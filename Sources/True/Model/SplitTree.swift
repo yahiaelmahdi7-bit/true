@@ -121,8 +121,9 @@ indirect enum SplitTree: Codable, Equatable, Sendable {
         case .leaf(let id):
             out.panes[id] = rect
         case .split(let sid, let axis, let fraction, let a, let b):
-            let d = Self.dividerThickness
             let total = axis == .horizontal ? rect.width : rect.height
+            // A container thinner than the divider can't show one; shrink it so nothing spills outside.
+            let d = min(Self.dividerThickness, total)
             let usable = max(0, total - d)
             var first = usable * CGFloat(Self.clampFraction(fraction))
             // Pixel minimums, only when both sides can honour them at once.
