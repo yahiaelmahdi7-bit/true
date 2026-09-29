@@ -15,6 +15,11 @@ final class WorkspaceModel {
     /// Tab currently being renamed inline (double-click), if any.
     var renamingTab: UUID?
 
+    /// Set by `AgentRegistry`: told when a pane goes away so it can forget the agent that owned it.
+    @ObservationIgnored var onPaneClosed: ((UUID) -> Void)?
+    /// Set by `AgentRegistry`: is this pane an agent's? Sleeping the only tab must not quit True.
+    @ObservationIgnored var isAgentPane: ((UUID) -> Bool)?
+
     @ObservationIgnored private let store: WorkspaceStore
     @ObservationIgnored private var saveTask: Task<Void, Never>?
 
@@ -38,6 +43,15 @@ final class WorkspaceModel {
     func newTab() {
         let cwd = selectedTab.cwds[selectedTab.focusedPane] ?? NSHomeDirectory()
         _ = state.addTab(cwd: cwd)
+    }
+
+    /// An ordinary tab, named after the agent, that the registry then starts `claude` in.
+    /// Returns the tab's (only) pane.
+    @discardableResult
+    func openAgentTab(name: String, cwd: String) -> UUID {
+        let t = state.addTab(cwd: cwd)
+        state.tabs[state.selectedIndex].customName = name
+        return t.focusedPane
     }
 
     func select(tab: UUID) { if index(of: tab) != nil { state.selectedTab = tab } }
@@ -85,6 +99,12 @@ final class WorkspaceModel {
     func paneExited(_ pane: UUID) { close(pane: pane) }
 
     private func close(pane: UUID) {
+        guard let i = tabIndex(containing: pane) else { return }
+        // Putting the last agent to sleep closes the last tab; keep a plain shell so that never quits True.
+        if state.tabs.count == 1, state.tabs[i].tree.leafIDs.count == 1, isAgentPane?(pane) == true {
+            _ = state.addTab(cwd: NSHomeDirectory())
+        }
+        onPaneClosed?(pane)
         guard let i = tabIndex(containing: pane) else { return }
         if !state.closePane(pane, inTab: state.tabs[i].id) {
             saveNow()

@@ -7,6 +7,13 @@ import SwiftTerm
 /// activity monitor, canvas gestures) is deliberately gone.
 final class TrueTerminalView: LocalProcessTerminalView {
     var paneID: UUID?
+
+    /// The rendered screen as text (end of the active buffer, whatever the viewport is scrolled to).
+    /// Cells a renderer skipped with a cursor move come back as NUL, not space, so NUL becomes the
+    /// space a person sees. PaneDelivery and the needs-you detector read this, never the raw stream.
+    func screenText() -> String {
+        PermissionDialog.screenText(getTerminal())
+    }
     /// Called when the user clicks into this pane, so the model's focus follows the mouse.
     var onFocusClick: (() -> Void)?
     /// Called shortly after Return is typed — the cheap moment a `cd` may have happened.

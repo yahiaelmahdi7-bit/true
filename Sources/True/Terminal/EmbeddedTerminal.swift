@@ -72,9 +72,17 @@ struct EmbeddedTerminal: NSViewRepresentable {
         where k != "CLAUDECODE" && !k.hasPrefix("CLAUDE_CODE_") { env[k] = v }
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
+        // Every pane names itself so the hook forwarder can say which pane an event came from.
+        env["TRUE_PANE_ID"] = paneID.uuidString
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let dir = FileManager.default.fileExists(atPath: startDir) ? startDir : NSHomeDirectory()
-        term.startProcess(executable: shell, args: ["-l"],
+        // An agent pane runs its launch line instead of an interactive shell (registry set the spec at wake).
+        var args = ["-l"]
+        if let spec = AgentRegistry.shared.launchSpecs[paneID] {
+            args = ["-l", "-c", spec.shellCommand]
+            env["TRUE_AGENT"] = spec.agent
+        }
+        term.startProcess(executable: shell, args: args,
                           environment: env.map { "\($0.key)=\($0.value)" },
                           execName: nil, currentDirectory: dir)
         return term
