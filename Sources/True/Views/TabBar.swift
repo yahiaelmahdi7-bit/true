@@ -15,6 +15,7 @@ struct TabBar: View {
                 .buttonStyle(.borderless)
                 .help("New Tab (⌘T)")
             Spacer(minLength: 0)
+            NeedsYouTray()
         }
         .padding(.leading, 80)   // clears the traffic lights
         .padding(.trailing, 10)
@@ -45,6 +46,9 @@ private struct TabChip: View {
                     .onAppear { draft = tab.title; fieldFocused = true }
             } else {
                 Text(tab.title).lineLimit(1).frame(maxWidth: 160)
+            }
+            if let status = AgentRegistry.shared.tabStatus(tab) {
+                Circle().fill(status.tint).frame(width: 7, height: 7).help(status.label)
             }
             if hovering || selected {
                 Button { closeTab() } label: { Image(systemName: "xmark").font(.caption2) }
