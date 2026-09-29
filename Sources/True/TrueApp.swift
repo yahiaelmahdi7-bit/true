@@ -10,14 +10,17 @@ struct TrueApp: App {
     var body: some Scene {
         Window("True", id: "main") {
             HStack(spacing: 0) {
-                VStack(spacing: 0) {
-                    TabBar(model: model)
-                    TerminalArea(model: model)
-                }
+                TerminalArea(model: model)
                 if registry.panelOpen {
+                    Theme.hairline.frame(width: 1)
                     AgentsPanel(registry: registry).transition(.move(edge: .trailing))
                 }
             }
+            // Content stays below the title-bar zone: on macOS 26 SwiftUI lays views out there under
+            // `.ignoresSafeArea` but never paints them (a red test strip never reached the screen).
+            // The tab numbers live in that zone as an AppKit-hosted view instead (`installTabs`).
+            .background { Theme.background.ignoresSafeArea(); WindowConfigurator().frame(width: 0, height: 0) }
+            .preferredColorScheme(.dark)
             .frame(minWidth: 480, minHeight: 300)
             .sheet(item: Bindable(registry).builder) { AgentBuilderSheet(draft: $0, registry: registry) }
         }
@@ -67,6 +70,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // A SwiftPM executable starts with no bundle policy; without this it gets no menu bar/Dock icon.
         NSApp.setActivationPolicy(.regular)
+        NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil,
+                                               queue: .main) { n in
+            guard let w = n.object as? NSWindow else { return }
+            Task { @MainActor in WindowChrome.hideButtons(w) }
+        }
         // The only launch-time side effect of Agents mode: a listening socket. It is event-driven
         // (blocks in accept) and costs nothing until an awake agent's hook rings it; it wakes nobody.
         agentSocket = AgentEventSocket(path: AgentPaths.standard.socketPath) { e in

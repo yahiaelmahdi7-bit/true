@@ -36,13 +36,17 @@ private struct TabContent: View {
                 if let r = layout.panes[id] {
                     let focused = visible && tab.focusedPane == id
                     EmbeddedTerminal(paneID: id, startDir: tab.cwds[id] ?? NSHomeDirectory(), isFocused: focused)
+                        .opacity(focused || tab.tree.leafIDs.count == 1 ? 1 : 0.6)
+                        .padding(Theme.paneInsets)
                         .frame(width: r.width, height: r.height)
-                        .opacity(focused || tab.tree.leafIDs.count == 1 ? 1 : 0.72)
+                        .background(Theme.background)
                         .position(x: r.midX, y: r.midY)
                 }
             }
             ForEach(layout.dividers, id: \.splitID) { d in
-                DividerHandle(divider: d) { f in model.setFraction(f, split: d.splitID, tab: tab.id) }
+                DividerHandle(divider: d,
+                              onFraction: { f in model.setFraction(f, split: d.splitID, tab: tab.id) },
+                              onEqualize: { model.equalize(split: d.splitID, tab: tab.id) })
             }
         }
         .opacity(visible ? 1 : 0)
@@ -50,10 +54,12 @@ private struct TabContent: View {
     }
 }
 
-/// 1pt line with a 7pt grab area; dragging reports a new proportion of the split's region.
+/// 1pt line with a 7pt grab area; dragging reports a new proportion of the split's region, and a
+/// double-click snaps the row back to equal shares.
 private struct DividerHandle: View {
     let divider: SplitTree.DividerFrame
     let onFraction: (Double) -> Void
+    let onEqualize: () -> Void
 
     var body: some View {
         let f = divider.frame
@@ -63,7 +69,7 @@ private struct DividerHandle: View {
                          width: horizontal ? 7 : f.width,
                          height: horizontal ? f.height : 7)
         Rectangle().fill(Color.primary.opacity(0.001))
-            .overlay(Rectangle().fill(Color(nsColor: .separatorColor))
+            .overlay(Rectangle().fill(Theme.hairline)
                 .frame(width: horizontal ? 1 : nil, height: horizontal ? nil : 1))
             .frame(width: hit.width, height: hit.height)
             .contentShape(Rectangle())
@@ -74,5 +80,6 @@ private struct DividerHandle: View {
                 let frac = horizontal ? (v.location.x - r.minX) / r.width : (v.location.y - r.minY) / r.height
                 onFraction(Double(frac))
             })
+            .simultaneousGesture(TapGesture(count: 2).onEnded { onEqualize() })
     }
 }

@@ -128,7 +128,7 @@ final class NeedsYouQueue {
         let reg = AgentRegistry.shared
         return Self.rows(events: reg.latest, seat: { id in
             guard let n = reg.name(for: id) else { return nil }
-            return (n, reg.agent(named: n)?.model.tint ?? .orange)
+            return (n, reg.agent(named: n)?.model.tint ?? Theme.text)
         }, resolved: resolved)
         .map { var r = $0; r.status = statuses[$0.paneID] ?? .idle; return r }
     }

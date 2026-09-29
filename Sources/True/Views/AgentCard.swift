@@ -1,13 +1,13 @@
 import SwiftUI
 
 extension AgentModel {
-    /// Tier colour: haiku teal · sonnet blue · opus purple · fable gold.
+    /// Tier as brightness — True is black and white only: the heavier the model, the whiter.
     var tint: Color {
         switch self {
-        case .haiku: return .teal
-        case .sonnet: return .blue
-        case .opus: return .purple
-        case .fable: return Color(red: 0.86, green: 0.67, blue: 0.16)
+        case .haiku: return Color(white: 0.55)
+        case .sonnet: return Color(white: 0.70)
+        case .opus: return Color(white: 0.85)
+        case .fable: return Color(white: 1.0)
         }
     }
 }
@@ -15,11 +15,11 @@ extension AgentModel {
 extension AgentStatus {
     var tint: Color {
         switch self {
-        case .asleep: return .gray
-        case .idle: return .secondary
-        case .working: return .green
-        case .needsYou: return .orange
-        case .done: return .mint
+        case .asleep: return Color(white: 0.25)
+        case .idle: return Color(white: 0.45)
+        case .working: return Color(white: 0.90)
+        case .needsYou: return Color(white: 1.0)
+        case .done: return Color(white: 0.65)
         }
     }
 }
@@ -84,8 +84,8 @@ struct AgentCardFace: View {
             }
         }
         .padding(10)
-        .background(.background.opacity(0.35), in: .rect(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(agent.model.tint.opacity(0.35), lineWidth: 1))
+        .background(Color.white.opacity(0.04), in: .rect(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.hairline, lineWidth: 1))
     }
 }
 
@@ -113,7 +113,7 @@ struct AgentCard: View {
                     registry.builder = BuilderDraft(editing: agent)
                 }
                 Spacer(minLength: 0)
-                if let note { Text(note).font(.caption2).foregroundStyle(.orange) }
+                if let note { Text(note).font(.caption2).foregroundStyle(Theme.text) }
             }
             .buttonStyle(.borderless).controlSize(.small).labelStyle(.titleAndIcon)
             if agent.role == .lead {
@@ -173,6 +173,6 @@ struct AgentsPanel: View {
             }
         }
         .frame(width: 330)
-        .glassEffect(.regular, in: .rect)
+        .background(Theme.background)
     }
 }

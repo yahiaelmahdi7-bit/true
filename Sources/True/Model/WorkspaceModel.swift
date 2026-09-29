@@ -117,6 +117,12 @@ final class WorkspaceModel {
         state.tabs[i].tree = state.tabs[i].tree.settingFraction(f, forSplit: split)
     }
 
+    /// Even out the row or column a divider belongs to (double-click on it).
+    func equalize(split: UUID, tab: UUID) {
+        guard let i = index(of: tab) else { return }
+        state.tabs[i].tree = state.tabs[i].tree.equalizing(split: split)
+    }
+
     // MARK: Working directories
 
     func updateCwd(pane: UUID, _ path: String) {

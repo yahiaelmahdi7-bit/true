@@ -41,13 +41,45 @@ final class TrueTerminalView: LocalProcessTerminalView {
         applyThemeColors()
     }
 
-    /// System colours so the pane follows Light/Dark without True owning a palette. Re-applied when
-    /// the appearance flips because SwiftTerm stores the resolved colour, not the dynamic one.
+    /// Black in Light and Dark alike (see ``Theme``). Re-applied on an appearance flip anyway, in
+    /// case SwiftTerm re-derives anything from it.
     func applyThemeColors() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            nativeBackgroundColor = NSColor.textBackgroundColor
-            nativeForegroundColor = NSColor.textColor
-        }
+        nativeBackgroundColor = Theme.nsBackground
+        nativeForegroundColor = Theme.nsText
+        caretColor = Theme.nsText
+        // The default background goes transparent (the pane's own black shows through), so the
+        // view's shadow is cast by the glyphs alone: a zero-offset white shadow reads as a glow.
+        backgroundOpacity = 0
+        shadow = Theme.textGlow
+        // Black and white only, whatever a program asks for: Claude Code paints its orange in
+        // 24-bit colour, which no 16-colour palette can catch, so the pixels are desaturated.
+        wantsLayer = true
+        layerUsesCoreImageFilters = true
+        contentFilters = Theme.monochrome
+        installColors(Self.ansiGreys)
+    }
+
+    /// The 16 ANSI colours as a ladder of greys. Desaturating the stock palette left blue and red
+    /// nearly black on black; these keep every colour readable and still tell them apart by brightness.
+    private static let ansiGreys: [SwiftTerm.Color] = [
+        0.00, 0.60, 0.68, 0.80, 0.56, 0.64, 0.74, 0.85,   // black red green yellow blue magenta cyan white
+        0.45, 0.72, 0.82, 0.92, 0.70, 0.76, 0.86, 1.00,   // the bright eight
+    ].map { let v = UInt16($0 * 65535); return SwiftTerm.Color(red: v, green: v, blue: v) }
+
+    /// AppKit delivers a click to exactly the pane under it, so this pane — no hit test of ours —
+    /// claims focus: first responder for the typing, and the model for dimming, ⌘D and ⌘W. Two
+    /// owners that could disagree was the bug: typing went here while ⌘D split the old pane.
+    override func mouseDown(with event: NSEvent) {
+        if window?.firstResponder !== self { window?.makeFirstResponder(self) }
+        onFocusClick?()
+        super.mouseDown(with: event)
+    }
+
+    /// SwiftTerm's scroller draws a faint track down the right edge even when disabled. Hidden, it
+    /// also stops reserving that width (`reservedScrollerWidth` reads `isHidden`); wheel and
+    /// trackpad scrolling go through ``handleScroll`` and are unaffected.
+    func hideScroller() {
+        for case let s as NSScroller in subviews { s.isHidden = true }
     }
 
     /// Set only while ``TerminalRedrawCoalescer`` is releasing a batched paint, so the `super`
@@ -285,12 +317,13 @@ final class TrueTerminalView: LocalProcessTerminalView {
     /// bare hover with `overwriteRelease: true`; its SGR encoder turns that into `CSI<32;x;y m` —
     /// literally "left button released here" — so moving the mouse over a session spam-clicked
     /// whatever was under it. Motion reports that carry no button are dropped; real clicks and
-    /// drags pass through; (3) click-to-focus and Return notification, observed only.
+    /// drags pass through; (3) Return notification, observed only; (4) ⌘⇧1…9 jumps to tab N.
+    /// Click-to-focus is `mouseDown`.
     static func installEventMonitor() {
         guard !monitorInstalled else { return }
         monitorInstalled = true
         NSEvent.addLocalMonitorForEvents(
-            matching: [.scrollWheel, .mouseMoved, .leftMouseDown, .keyDown]
+            matching: [.scrollWheel, .mouseMoved, .keyDown]
         ) { event in
             switch event.type {
             case .scrollWheel:
@@ -306,10 +339,14 @@ final class TrueTerminalView: LocalProcessTerminalView {
                 guard let term = Self.hoveredTerminal(for: event) else { return event }
                 if term.getTerminal().mouseMode == .anyEvent { return nil }
                 return event
-            case .leftMouseDown:
-                Self.terminal(under: event)?.onFocusClick?()
-                return event
             case .keyDown:
+                // Matched by key position: with Shift held the digits arrive as "!@#…", which a
+                // menu shortcut never matches. (⌘⇧3/4/5 are macOS screenshots and never get here.)
+                if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [.command, .shift],
+                   let n = Self.digitKeys[event.keyCode] {
+                    WorkspaceModel.shared.selectTab(number: n)
+                    return nil
+                }
                 if let term = event.window?.firstResponder as? TrueTerminalView,
                    event.charactersIgnoringModifiers?.contains("\r") == true {
                     term.onCommandSubmitted?()
@@ -320,6 +357,9 @@ final class TrueTerminalView: LocalProcessTerminalView {
             }
         }
     }
+
+    /// ANSI key codes of the 1…9 row → the digit.
+    private static let digitKeys: [UInt16: Int] = [18: 1, 19: 2, 20: 3, 21: 4, 23: 5, 22: 6, 26: 7, 28: 8, 25: 9]
 
     /// Where the last pointer hit landed, so ordinary motion inside one pane costs a rect test
     /// instead of a hit test. Never trusted for longer than a moment, so a panel that opens over a
@@ -344,7 +384,10 @@ final class TrueTerminalView: LocalProcessTerminalView {
     /// helper subviews (selection, find bar) over the terminal.
     private static func terminal(under event: NSEvent) -> TrueTerminalView? {
         guard let content = event.window?.contentView else { return nil }
-        let point = content.convert(event.locationInWindow, from: nil)
+        // `hitTest` wants the point in the receiver's SUPERVIEW space. The hosting view is flipped
+        // and its superview isn't, so converting into `content` itself mirrored y — in a stacked
+        // split the wheel went to the other pane.
+        let point = content.superview?.convert(event.locationInWindow, from: nil) ?? event.locationInWindow
         guard let hit = content.hitTest(point) else { return nil }
         var view: NSView? = hit
         while let v = view {

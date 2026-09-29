@@ -1,34 +1,37 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Liquid Glass tab strip. The empty space (and the leading traffic-light gutter) drags the
-/// window; double-clicking it zooms — `windowChromeArea()` supplies both.
+/// Tabs as plain numbers — 1 2 3, matching ⌘1…⌘9 — drawn INSIDE the title-bar zone (see
+/// `WindowChrome.installTabs`), so there is no second strip under it. Numbers appear only with two
+/// or more tabs; the needs-you badge only when an agent is blocked. A tab shows a name only if you
+/// gave it one (double-click). Empty space drags the window and double-click zooms —
+/// `windowChromeArea()` supplies both, since this view covers the whole title bar.
 struct TabBar: View {
     let model: WorkspaceModel
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(model.state.tabs) { tab in
-                TabChip(model: model, tab: tab, selected: tab.id == model.state.selectedTab)
+        HStack(spacing: 18) {
+            if model.state.tabs.count > 1 {
+                ForEach(Array(model.state.tabs.enumerated()), id: \.element.id) { i, tab in
+                    TabChip(model: model, tab: tab, number: i + 1,
+                            selected: tab.id == model.state.selectedTab)
+                }
             }
-            Button { model.newTab() } label: { Image(systemName: "plus") }
-                .buttonStyle(.borderless)
-                .help("New Tab (⌘T)")
             Spacer(minLength: 0)
             NeedsYouTray()
         }
-        .padding(.leading, 80)   // clears the traffic lights
-        .padding(.trailing, 10)
-        .frame(height: 38)
+        // Numbers start where the terminal's text does, so "1" sits over the prompt's first column.
+        .padding(.leading, Theme.paneInsets.leading)
+        .padding(.trailing, Theme.paneInsets.trailing)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .windowChromeArea()
-        .background(.clear)
-        .glassEffect(.regular, in: .rect)
     }
 }
 
 private struct TabChip: View {
     let model: WorkspaceModel
     let tab: TabState
+    let number: Int
     let selected: Bool
     @State private var hovering = false
     @State private var draft = ""
@@ -43,23 +46,22 @@ private struct TabChip: View {
                     .focused($fieldFocused)
                     .onSubmit { model.rename(tab: tab.id, to: draft) }
                     .onExitCommand { model.renamingTab = nil }
-                    .onAppear { draft = tab.title; fieldFocused = true }
+                    .onAppear { draft = tab.customName ?? ""; fieldFocused = true }
             } else {
-                Text(tab.title).lineLimit(1).frame(maxWidth: 160)
+                Text(label).lineLimit(1).fixedSize().monospacedDigit()
             }
             if let status = AgentRegistry.shared.tabStatus(tab) {
-                Circle().fill(status.tint).frame(width: 7, height: 7).help(status.label)
+                Circle().fill(status.tint).frame(width: 6, height: 6).help(status.label)
             }
-            if hovering || selected {
-                Button { closeTab() } label: { Image(systemName: "xmark").font(.caption2) }
-                    .buttonStyle(.borderless)
+            if hovering {
+                Button { closeTab() } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }
+                    .buttonStyle(.plain)
                     .help("Close Tab")
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 5)
-        .background(selected ? Color.primary.opacity(0.14) : (hovering ? Color.primary.opacity(0.07) : .clear),
-                    in: .capsule)
-        .contentShape(Capsule())
+        .font(.system(size: 14, weight: selected ? .semibold : .regular))
+        .foregroundStyle(selected || hovering ? Theme.text : Theme.dimText)
+        .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture(count: 2) { model.renamingTab = tab.id }
         .onTapGesture { model.select(tab: tab.id) }
@@ -69,6 +71,12 @@ private struct TabChip: View {
             model.move(tab: src, onto: tab.id)
             return true
         }
+    }
+
+    /// The number, unless the tab was deliberately named.
+    private var label: String {
+        guard let n = tab.customName?.trimmingCharacters(in: .whitespaces), !n.isEmpty else { return "\(number)" }
+        return n.count > 28 ? n.prefix(27) + "…" : n
     }
 
     private func closeTab() {

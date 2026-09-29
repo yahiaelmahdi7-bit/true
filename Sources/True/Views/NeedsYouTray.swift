@@ -17,7 +17,8 @@ struct NeedsYouTray: View {
                     .padding(.horizontal, 8).padding(.vertical, 3)
             }
             .buttonStyle(.borderedProminent)
-            .tint(.orange)
+            .tint(.white)
+            .foregroundStyle(.black)
             .controlSize(.small)
             .help(rows.count == 1 ? "1 agent needs you  ⇧⌘U" : "\(rows.count) agents need you  ⇧⌘U")
             .popover(isPresented: $q.trayOpen, arrowEdge: .bottom) { NeedsYouList(rows: rows) }
@@ -73,7 +74,7 @@ private struct NeedsYouRowView: View {
                 Button("Jump") { queue.jump(to: row.paneID) }
                 Spacer()
                 if let note = Self.note(row.status) {
-                    Text(note).font(.caption).foregroundStyle(.orange)
+                    Text(note).font(.caption).foregroundStyle(Theme.text)
                 }
             }
             .disabled(row.status == .sending)

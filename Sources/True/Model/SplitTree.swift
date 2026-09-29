@@ -86,6 +86,36 @@ indirect enum SplitTree: Codable, Equatable, Sendable {
         }
     }
 
+    /// Double-click on a divider: every pane in that divider's row (or column) gets an equal share.
+    /// The row is the whole unbroken run of same-axis splits, so in a | b | c either divider evens
+    /// out all three, not just the two panes it touches.
+    func equalizing(split id: UUID) -> SplitTree {
+        guard case .split(let sid, let ax, let f, let a, let b) = self else { return self }
+        if runContains(id, axis: ax) { return equalized(along: ax) }
+        return .split(id: sid, axis: ax, fraction: f,
+                      first: a.equalizing(split: id), second: b.equalizing(split: id))
+    }
+
+    /// Whether split `id` is this split or sits below it through splits of `axis` only.
+    private func runContains(_ id: UUID, axis: Axis) -> Bool {
+        guard case .split(let sid, let ax, _, let a, let b) = self, ax == axis else { return false }
+        return sid == id || a.runContains(id, axis: axis) || b.runContains(id, axis: axis)
+    }
+
+    /// Equal slots this subtree fills in a run along `axis`; a split the other way is one slot
+    /// (a stacked pair is one column).
+    private func slots(along axis: Axis) -> Int {
+        guard case .split(_, let ax, _, let a, let b) = self, ax == axis else { return 1 }
+        return a.slots(along: axis) + b.slots(along: axis)
+    }
+
+    private func equalized(along axis: Axis) -> SplitTree {
+        guard case .split(let sid, let ax, _, let a, let b) = self, ax == axis else { return self }
+        let wa = Double(a.slots(along: axis)), wb = Double(b.slots(along: axis))
+        return .split(id: sid, axis: ax, fraction: wa / (wa + wb),
+                      first: a.equalized(along: axis), second: b.equalized(along: axis))
+    }
+
     static func clampFraction(_ f: Double) -> Double {
         guard f.isFinite else { return 0.5 }
         return min(0.95, max(0.05, f))

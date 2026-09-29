@@ -51,6 +51,7 @@ struct EmbeddedTerminal: NSViewRepresentable {
         let term = TrueTerminalView(frame: .zero)
         term.paneID = paneID
         term.applyThemeColors()
+        term.hideScroller()
         term.processDelegate = context.coordinator
         term.getTerminal().changeScrollback(TerminalSettings.clampScrollback(scrollback))
         term.font = TerminalSettings.font(family: family, size: fontSize)
@@ -75,6 +76,7 @@ struct EmbeddedTerminal: NSViewRepresentable {
         // Every pane names itself so the hook forwarder can say which pane an event came from.
         env["TRUE_PANE_ID"] = paneID.uuidString
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        ShellIntegration.apply(to: &env, shell: shell)
         let dir = FileManager.default.fileExists(atPath: startDir) ? startDir : NSHomeDirectory()
         // An agent pane runs its launch line instead of an interactive shell (registry set the spec at wake).
         var args = ["-l"]

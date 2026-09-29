@@ -1,31 +1,10 @@
 import AppKit
 import SwiftUI
 
-/// Empty bar space that behaves like the title bar it replaced.
-///
-/// `.hiddenTitleBar` + full-size content puts our toolbars where the title bar used to be, and
-/// their opaque backgrounds swallow the clicks AppKit's title bar would have handled — so
-/// double-clicking the top of the window did nothing, where every other Mac app zooms. This view
-/// sits BEHIND a bar's controls: a click that misses every control lands here, drags the window on
-/// a single click and runs the Mac's own double-click action on a double. Controls keep their
-/// clicks because SwiftUI hit-tests them first.
-struct WindowChromeArea: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { ChromeView() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
-
-    private final class ChromeView: NSView {
-        override var mouseDownCanMoveWindow: Bool { true }
-
-        override func mouseDown(with event: NSEvent) {
-            guard let window else { return }
-            if event.clickCount == 2 {
-                WindowChromeArea.titleBarDoubleClick(window)
-            } else {
-                window.performDrag(with: event)
-            }
-        }
-    }
-
+/// Window chrome, such as it is: no traffic lights, and a black title-bar zone that holds the tab
+/// numbers and still drags and double-click zooms.
+@MainActor
+enum WindowChrome {
     /// System Settings → Desktop & Dock → "Double-click a window's title bar to". "Fill" (the
     /// macOS 15+ default, also what an unset key means) and "Maximize" both fill the usable screen;
     /// `performZoom` does that and a second double-click puts the window back, as Warp does.
@@ -36,10 +15,66 @@ struct WindowChromeArea: NSViewRepresentable {
         default: window.performZoom(nil)
         }
     }
+
+    /// No traffic lights: True is black with no chrome. ⌘W / ⌘M / ⌘Q and the Window menu still
+    /// close, minimise and quit. Called on every key-window change (AppKit re-adds them after
+    /// full screen).
+    static func hideButtons(_ window: NSWindow) {
+        for b in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(b)?.isHidden = true
+        }
+    }
+
+    /// Black, buttonless title-bar zone with no separator line. Runs as soon as the window exists
+    /// (a window launched behind others never becomes key, so the key-change hook alone misses it).
+    static func configure(_ window: NSWindow) {
+        window.titlebarSeparatorStyle = .none
+        window.backgroundColor = Theme.nsBackground
+        hideButtons(window)
+        installTabs(window)
+    }
+
+    private static let tabsID = NSUserInterfaceItemIdentifier("true.tabs")
+
+    /// The tab row goes INTO the 32pt title-bar zone rather than under it. SwiftUI content laid out
+    /// there never paints on macOS 26, but the title bar's own subviews do (it's where the traffic
+    /// lights draw), so the row is an AppKit-hosted view parented to the title bar itself.
+    static func installTabs(_ window: NSWindow) {
+        guard let bar = window.standardWindowButton(.closeButton)?.superview,
+              !bar.subviews.contains(where: { $0.identifier == tabsID }) else { return }
+        let host = NSHostingView(rootView: TabBar(model: .shared).preferredColorScheme(.dark))
+        host.identifier = tabsID
+        host.sizingOptions = []   // the title bar sizes the row, never the reverse
+        host.frame = bar.bounds
+        host.autoresizingMask = [.width, .height]
+        bar.addSubview(host)
+    }
+}
+
+/// Zero-size probe that hands its window to ``WindowChrome/configure(_:)`` once it is in one.
+/// Lives in the root's background, away from the tab row.
+struct WindowConfigurator: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Probe() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    private final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window { WindowChrome.configure(window) }
+        }
+    }
 }
 
 extension View {
-    /// Make this bar's empty space act like a title bar (drag, double-click). Apply it BEFORE the
-    /// bar's own `.background(...)` so it sits above that fill and below the controls.
-    func windowChromeArea() -> some View { background(WindowChromeArea()) }
+    /// Make this bar's empty space act like a title bar (drag, double-click zoom) on a black
+    /// backing. Controls in the bar keep their own clicks: a background only gets what they miss.
+    func windowChromeArea() -> some View {
+        background {
+            Theme.background
+                .contentShape(Rectangle())
+                .gesture(WindowDragGesture())
+                .onTapGesture(count: 2) { if let w = NSApp.keyWindow { WindowChrome.titleBarDoubleClick(w) } }
+                .allowsWindowActivationEvents(true)
+        }
+    }
 }
