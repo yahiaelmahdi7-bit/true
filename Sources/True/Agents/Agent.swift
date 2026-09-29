@@ -6,8 +6,16 @@ import Foundation
 /// its role always round-trip (`AgentNaming.parse`).
 enum AgentRole: String, Codable, CaseIterable, Sendable {
     case lead, helper
+    /// No repo: works across repos by summoning their leads (`truectl summon`). Named by the user.
+    case global
 
-    var defaultSymbol: String { self == .lead ? "crown" : "hammer" }
+    var defaultSymbol: String {
+        switch self {
+        case .lead: return "crown"
+        case .helper: return "hammer"
+        case .global: return "globe"
+        }
+    }
 }
 
 enum AgentModel: String, Codable, CaseIterable, Sendable {
@@ -46,21 +54,25 @@ enum AgentPermission: String, Codable, CaseIterable, Sendable {
 struct Agent: Codable, Equatable, Identifiable, Sendable {
     var name: String
     var role: AgentRole
-    /// Absolute path of the repo the agent works in (its tab opens here).
+    /// Absolute path of the repo the agent works in (its tab opens here). A global's may be ""
+    /// (= the user's home folder) or a folder it was given.
     var repo: String
     var model: AgentModel
     var effort: AgentEffort
     var permission: AgentPermission
     /// Extra instructions appended to the role card.
     var charter: String
-    /// A lead lists the helper names it manages. Empty for helpers.
+    /// A lead lists the helper names it manages; a global lists the lead names it may summon.
+    /// Empty for helpers.
     var team: [String]
     /// The conversation to resume on next wake. Only used when non-empty AND its transcript exists.
     var lastSessionID: String?
     var symbol: String
 
     var id: String { name }
-    var repoName: String { (repo as NSString).lastPathComponent }
+    var repoName: String {
+        role == .global && repo.isEmpty ? "Global" : (repo as NSString).lastPathComponent
+    }
 
     init(name: String, role: AgentRole, repo: String, model: AgentModel = .sonnet,
          effort: AgentEffort = .medium, permission: AgentPermission = .default,
@@ -125,8 +137,17 @@ enum AgentNaming {
         return slug.isEmpty ? nil : (.helper, n, slug)
     }
 
+    /// A global's name is the user's own. Lowercase ASCII so it is safe in a file name, a shell-quoted
+    /// flag and a `truectl` argument, and `parse(s) == nil` so it can never be read as a lead/helper.
+    static func isValidGlobalName(_ s: String) -> Bool {
+        guard (2...32).contains(s.count), let first = s.unicodeScalars.first, ("a"..."z").contains(first),
+              !s.hasSuffix("-"), parse(s) == nil else { return false }
+        return s.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "-" }
+    }
+
     /// The name a new agent gets: `lead-<repo>` if the repo has no lead yet, else the next free
-    /// `helper-N-<repo>`. Nil when the requested role has no free slot (one lead, four helpers).
+    /// `helper-N-<repo>`. Nil when the requested role has no free slot (one lead, four helpers),
+    /// and always nil for a global (the user names it).
     static func nextName(role: AgentRole, repo: String, existing: [String]) -> String? {
         let slug = repoSlug(repo)
         switch role {
@@ -135,6 +156,8 @@ enum AgentNaming {
             return existing.contains(n) ? nil : n
         case .helper:
             return helperSlots.map { helperName($0, slug: slug) }.first { !existing.contains($0) }
+        case .global:
+            return nil
         }
     }
 }
@@ -194,6 +217,9 @@ struct AgentPaths: Sendable {
     var rolesDir: URL { root.appendingPathComponent("roles") }
     var socketPath: String { root.appendingPathComponent("agent-events.sock").path }
     var forwarderPath: String { hooksDir.appendingPathComponent("forward-claude.py").path }
+    var controlSocketPath: String { root.appendingPathComponent("control.sock").path }
+    var binDir: URL { root.appendingPathComponent("bin") }
+    var truectlPath: String { binDir.appendingPathComponent("truectl").path }
 
     /// Agent names are slugs, but the file name is sanitised anyway — a hand-edited agents.json
     /// must not be able to write outside the directory.

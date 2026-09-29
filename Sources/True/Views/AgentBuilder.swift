@@ -17,7 +17,7 @@ struct AgentBuilderSheet: View {
         HStack(alignment: .top, spacing: 20) {
             VStack(spacing: 12) {
                 Text("Preview").font(.caption).foregroundStyle(.secondary)
-                AgentCardFace(agent: preview(existing), name: name ?? "pick a repo", status: .asleep)
+                AgentCardFace(agent: preview(existing), name: name ?? (draft.role == .global ? "name it" : "pick a repo"), status: .asleep)
                     .frame(width: 290)
                 Spacer(minLength: 0)
             }
@@ -51,14 +51,29 @@ struct AgentBuilderSheet: View {
                     }
                 }
                 Section {
-                    LabeledContent("Repo") {
+                    // A global has no repo: its folder is optional and empty means the home folder, and it
+                    // may be re-pointed while editing because its name does not derive from the folder.
+                    let isGlobal = draft.role == .global
+                    LabeledContent(isGlobal ? "Folder" : "Repo") {
                         HStack {
-                            Text(draft.repo.isEmpty ? "None" : (draft.repo as NSString).lastPathComponent)
+                            Text(draft.repo.isEmpty ? (isGlobal ? "Home" : "None") : (draft.repo as NSString).lastPathComponent)
                                 .foregroundStyle(.secondary)
-                            if draft.editing == nil { Button("Choose…") { pickingRepo = true } }
+                            if draft.editing == nil || isGlobal { Button("Choose…") { pickingRepo = true } }
+                            if isGlobal && !draft.repo.isEmpty { Button("Clear") { draft.repo = "" } }
                         }
                     }
-                    LabeledContent("Name", value: name ?? (draft.repo.isEmpty ? "—" : "no free slot"))
+                    if isGlobal && draft.editing == nil {
+                        VStack(alignment: .leading, spacing: 4) {
+                            LabeledContent("Name") {
+                                TextField("name", text: $draft.globalName).textFieldStyle(.roundedBorder)
+                            }
+                            if let note = globalNameNote(existing) {
+                                Text(note).font(.footnote).foregroundStyle(.red)
+                            }
+                        }
+                    } else {
+                        LabeledContent("Name", value: name ?? (draft.repo.isEmpty ? "—" : "no free slot"))
+                    }
                     if draft.editing == nil {
                         Picker("Role", selection: $draft.role) {
                             ForEach(AgentRole.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
@@ -66,6 +81,7 @@ struct AgentBuilderSheet: View {
                         .pickerStyle(.segmented)
                         .onChange(of: draft.role) { _, r in
                             if Self.isDefault(draft.symbol) { draft.symbol = r.defaultSymbol }
+                            draft.team = []   // a lead's helpers and a global's leads are different pools
                         }
                     }
                 }
@@ -101,16 +117,26 @@ struct AgentBuilderSheet: View {
                         .font(.body).frame(height: 70)
                         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
                 }
-                if draft.role == .lead {
-                    let helpers = draft.helperChoices(existing: existing)
-                    Section("Manages") {
-                        if helpers.isEmpty {
-                            Text("No helpers in this repo yet — build them first.").foregroundStyle(.secondary)
+                if draft.role != .helper {
+                    let choices = draft.teamChoices(existing: existing)
+                    Section(draft.role == .global ? "Can summon" : "Manages") {
+                        if choices.isEmpty {
+                            Text(draft.role == .global ? "No leads yet — build them first."
+                                                       : "No helpers in this repo yet — build them first.")
+                                .foregroundStyle(.secondary)
                         }
-                        ForEach(helpers) { h in
-                            Toggle(h.name, isOn: Binding(
+                        ForEach(choices) { h in
+                            Toggle(isOn: Binding(
                                 get: { draft.team.contains(h.name) },
-                                set: { on in if on { draft.team.insert(h.name) } else { draft.team.remove(h.name) } }))
+                                set: { on in if on { draft.team.insert(h.name) } else { draft.team.remove(h.name) } })) {
+                                HStack {
+                                    Text(h.name)
+                                    if draft.role == .global {
+                                        Spacer(minLength: 8)
+                                        Text(h.repoName).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -156,6 +182,14 @@ struct AgentBuilderSheet: View {
                 fillError = error.localizedDescription
             }
         }
+    }
+
+    /// The line under a global's name field: nothing while empty or fine.
+    private func globalNameNote(_ existing: [Agent]) -> String? {
+        let n = draft.globalName.trimmingCharacters(in: .whitespaces).lowercased()
+        if n.isEmpty { return nil }
+        if !AgentNaming.isValidGlobalName(n) { return "lowercase letters, digits and dashes" }
+        return existing.contains { $0.name == n } ? "already taken" : nil
     }
 
     private var effortBinding: Binding<Double> {

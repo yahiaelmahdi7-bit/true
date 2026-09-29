@@ -86,6 +86,10 @@ struct EmbeddedTerminal: NSViewRepresentable {
         if let spec = AgentRegistry.shared.launchSpecs[paneID] {
             args = ["-l", "-i", "-c", spec.shellCommand]
             env["TRUE_AGENT"] = spec.agent
+            // Appended, not prepended: the rc files above prepend their own dirs and must keep winning,
+            // but `truectl` has to resolve for the agent's Bash tool whatever they did to PATH.
+            let bin = NSHomeDirectory() + "/.true/bin"
+            env["PATH"] = env["PATH"].map { "\($0):\(bin)" } ?? bin
         }
         term.startProcess(executable: shell, args: args,
                           environment: env.map { "\($0.key)=\($0.value)" },

@@ -116,7 +116,7 @@ struct AgentCard: View {
                 if let note { Text(note).font(.caption2).foregroundStyle(Theme.text) }
             }
             .buttonStyle(.borderless).controlSize(.small).labelStyle(.titleAndIcon)
-            if agent.role == .lead {
+            if agent.role != .helper {
                 TextField("Message \(agent.name)…", text: $message)
                     .textFieldStyle(.roundedBorder).controlSize(.small)
                     .onSubmit(send)
@@ -160,9 +160,9 @@ struct AgentsPanel: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(AgentRegistry.grouped(registry.agents), id: \.repo) { group in
+                        ForEach(AgentRegistry.grouped(registry.agents), id: \.key) { group in
                             VStack(alignment: .leading, spacing: 8) {
-                                Label((group.repo as NSString).lastPathComponent, systemImage: "folder")
+                                Label(group.title, systemImage: group.key.isEmpty ? "globe" : "folder")
                                     .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                                 ForEach(group.agents) { AgentCard(agent: $0, registry: registry) }
                             }

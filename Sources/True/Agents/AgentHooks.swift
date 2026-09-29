@@ -6,6 +6,7 @@ import Foundation
 /// - `hooks/forward-claude.py` — the hook command. Claude pipes each hook's stdin JSON here; it tags
 ///   the event with the pane (`$TRUE_PANE_ID`, set on every pane's environment) and writes one line
 ///   to the events socket.
+/// - `bin/truectl` — the agents' command-line door back into True (summon another agent).
 /// - `hooks/<agent>.settings.json` — the per-agent `--settings` layer enabling those hooks. It is an
 ///   EXTRA settings layer, so the user's own `~/.claude/settings.json` (never touched) still applies.
 enum AgentHooks {
@@ -18,7 +19,9 @@ enum AgentHooks {
         let fm = FileManager.default
         try? fm.createDirectory(at: paths.hooksDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: paths.rolesDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: paths.binDir, withIntermediateDirectories: true)
         write(paths.forwarderPath, forwarder(socketPath: paths.socketPath), executable: true)
+        write(paths.truectlPath, AgentControl.truectl(socketPath: paths.controlSocketPath), executable: true)
         write(paths.settingsPath(a.name), settingsJSON(paths: paths), executable: false)
         write(paths.rolePath(a.name), AgentLaunch.roleCard(a, all: all), executable: false)
     }
@@ -125,7 +128,7 @@ enum AgentHooks {
         .replacingOccurrences(of: "SOCKET)", with: pythonString(socketPath) + ")")
     }
 
-    private static func pythonString(_ s: String) -> String {
+    static func pythonString(_ s: String) -> String {
         "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 }

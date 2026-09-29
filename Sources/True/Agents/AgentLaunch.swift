@@ -35,7 +35,8 @@ enum AgentLaunch {
     static func resumeID(for a: Agent, claudeDir: URL = claudeConfigDir) -> String? {
         guard let id = a.lastSessionID?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty,
               UUID(uuidString: id) != nil else { return nil }
-        let project = a.repo.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
+        let cwd = a.repo.isEmpty ? NSHomeDirectory() : a.repo   // a global with no folder boots in home
+        let project = cwd.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
         let file = claudeDir.appendingPathComponent("projects/\(project)/\(id).jsonl").path
         return FileManager.default.fileExists(atPath: file) ? id : nil
     }
@@ -74,11 +75,14 @@ enum AgentLaunch {
             ## Protocol
             1. Split the request into bounded tasks. Each hand-off names the owner, the objective, the
                files they may touch and how you will check the result.
-            2. Hand work to a helper by name with the `SendMessage` tool (`to: "<helper name>"`). A helper
-               that is asleep cannot receive it — say so to the user instead of retrying.
+            2. Hand work to a helper with `truectl summon <helper> "<brief>"` — it wakes a helper that is
+               asleep and delivers the brief (truectl is at ~/.true/bin/truectl and on your PATH). For a
+               helper that is already awake, `SendMessage` to its name (`to: "<helper name>"`) also works.
             3. Review what comes back (diff, tests) before calling anything done. Report outcomes with
                evidence, never on a helper's word alone.
             4. If a helper is waiting on a decision only you can make, answer it before anything else.
+            5. A global agent may summon you. When it does, do the work through your helpers as usual and
+               reply to that global agent by name with `SendMessage` when done or blocked.
             """
         case .helper:
             let lead = all.first { $0.role == .lead && AgentNaming.repoSlug($0.repo) == slug }?.name
@@ -90,9 +94,38 @@ enum AgentLaunch {
 
             ## Protocol
             1. Work on what your lead assigns, inside the files they name. Do not widen scope.
-            2. When done, reply to `\(lead)` with `SendMessage`: a one-line summary, what changed and the
-               verification output. No "done" without evidence.
-            3. If you are blocked or need a decision, message `\(lead)` with the exact question, then stop.
+            2. When done, reply to whoever summoned you (named in the brief), else to `\(lead)`, with
+               `SendMessage`: a one-line summary, what changed and the verification output. No "done"
+               without evidence.
+            3. If you are blocked or need a decision, message whoever summoned you (else `\(lead)`) with
+               the exact question, then stop.
+            """
+        case .global:
+            let leads = a.team.isEmpty
+                ? "You have no leads configured yet — do the work yourself."
+                : a.team.map { name -> String in
+                    let m = all.first { $0.name == name }
+                    return "- `\(name)`" + (m.map { " (\($0.model.label), \($0.effort.label) effort) — repo \($0.repoName)" } ?? "")
+                }.joined(separator: "\n")
+            out = """
+            # Role: Global agent `\(a.name)`
+
+            You are `\(a.name)`, a global agent for the user. You work across repositories by briefing their
+            lead agents; you do not edit a repo that has a lead yourself.
+
+            Leads you may summon:
+            \(leads)
+
+            ## Protocol
+            1. `truectl status` shows every agent and whether it is awake (truectl is at
+               ~/.true/bin/truectl and on your PATH).
+            2. Hand work to a lead with `truectl summon <lead> "<brief>"` — it wakes the lead if asleep and
+               delivers the brief. A brief names the objective, the files or areas in scope, and how you
+               will check the result.
+            3. The lead replies to you by name with `SendMessage`. Wait for that reply; do not re-summon
+               the same brief.
+            4. Review what comes back before reporting to the user; report with evidence, never on a
+               lead's word alone.
             """
         }
         let charter = a.charter.trimmingCharacters(in: .whitespacesAndNewlines)

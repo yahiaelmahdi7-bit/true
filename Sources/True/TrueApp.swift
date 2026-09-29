@@ -67,6 +67,7 @@ struct TrueApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentSocket: AgentEventSocket?
+    private var controlSocket: AgentControlSocket?
     func applicationDidFinishLaunching(_ notification: Notification) {
         // A SwiftPM executable starts with no bundle policy; without this it gets no menu bar/Dock icon.
         NSApp.setActivationPolicy(.regular)
@@ -81,11 +82,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in AgentRegistry.shared.handle(e) }
         }
         _ = agentSocket?.start()
+        // Same kind of side effect, for `truectl`: one more thread parked in accept() — 0% idle, nothing
+        // polls. It only acts when an awake agent runs `truectl summon`, and the reply says who was woken.
+        controlSocket = AgentControlSocket(path: AgentPaths.standard.controlSocketPath, registry: AgentRegistry.shared)
+        _ = controlSocket?.start()
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationWillTerminate(_ notification: Notification) {
         // Final save so restored tabs carry each shell's latest cwd (not the last debounced one).
         WorkspaceModel.shared.saveNow()
         agentSocket?.stop()
+        controlSocket?.stop()
     }
 }

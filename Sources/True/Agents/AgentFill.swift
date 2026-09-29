@@ -42,7 +42,7 @@ enum AgentFill {
             : "The agent works in the repo \(URL(fileURLWithPath: draft.repo).lastPathComponent) at \(draft.repo)."
         let roleLine = draft.editing != nil
             ? "The role is fixed to \(draft.role.rawValue); return exactly that role."
-            : "Choose the role: lead (coordinates helpers) or helper (does focused work)."
+            : "Choose the role: lead (coordinates helpers) or helper (does focused work) or global (works across repos and hands work to repo leads)."
         return """
         Design a Claude Code agent profile for this request: \(request)
 

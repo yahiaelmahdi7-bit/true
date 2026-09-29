@@ -83,17 +83,20 @@ final class AgentRegistry {
         return nil
     }
 
-    /// By repo (sorted by name), lead first, then helpers by slot number.
-    static func grouped(_ agents: [Agent]) -> [(repo: String, agents: [Agent])] {
-        Dictionary(grouping: agents, by: \.repo)
+    /// Globals first as ONE group (key "", title "Global", sorted by name) — even a global with a
+    /// folder belongs to no repo. Then by repo (sorted by name), lead first, then helpers by slot number.
+    static func grouped(_ agents: [Agent]) -> [(key: String, title: String, agents: [Agent])] {
+        let globals = agents.filter { $0.role == .global }.sorted { $0.name < $1.name }
+        let repos = Dictionary(grouping: agents.filter { $0.role != .global }, by: \.repo)
             .map { repo, members in
-                (repo, members.sorted { a, b in
+                (key: repo, title: (repo as NSString).lastPathComponent, agents: members.sorted { a, b in
                     let ka = (a.role == .lead ? 0 : 1, AgentNaming.parse(a.name)?.helper ?? 0, a.name)
                     let kb = (b.role == .lead ? 0 : 1, AgentNaming.parse(b.name)?.helper ?? 0, b.name)
                     return ka < kb
                 })
             }
-            .sorted { ($0.repo as NSString).lastPathComponent.lowercased() < ($1.repo as NSString).lastPathComponent.lowercased() }
+            .sorted { $0.title.lowercased() < $1.title.lowercased() }
+        return (globals.isEmpty ? [] : [(key: "", title: "Global", agents: globals)]) + repos
     }
 
     // MARK: Events
@@ -125,7 +128,7 @@ final class AgentRegistry {
         guard let a = agent(named: name) else { return nil }
         AgentHooks.install(for: a, all: agents, paths: paths)
         let argv = AgentLaunch.argv(a, paths: paths, resumeID: AgentLaunch.resumeID(for: a, claudeDir: claudeDir))
-        let cwd = FileManager.default.fileExists(atPath: a.repo) ? a.repo : NSHomeDirectory()
+        let cwd = !a.repo.isEmpty && FileManager.default.fileExists(atPath: a.repo) ? a.repo : NSHomeDirectory()
         let pane = workspace.openAgentTab(name: a.name, cwd: cwd)
         launchSpecs[pane] = PaneLaunch(agent: a.name, argv: argv, shellCommand: AgentLaunch.shellCommand(argv: argv))
         panes[name] = pane

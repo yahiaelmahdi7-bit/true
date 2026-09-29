@@ -15,9 +15,11 @@ struct BuilderDraft: Identifiable, Equatable {
     var symbol: String
     var charter: String
     var team: Set<String>
+    /// A global agent's user-chosen name (typed in the builder); unused for lead/helper.
+    var globalName: String = ""
 
-    /// ~24 curated SF Symbols. First two are the role defaults.
-    static let symbols = ["crown", "hammer", "star", "shield", "bolt", "flame", "leaf", "moon",
+    /// ~24 curated SF Symbols. First three are the role defaults.
+    static let symbols = ["crown", "hammer", "globe", "star", "shield", "bolt", "flame", "leaf", "moon",
                           "sparkles", "wand.and.stars", "scope", "binoculars", "map", "compass.drawing",
                           "wrench.and.screwdriver", "paintbrush", "pencil.and.ruler", "atom", "cpu",
                           "ant", "hare", "tortoise", "bird", "pawprint"]
@@ -33,26 +35,39 @@ struct BuilderDraft: Identifiable, Equatable {
         permission = a.permission; symbol = a.symbol; charter = a.charter; team = Set(a.team)
     }
 
-    /// The auto-assigned name, or the fixed one when editing. Nil = no repo yet, or no free slot.
+    /// The auto-assigned name, or the fixed one when editing. Nil = no repo yet, or no free slot;
+    /// for a global, nil until the typed name is valid and not taken.
     func name(existing: [Agent]) -> String? {
         if let editing { return editing }
+        if role == .global {
+            let n = globalName.trimmingCharacters(in: .whitespaces).lowercased()
+            return AgentNaming.isValidGlobalName(n) && !existing.contains { $0.name == n } ? n : nil
+        }
         guard !repo.isEmpty else { return nil }
         return AgentNaming.nextName(role: role, repo: repo, existing: existing.map(\.name))
     }
 
     func canSave(existing: [Agent]) -> Bool { name(existing: existing) != nil }
 
-    /// Helpers of the same repo that a lead may manage.
-    func helperChoices(existing: [Agent]) -> [Agent] {
-        let slug = AgentNaming.repoSlug(repo)
-        return existing.filter { $0.role == .helper && AgentNaming.repoSlug($0.repo) == slug }
+    /// Who this agent may be given: a lead manages the helpers of its repo; a global may summon
+    /// every lead (leads only, never helpers); a helper has no team.
+    func teamChoices(existing: [Agent]) -> [Agent] {
+        switch role {
+        case .lead:
+            let slug = AgentNaming.repoSlug(repo)
+            return existing.filter { $0.role == .helper && AgentNaming.repoSlug($0.repo) == slug }
+        case .global:
+            return existing.filter { $0.role == .lead }.sorted { $0.name < $1.name }
+        case .helper:
+            return []
+        }
     }
 
     func agent(existing: [Agent]) -> Agent? {
         guard let n = name(existing: existing) else { return nil }
-        let valid = Set(helperChoices(existing: existing).map(\.name))
+        let valid = Set(teamChoices(existing: existing).map(\.name))
         return Agent(name: n, role: role, repo: repo, model: model, effort: effort, permission: permission,
-                     charter: charter, team: role == .lead ? team.filter(valid.contains).sorted() : [],
+                     charter: charter, team: role == .helper ? [] : team.filter(valid.contains).sorted(),
                      symbol: symbol)
     }
 }

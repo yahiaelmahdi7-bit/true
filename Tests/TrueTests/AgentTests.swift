@@ -52,6 +52,16 @@ private func tempDir() -> URL {
         #expect(AgentNaming.repoSlug("/") == "repo")
     }
 
+    @Test func globalNameRules() {
+        for ok in ["designer", "arch-2", "ab"] { #expect(AgentNaming.isValidGlobalName(ok), "\(ok)") }
+        for bad in ["Lead", "lead-x", "helper-1-x", "-x", "x-", "a", String(repeating: "a", count: 33), "d_x", "2fa", ""] {
+            #expect(!AgentNaming.isValidGlobalName(bad), "\(bad)")
+        }
+        #expect(AgentNaming.isValidGlobalName(String(repeating: "a", count: 32)))
+        #expect(AgentNaming.nextName(role: .global, repo: "/p/app", existing: []) == nil)
+        #expect(AgentNaming.parse("designer") == nil)
+    }
+
     @Test func leadOnceThenHelpersOneToFour() {
         var names: [String] = []
         let lead = AgentNaming.nextName(role: .lead, repo: "/p/app", existing: names)
@@ -120,6 +130,18 @@ private func tempDir() -> URL {
     @Test func shellCommandQuotesAndExecs() {
         let cmd = AgentLaunch.shellCommand(argv: ["claude", "--name", "it's"])
         #expect(cmd.hasSuffix("exec 'claude' '--name' 'it'\\''s'"))
+    }
+
+    @Test func globalAndLeadCardsTeachSummon() {
+        let l = Agent(name: "lead-app", role: .lead, repo: "/p/app", model: .opus, effort: .high)
+        let g = Agent(name: "designer", role: .global, repo: "", team: ["lead-app"])
+        let card = AgentLaunch.roleCard(g, all: [l, g])
+        #expect(card.contains("truectl summon") && card.contains("`lead-app` (Opus, High effort)") && card.contains("repo app"))
+        #expect(card.contains("~/.true/bin/truectl"))
+        let none = Agent(name: "solo", role: .global, repo: "")
+        #expect(AgentLaunch.roleCard(none, all: [none]).contains("You have no leads configured yet"))
+        let lead = AgentLaunch.roleCard(l, all: [l, g])
+        #expect(lead.contains("truectl summon") && lead.contains("A global agent may summon you"))
     }
 
     @Test func roleCardsMentionTheProtocol() {
@@ -265,8 +287,18 @@ private func tempDir() -> URL {
                  Agent(name: "lead-b", role: .lead, repo: "/p/b"),
                  Agent(name: "lead-a", role: .lead, repo: "/p/a")]
         let g = AgentRegistry.grouped(a)
-        #expect(g.map(\.repo) == ["/p/a", "/p/b"])
+        #expect(g.map(\.key) == ["/p/a", "/p/b"] && g.map(\.title) == ["a", "b"])
         #expect(g[1].agents.map(\.name) == ["lead-b", "helper-1-b", "helper-2-b"])
+    }
+
+    @Test func globalsFormOneGroupFirst() {
+        let a = [Agent(name: "lead-a", role: .lead, repo: "/p/a"),
+                 Agent(name: "zed", role: .global, repo: ""),
+                 Agent(name: "designer", role: .global, repo: "/p/a")]
+        let g = AgentRegistry.grouped(a)
+        #expect(g.map(\.title) == ["Global", "a"] && g[0].key == "")
+        #expect(g[0].agents.map(\.name) == ["designer", "zed"])
+        #expect(AgentRegistry.grouped([Agent(name: "lead-a", role: .lead, repo: "/p/a")]).map(\.title) == ["a"])
     }
 
     @Test func talkToUnknownAgentReportsNoPane() {
@@ -288,6 +320,40 @@ private func tempDir() -> URL {
         #expect(BuilderDraft().name(existing: []) == nil)
     }
 
+    @Test func globalNameIsTypedValidatedAndUnique() {
+        var d = BuilderDraft(repo: "", role: .global)
+        #expect(d.name(existing: []) == nil && !d.canSave(existing: []))
+        d.globalName = "  Designer "
+        #expect(d.name(existing: []) == "designer")
+        #expect(d.name(existing: [Agent(name: "designer", role: .global, repo: "")]) == nil)
+        d.globalName = "lead-x"
+        #expect(d.name(existing: []) == nil)
+        d.globalName = "d_x"
+        #expect(d.name(existing: []) == nil)
+    }
+
+    @Test func teamChoicesPerRole() {
+        let h = Agent(name: "helper-1-app", role: .helper, repo: "/p/app")
+        let h2 = Agent(name: "helper-1-web", role: .helper, repo: "/p/web")
+        let lb = Agent(name: "lead-web", role: .lead, repo: "/p/web")
+        let la = Agent(name: "lead-app", role: .lead, repo: "/p/app")
+        let g = Agent(name: "designer", role: .global, repo: "")
+        let all = [h, h2, lb, la, g]
+        #expect(BuilderDraft(repo: "/p/app", role: .lead).teamChoices(existing: all).map(\.name) == ["helper-1-app"])
+        #expect(BuilderDraft(repo: "", role: .global).teamChoices(existing: all).map(\.name) == ["lead-app", "lead-web"])
+        #expect(BuilderDraft(repo: "/p/app", role: .helper).teamChoices(existing: all).isEmpty)
+    }
+
+    @Test func globalTeamKeepsOnlyRealLeads() throws {
+        let la = Agent(name: "lead-app", role: .lead, repo: "/p/app")
+        let h = Agent(name: "helper-1-app", role: .helper, repo: "/p/app")
+        var d = BuilderDraft(repo: "", role: .global)
+        d.globalName = "designer"
+        d.team = ["lead-app", "helper-1-app", "lead-ghost"]
+        let a = try #require(d.agent(existing: [la, h]))
+        #expect(a.team == ["lead-app"] && a.repoName == "Global" && a.symbol == "globe")
+    }
+
     @Test func leadTeamKeepsOnlyRealHelpersOfTheRepo() throws {
         let h = Agent(name: "helper-1-app", role: .helper, repo: "/p/app")
         var d = BuilderDraft(repo: "/p/app", role: .lead)
@@ -303,6 +369,7 @@ private func tempDir() -> URL {
     }
 
     @Test func symbolListIsCurated() {
-        #expect(BuilderDraft.symbols.count == 24 && Set(BuilderDraft.symbols).count == 24)
+        #expect(BuilderDraft.symbols.count == 25 && Set(BuilderDraft.symbols).count == 25)
+        #expect(Array(BuilderDraft.symbols.prefix(3)) == AgentRole.allCases.map(\.defaultSymbol))
     }
 }

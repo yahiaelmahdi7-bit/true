@@ -84,17 +84,66 @@ enum ToolSummary {
     }
 }
 
-/// The events socket listener. Event-driven: one thread parked in `accept()` (0% CPU when idle),
-/// one short-lived reader per connection. Lifted from Axon's `AgentEvents` (pure BSD sockets — no
-/// dependencies, no NWListener quirks). Started once at launch; nothing else in True opens it.
-final class AgentEventSocket: @unchecked Sendable {
+/// A listening unix socket that hands each complete line to `handler` together with a `reply`
+/// that writes bytes back on the same connection. Event-driven: one thread parked in `accept()`
+/// (0% CPU when idle), one short-lived reader per connection. Lifted from Axon's `AgentEvents`
+/// (pure BSD sockets — no dependencies, no NWListener quirks).
+///
+/// Two users: the fire-and-forget events socket (never replies; the connection just closes at EOF)
+/// and the request/response control socket (the client sends ONE line and then WAITS, so a line is
+/// dispatched the moment its newline arrives, never at EOF, and the reply goes out while the
+/// connection is still open; it is closed right after).
+final class LineSocketServer: @unchecked Sendable {
+    typealias Handler = @Sendable (_ line: Data, _ reply: @escaping @Sendable (Data) -> Void) -> Void
+
+    /// One accepted connection. The fd is closed exactly once, under the lock, and a late `reply`
+    /// after that is dropped — writing to a closed number could hit a recycled fd of something else.
+    private final class Connection: @unchecked Sendable {
+        private let fd: Int32
+        private let lock = NSLock()
+        private var closed = false
+        private var replied = false
+
+        init(_ fd: Int32) {
+            self.fd = fd
+            var on: Int32 = 1
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
+        }
+
+        /// At most once. Ends the connection: shutdown wakes the reader blocked in `read`, which closes.
+        func reply(_ data: Data) {
+            lock.lock(); defer { lock.unlock() }
+            guard !closed, !replied else { return }
+            replied = true
+            data.withUnsafeBytes { raw in
+                var off = 0
+                while off < raw.count {
+                    let n = write(fd, raw.baseAddress! + off, raw.count - off)
+                    if n < 0 && errno == EINTR { continue }
+                    if n <= 0 { break }
+                    off += n
+                }
+            }
+            shutdown(fd, SHUT_RDWR)
+        }
+
+        func close() {
+            lock.lock(); defer { lock.unlock() }
+            guard !closed else { return }
+            closed = true
+            Darwin.close(fd)
+        }
+
+        var readFD: Int32 { fd }
+    }
+
     private let path: String
-    private let handler: @Sendable (PaneEvent) -> Void
+    private let handler: Handler
     private let lock = NSLock()
     private var started = false
     private var listenFD: Int32 = -1
 
-    init(path: String, handler: @escaping @Sendable (PaneEvent) -> Void) {
+    init(path: String, handler: @escaping Handler) {
         self.path = path
         self.handler = handler
     }
@@ -147,30 +196,43 @@ final class AgentEventSocket: @unchecked Sendable {
                 if errno == EINTR { continue }
                 break
             }
-            DispatchQueue.global(qos: .utility).async { [self] in drain(conn) }
+            DispatchQueue.global(qos: .utility).async { [self] in drain(Connection(conn)) }
         }
     }
 
-    /// Read one connection to EOF, handing off each complete line — plus any unterminated remainder,
-    /// so a `printf '...json...' | nc -U` without a trailing newline still lands.
-    private func drain(_ conn: Int32) {
-        defer { close(conn) }
+    /// Read one connection to EOF, handing off each complete line the moment it arrives — plus any
+    /// unterminated remainder, so a `printf '...json...' | nc -U` without a trailing newline still lands.
+    private func drain(_ conn: Connection) {
+        defer { conn.close() }
+        let fd = conn.readFD
         var pending = Data()
         var buf = [UInt8](repeating: 0, count: 4096)
         while true {
-            let n = read(conn, &buf, buf.count)
+            let n = read(fd, &buf, buf.count)
             if n <= 0 { break }
             pending.append(contentsOf: buf[0..<n])
             while let nl = pending.firstIndex(of: 0x0A) {
-                deliver(pending.prefix(upTo: nl))
+                handler(pending.prefix(upTo: nl), conn.reply)
                 pending = Data(pending.suffix(from: nl + 1))
             }
             guard pending.count < 1 << 20 else { return }   // a megabyte with no newline is garbage
         }
-        if !pending.isEmpty { deliver(pending) }
+        if !pending.isEmpty { handler(pending, conn.reply) }
+    }
+}
+
+/// The events socket: `LineSocketServer` + `PaneEvent.parse`. Started once at launch; nothing else
+/// in True opens it. Events are fire-and-forget, so nothing is ever replied.
+final class AgentEventSocket: @unchecked Sendable {
+    private let server: LineSocketServer
+
+    init(path: String, handler: @escaping @Sendable (PaneEvent) -> Void) {
+        server = LineSocketServer(path: path) { line, _ in
+            if let e = PaneEvent.parse(line: line) { handler(e) }
+        }
     }
 
-    private func deliver(_ line: Data) {
-        if let e = PaneEvent.parse(line: line) { handler(e) }
-    }
+    @discardableResult
+    func start() -> Bool { server.start() }
+    func stop() { server.stop() }
 }
