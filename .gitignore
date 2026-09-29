@@ -1,0 +1,6 @@
+.build/
+.swiftpm/
+True.app/
+*.xcodeproj/
+.DS_Store
+.claude/HANDOFF*.md
