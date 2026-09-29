@@ -79,9 +79,12 @@ struct EmbeddedTerminal: NSViewRepresentable {
         ShellIntegration.apply(to: &env, shell: shell)
         let dir = FileManager.default.fileExists(atPath: startDir) ? startDir : NSHomeDirectory()
         // An agent pane runs its launch line instead of an interactive shell (registry set the spec at wake).
+        // `-i` matters: `claude` reaches PATH through ~/.zshrc, which only an INTERACTIVE shell reads, so a
+        // plain `-l -c` (2026-09-30) failed with "'claude' was not found on PATH" and dropped to a shell.
+        // The launch line single-quotes argv[0], so the interactive `claude` alias never expands.
         var args = ["-l"]
         if let spec = AgentRegistry.shared.launchSpecs[paneID] {
-            args = ["-l", "-c", spec.shellCommand]
+            args = ["-l", "-i", "-c", spec.shellCommand]
             env["TRUE_AGENT"] = spec.agent
         }
         term.startProcess(executable: shell, args: args,

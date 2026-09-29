@@ -7,6 +7,9 @@ struct AgentBuilderSheet: View {
     let registry: AgentRegistry
     @Environment(\.dismiss) private var dismiss
     @State private var pickingRepo = false
+    @State private var request = ""
+    @State private var fillTask: Task<Void, Never>?
+    @State private var fillError: String?
 
     var body: some View {
         let existing = registry.agents
@@ -19,6 +22,22 @@ struct AgentBuilderSheet: View {
                 Spacer(minLength: 0)
             }
             Form {
+                Section("Describe") {
+                    TextField("What should this agent do?", text: $request, axis: .vertical)
+                        .lineLimit(1...3)
+                    HStack {
+                        Button {
+                            if fillTask != nil { fillTask?.cancel() } else { startFill() }
+                        } label: {
+                            Label(fillTask != nil ? "Cancel" : "Fill", systemImage: fillTask != nil ? "xmark" : "sparkles")
+                        }
+                        .disabled(fillTask == nil && request.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        if fillTask != nil { ProgressView().controlSize(.small) }
+                    }
+                    if let fillError {
+                        Text(fillError).font(.footnote).foregroundStyle(.red)
+                    }
+                }
                 Section {
                     LabeledContent("Repo") {
                         HStack {
@@ -105,8 +124,25 @@ struct AgentBuilderSheet: View {
             }
             .padding(.horizontal, 16).padding(.bottom, 12)
         }
+        .onDisappear { fillTask?.cancel() }
         .fileImporter(isPresented: $pickingRepo, allowedContentTypes: [.folder]) { result in
             if case .success(let url) = result { draft.repo = url.path }
+        }
+    }
+
+    private func startFill() {
+        fillError = nil
+        let text = request.trimmingCharacters(in: .whitespacesAndNewlines)
+        let snapshot = draft
+        fillTask = Task {
+            defer { fillTask = nil }
+            do {
+                let profile = try await AgentFill.run(request: text, draft: snapshot)
+                if !Task.isCancelled { AgentFill.apply(profile, to: &draft) }
+            } catch is CancellationError {
+            } catch {
+                fillError = error.localizedDescription
+            }
         }
     }
 
