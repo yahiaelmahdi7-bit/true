@@ -23,8 +23,20 @@ struct AgentBuilderSheet: View {
             }
             Form {
                 Section("Describe") {
-                    TextField("What should this agent do?", text: $request, axis: .vertical)
-                        .lineLimit(1...3)
+                    // A TextField inside a grouped Form makes its placeholder the row LABEL and right-aligns
+                    // the typed text, clipped (2026-09-30 "broken text box"). An editor with a faint prompt
+                    // overlaid reads and wraps like the Charter box below.
+                    TextEditor(text: $request)
+                        .font(.body).frame(height: 64)
+                        .overlay(alignment: .topLeading) {
+                            if request.isEmpty {
+                                Text("What should this agent do? Job, what it may touch, how much to ask you.")
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.top, 8).padding(.leading, 5)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.quaternary))
                     HStack {
                         Button {
                             if fillTask != nil { fillTask?.cancel() } else { startFill() }
