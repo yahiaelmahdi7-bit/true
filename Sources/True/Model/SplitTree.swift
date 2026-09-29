@@ -158,7 +158,8 @@ indirect enum SplitTree: Codable, Equatable, Sendable {
         let frames = layout(in: CGSize(width: 1000, height: 1000)).panes
         guard let src = frames[from] else { return nil }
         var best: (id: UUID, gap: CGFloat, overlap: CGFloat)?
-        for (id, r) in frames where id != from {
+        // Top-left first so equal-distance, equal-overlap ties resolve deterministically.
+        for (id, r) in frames.sorted(by: { ($0.value.minY, $0.value.minX) < ($1.value.minY, $1.value.minX) }) where id != from {
             let gap: CGFloat, overlap: CGFloat
             switch direction {
             case .left:  gap = src.minX - r.maxX
