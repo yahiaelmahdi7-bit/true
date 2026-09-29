@@ -19,11 +19,17 @@ enum AgentHooks {
         let fm = FileManager.default
         try? fm.createDirectory(at: paths.hooksDir, withIntermediateDirectories: true)
         try? fm.createDirectory(at: paths.rolesDir, withIntermediateDirectories: true)
-        try? fm.createDirectory(at: paths.binDir, withIntermediateDirectories: true)
         write(paths.forwarderPath, forwarder(socketPath: paths.socketPath), executable: true)
-        write(paths.truectlPath, AgentControl.truectl(socketPath: paths.controlSocketPath), executable: true)
+        installClient(paths: paths)
         write(paths.settingsPath(a.name), settingsJSON(paths: paths), executable: false)
         write(paths.rolePath(a.name), AgentLaunch.roleCard(a, all: all), executable: false)
+    }
+
+    /// `bin/truectl` alone. Written at launch beside the control socket, so a human pane can run
+    /// `truectl status` before any agent has ever woken (waking is what installs the rest).
+    static func installClient(paths: AgentPaths) {
+        try? FileManager.default.createDirectory(at: paths.binDir, withIntermediateDirectories: true)
+        write(paths.truectlPath, AgentControl.truectl(socketPath: paths.controlSocketPath), executable: true)
     }
 
     private static func write(_ path: String, _ content: String, executable: Bool) {

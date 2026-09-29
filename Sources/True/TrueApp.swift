@@ -86,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // polls. It only acts when an awake agent runs `truectl summon`, and the reply says who was woken.
         controlSocket = AgentControlSocket(path: AgentPaths.standard.controlSocketPath, registry: AgentRegistry.shared)
         _ = controlSocket?.start()
+        AgentHooks.installClient(paths: AgentPaths.standard)   // the door's client, before any agent wakes
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationWillTerminate(_ notification: Notification) {
