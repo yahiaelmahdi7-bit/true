@@ -87,6 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controlSocket = AgentControlSocket(path: AgentPaths.standard.controlSocketPath, registry: AgentRegistry.shared)
         _ = controlSocket?.start()
         AgentHooks.installClient(paths: AgentPaths.standard)   // the door's client, before any agent wakes
+        // No idle sleep while True is frontmost: a driven session must outlast an AFK user.
+        KeepAwake.shared.follow(NSApplication.shared)
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationWillTerminate(_ notification: Notification) {
