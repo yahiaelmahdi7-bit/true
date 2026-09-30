@@ -91,14 +91,16 @@ enum CleanerFactCheck {
     }
 
     /// Blocks of `original` that are gone from `output`: long enough to mean something, not a substring of
-    /// the normalised output, and not close (Dice ≥ 0.6) to any single output block.
+    /// the normalised output, and not close (Dice ≥ 0.6) to any single output block. A block repeated in the
+    /// original is reported once (repetition is padding; the chips are keyed by text).
     static func vanished(original: String, output: String) -> [String] {
         let wholeOut = norm(output)
         let outBlocks = blocks(output).map(norm)
         var result: [String] = []
+        var seen = Set<String>()
         for block in blocks(original) {
             let n = norm(block)
-            guard n.count >= minNormLength, !wholeOut.contains(n) else { continue }
+            guard n.count >= minNormLength, !wholeOut.contains(n), seen.insert(n).inserted else { continue }
             if outBlocks.contains(where: { dice(n, $0) >= diceCutoff }) { continue }
             result.append(block)
         }

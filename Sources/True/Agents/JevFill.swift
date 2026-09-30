@@ -74,13 +74,17 @@ enum JevFill {
         if let x = p.permission { draft.permission = x }
     }
 
-    /// When Claude returns: the charter and symbol are always Claude's; every other field only if it still
-    /// equals what it was when Fill started, so Jev's picks and anything the user touched win.
-    static func merge(_ p: AgentFill.Profile, into draft: inout BuilderDraft, prefill: BuilderDraft) {
-        if draft.editing == nil, draft.role == prefill.role, let r = AgentRole(rawValue: p.role) { draft.role = r }
-        if draft.model == prefill.model, let m = AgentModel(rawValue: p.model) { draft.model = m }
-        if draft.effort == prefill.effort, let e = AgentEffort(rawValue: p.effort) { draft.effort = e }
-        if draft.permission == prefill.permission, let x = AgentPermission(rawValue: p.permission) { draft.permission = x }
+    /// When Claude returns: the charter and symbol are always Claude's; every other field only if Jev did not
+    /// pick it and it still equals what it was when Fill started, so Jev's picks and anything the user touched
+    /// win. `jev` matters when Jev's pick happens to equal the prefill value: the draft looks untouched then.
+    static func merge(_ p: AgentFill.Profile, into draft: inout BuilderDraft, prefill: BuilderDraft,
+                      jev: Picks = Picks()) {
+        if draft.editing == nil, jev.role == nil, draft.role == prefill.role,
+           let r = AgentRole(rawValue: p.role) { draft.role = r }
+        if jev.model == nil, draft.model == prefill.model, let m = AgentModel(rawValue: p.model) { draft.model = m }
+        if jev.effort == nil, draft.effort == prefill.effort, let e = AgentEffort(rawValue: p.effort) { draft.effort = e }
+        if jev.permission == nil, draft.permission == prefill.permission,
+           let x = AgentPermission(rawValue: p.permission) { draft.permission = x }
         if BuilderDraft.symbols.contains(p.symbol) { draft.symbol = p.symbol }
         draft.charter = p.charter
     }
@@ -92,19 +96,21 @@ enum JevFill {
                             jev: @escaping @Sendable () async -> Picks,
                             claude: @Sendable () async throws -> AgentFill.Profile,
                             edit: @escaping @MainActor (@MainActor (inout BuilderDraft) -> Void) -> Void) async throws {
-        let jevTask = Task { @MainActor in
+        let jevTask = Task { @MainActor () -> Picks in
             let p = await jev()
-            if !Task.isCancelled { edit { apply(p, to: &$0) } }
+            guard !Task.isCancelled else { return Picks() }
+            edit { apply(p, to: &$0) }
+            return p
         }
         do {
             let profile = try await claude()
-            await jevTask.value
-            if !Task.isCancelled { edit { merge(profile, into: &$0, prefill: prefill) } }
+            let picks = await jevTask.value
+            if !Task.isCancelled { edit { merge(profile, into: &$0, prefill: prefill, jev: picks) } }
         } catch is CancellationError {
             jevTask.cancel()
             throw CancellationError()
         } catch {
-            await jevTask.value
+            _ = await jevTask.value
             throw error
         }
     }

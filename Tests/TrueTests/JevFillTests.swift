@@ -62,6 +62,17 @@ private func profile(role: String = "helper", model: String = "haiku", effort: S
         #expect(d.symbol == "scope" && d.charter == "CLAUDE CHARTER")   // always Claude's
     }
 
+    @Test func jevPickEqualToPrefillStillBeatsClaude() async throws {
+        let pre = BuilderDraft(repo: "/tmp/app")                       // model sonnet
+        var d = pre
+        try await JevFill.orchestrate(prefill: pre,
+                                      jev: { .init(role: nil, model: .sonnet, effort: nil, permission: nil) },
+                                      claude: { profile(model: "opus") },
+                                      edit: { change in change(&d) })
+        #expect(d.model == .sonnet)                                     // Jev said sonnet; Claude's opus loses
+        #expect(d.effort == .low)                                       // Jev silent -> Claude's
+    }
+
     @Test func mergeKeepsRoleWhenEditingAndAlwaysTakesCharter() {
         let pre = BuilderDraft(editing: Agent(name: "lead-app", role: .lead, repo: "/tmp/app", charter: "old"))
         var d = pre

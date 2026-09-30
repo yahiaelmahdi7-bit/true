@@ -81,6 +81,12 @@ private func jev(_ t: NoulJev) -> JevClient { JevClient(transport: t, keyProvide
         #expect(C.vanished(original: orig, output: out) == ["- Never run the migration against production without a backup"])
     }
 
+    @Test func repeatedVanishedBlockIsReportedOnce() {
+        let rule = "- Never run the migration against production without a backup"
+        let orig = "# Notes\n\n\(rule)\n- Tests live in Tests/\n\n## Again\n\n\(rule)"
+        #expect(C.vanished(original: orig, output: "# Notes\n\n- Tests live in Tests/") == [rule])
+    }
+
     @Test func shortBlocksAreIgnored() {
         #expect(C.vanished(original: "# Rules\n\n- be nice", output: "x").isEmpty)   // "rules" / "be nice" < 15 chars
     }
