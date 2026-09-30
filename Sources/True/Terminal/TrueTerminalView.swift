@@ -54,6 +54,9 @@ final class TrueTerminalView: LocalProcessTerminalView {
         // Black and white only, whatever a program asks for: Claude Code paints its orange in
         // 24-bit colour, which no 16-colour palette can catch, so the pixels are desaturated.
         wantsLayer = true
+        // Stale layer contents (a resize pass before the repaint lands) stay anchored top-left
+        // instead of AppKit's default of stretching them to the new bounds, which shook the text.
+        layerContentsPlacement = .topLeft
         layerUsesCoreImageFilters = true
         contentFilters = Theme.monochrome
         installColors(Self.ansiGreys)
@@ -90,8 +93,11 @@ final class TrueTerminalView: LocalProcessTerminalView {
     /// AppKit the instant a PTY chunk lands — see ``TerminalRedrawCoalescer`` for the measurements.
     /// `needsDisplay = true` (the boolean property) deliberately stays un-intercepted: those call
     /// sites are caret blink, focus and resize — rare, and the ones where a frame of delay is felt.
+    /// Rect invalidations bypass the coalescer during a live resize too: SwiftTerm answers each
+    /// `setFrameSize` with `needsDisplay`, and deferring that to the next tick lets AppKit show the
+    /// old contents scaled to the new bounds for a frame — a stretch/snap on every step.
     override func setNeedsDisplay(_ invalidRect: NSRect) {
-        guard !isFlushingCoalesced, Thread.isMainThread, window != nil else {
+        guard !isFlushingCoalesced, !inLiveResize, Thread.isMainThread, window != nil else {
             super.setNeedsDisplay(invalidRect)
             return
         }
