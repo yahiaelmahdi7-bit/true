@@ -40,6 +40,11 @@ struct TrueApp: App {
                 Button("Focus Right") { model.moveFocus(.right) }.keyboardShortcut(.rightArrow, modifiers: [.command, .option])
                 Button("Focus Up") { model.moveFocus(.up) }.keyboardShortcut(.upArrow, modifiers: [.command, .option])
                 Button("Focus Down") { model.moveFocus(.down) }.keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                Divider()
+                Button("Screenshots…") { ScreenshotWatcher.shared.trayOpen.toggle() }
+                    .keyboardShortcut("s", modifiers: [.command, .shift])
+                Button("Paste Latest Screenshot") { ScreenshotWatcher.shared.pasteLatest() }
+                    .keyboardShortcut("v", modifiers: [.command, .option])
             }
             CommandMenu("Agents") {
                 Button("Toggle Agents Panel") { registry.panelOpen.toggle() }.keyboardShortcut("e")
@@ -89,6 +94,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AgentHooks.installClient(paths: AgentPaths.standard)   // the door's client, before any agent wakes
         // No idle sleep while True is frontmost: a driven session must outlast an AFK user.
         KeepAwake.shared.follow(NSApplication.shared)
+        // One kqueue watch on the screenshot folder: 0% CPU when idle, and it is what makes "fresh" possible.
+        ScreenshotWatcher.shared.start()
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationWillTerminate(_ notification: Notification) {
