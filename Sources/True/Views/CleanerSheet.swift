@@ -159,6 +159,7 @@ struct CleanerSheet: View {
                          : "\(r.file.tokens.formatted()) → \((r.tokensAfter ?? 0).formatted()) tok")
                         .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                     if !o.dropped.isEmpty { chips(o.dropped) }
+                    factCheckView(o.factCheck)
                 }
                 if case .error(let m) = r.status { Text(m).font(.callout).foregroundStyle(.red) }
                 HStack(spacing: 8) {
@@ -195,6 +196,33 @@ struct CleanerSheet: View {
                     }
                 }
             }.frame(maxHeight: 64)
+        }
+    }
+
+    @ViewBuilder private func factCheckView(_ fc: FactCheck) -> some View {
+        switch fc {
+        case .flagged(let lost):
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Possible lost fact (\(lost.count)) — Jev found no trace of these in the rewrite")
+                    .font(.caption2).foregroundStyle(.orange)
+                ScrollView {
+                    FlowLayout(spacing: 4) {
+                        ForEach(lost, id: \.text) { l in
+                            Text(l.chip).font(.system(size: 10)).lineLimit(1)
+                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                .background(.orange.opacity(0.18), in: .capsule)
+                                .foregroundStyle(.orange)
+                                .help(l.text)
+                        }
+                    }
+                }.frame(maxHeight: 64)
+            }
+        case .off:
+            Text("fact check off").font(.caption2).foregroundStyle(.secondary)
+        case .largeRewrite:
+            Text("large rewrite — review by eye").font(.caption2).foregroundStyle(.secondary)
+        case .notRun, .clean:
+            EmptyView()
         }
     }
 

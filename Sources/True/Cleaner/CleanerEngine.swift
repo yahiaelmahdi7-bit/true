@@ -7,6 +7,8 @@ struct RewriteOutcome: Equatable, Sendable {
     let dropped: [String]
     /// Output is ≥ 97% of the original: not worth applying.
     let isLean: Bool
+    /// Jev's second opinion on vanished blocks; only ever adds warnings.
+    var factCheck: FactCheck = .notRun
 }
 
 enum JobEvent: Sendable {
@@ -22,6 +24,8 @@ struct CleanerEngine: Sendable {
     let cwd: URL
     let env: [String: String]
     var maxConcurrent = 3
+    /// Nil = no fact check (tests, or Jev not wired in).
+    var jev: JevClient?
     var timeout = CleanerLaunch.timeout
 
     /// `onEvent(sha, …)` fires from worker tasks; the sha identifies the content, not the file.
@@ -51,10 +55,13 @@ struct CleanerEngine: Sendable {
             switch CleanerChecks.sanitize(raw, original: f.content) {
             case .failure(let e): onEvent(f.sha, .finished(.failure(e)))
             case .success(let out):
+                let lean = CleanerChecks.isLean(original: f.content, output: out)
+                var check = FactCheck.notRun
+                if !lean, let jev { check = await CleanerFactCheck.run(original: f.content, output: out, jev: jev) }
                 onEvent(f.sha, .finished(.success(RewriteOutcome(
                     output: out,
                     dropped: CleanerChecks.droppedFacts(original: f.content, output: out),
-                    isLean: CleanerChecks.isLean(original: f.content, output: out)))))
+                    isLean: lean, factCheck: check))))
             }
         } catch is CancellationError {
             // Sheet closed: the row goes back to idle, nothing to report.

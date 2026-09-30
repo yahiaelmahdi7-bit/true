@@ -38,6 +38,8 @@ final class ContextCleaner {
     private var work: Task<Void, Never>?
     var runner: CleanerRunning = ProcessCleanerRunner()
     var applier = CleanerApplier()
+    /// Jev fact check + ordering. Nil turns both off (tests).
+    var jev: JevClient? = JevClient.shared
 
     func open() {
         isOpen = true
@@ -85,7 +87,7 @@ final class ContextCleaner {
             rows[i].status = .queued; rows[i].applyChecked = false; rows[i].applyResult = nil
         }
         let engine = CleanerEngine(runner: runner, binary: binary, cwd: CleanerLaunch.emptyDir(),
-                                   env: CleanerLaunch.scrubbedEnv())
+                                   env: CleanerLaunch.scrubbedEnv(), jev: jev)
         let m = model
         work = Task { [weak self] in
             await engine.rewrite(targets, model: m) { sha, event in
@@ -110,7 +112,7 @@ final class ContextCleaner {
                 for i in rows.indices where rows[i].file.sha == sha && rows[i].status != .idle {
                     rows[i].status = .done(o)
                     // Apply defaults on only for a clean, non-lean rewrite: dropped facts are his call.
-                    rows[i].applyChecked = !o.isLean && o.dropped.isEmpty
+                    rows[i].applyChecked = !o.isLean && o.dropped.isEmpty && !o.factCheck.blocksApply
                 }
             }
         }
