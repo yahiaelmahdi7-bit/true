@@ -22,9 +22,11 @@ final class PaneStartup {
     }
 
     /// Resume a recorded conversation in its pane; nil unless `sessionID` is a UUID (it goes into a shell line).
-    nonisolated static func resumeCommand(sessionID: String, settings: String) -> String? {
+    /// `prompt` (interrupted sessions only) rides as the final positional argument: the session's first message.
+    nonisolated static func resumeCommand(sessionID: String, settings: String, prompt: String? = nil) -> String? {
         guard UUID(uuidString: sessionID) != nil else { return nil }
-        return "claude --resume \(sessionID) --settings \(AgentLaunch.shellQuote(settings)); exec \"${SHELL:-/bin/zsh}\" -l"
+        let tail = prompt.map { " " + AgentLaunch.shellQuote($0) } ?? ""
+        return "claude --resume \(sessionID) --settings \(AgentLaunch.shellQuote(settings))\(tail); exec \"${SHELL:-/bin/zsh}\" -l"
     }
 
     /// The shell argv that runs `command`.

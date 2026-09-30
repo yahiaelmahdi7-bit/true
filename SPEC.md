@@ -127,6 +127,17 @@ character art (no Gemini) · Nova as a separate menu-bar app driving True over a
 - **Plain shells:** at quit/close the normal buffer (scrollback+screen, with colours) is saved to
   `~/.true/scrollback/<pane>.ans` + `.json` (mode 0600) and replayed before the shell starts, followed by a
   dim `── restored · … ──` marker line. Nothing is re-run.
+- **Interrupted sessions continue (as built):** at the quit snapshot (`SessionSnapshot.atQuit`, after the
+  records) a recorded pane is marked interrupted when its claude session file says `"status": "busy"`
+  (`ClaudeSessions.Found.busy`) OR hook tracking says working / needs-you (`AgentRegistry.latest[pane]`
+  folded through `AgentStatus.next`, or the seat's `statusOf`). A session file saying `"status": "idle"`
+  overrides the hooks (Esc mid-turn fires no Stop, so a stale 'working' must not mark it; a missed mark only costs a quiet resume).
+  Marks live in `TabState.interrupted: Set<UUID>?` (optional, old files decode). On the next launch `ResumePlan.apply` adds
+  `ResumePlan.continuePrompt` as the final positional argument (`claude --resume <id> --settings <s> '<prompt>'`),
+  seats get it as the last argv element (`AgentLaunch.argv(initialPrompt:)`, only when really resuming),
+  idle sessions restore exactly as before, and every mark is cleared and saved at once (consumed once, so a
+  crash cannot replay it). Logged: `quit snapshot: N interrupted (will continue)`, `restore: continuing N
+  interrupted session(s)`. The restart confirm alert says sessions pick up where they left off.
 
 ## Run 6 — Jev in the backend (decisions only)
 Jev (TypeSafe System One: typed judgments with probabilities, never prose) supplies judgments; code keeps

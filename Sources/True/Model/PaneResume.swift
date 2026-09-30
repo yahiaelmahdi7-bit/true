@@ -13,9 +13,15 @@ enum PaneResume: Codable, Equatable, Sendable {
 /// `<claudeConfigDir>/sessions/<pid>.json`; the pane's Claude is a descendant of its shell, often
 /// 2–3 levels down (shell → claude-burn loop → claude).
 enum ClaudeSessions {
-    struct Found: Equatable, Sendable { var sessionID: String; var cwd: String; var pid: pid_t }
+    struct Found: Equatable, Sendable {
+        var sessionID: String; var cwd: String; var pid: pid_t
+        /// The session file said `"status": "busy"` (mid-turn). Missing or anything else = not busy.
+        var busy = false
+        /// The session file said `"status": "idle"` (at its prompt). Beats a stale hook: Esc fires no Stop.
+        var idle = false
+    }
 
-    private struct File: Decodable { var sessionId: String?; var cwd: String?; var kind: String? }
+    private struct File: Decodable { var sessionId: String?; var cwd: String?; var kind: String?; var status: String? }
 
     /// Breadth-first, so the shallowest match wins. `children` is injected so tests use a fake tree.
     static func find(under root: pid_t, sessionsDir: URL, maxDepth: Int = 5,
@@ -38,7 +44,7 @@ enum ClaudeSessions {
               let f = try? JSONDecoder().decode(File.self, from: data),
               f.kind == "interactive",
               let id = f.sessionId, !id.isEmpty, let cwd = f.cwd, !cwd.isEmpty else { return nil }
-        return Found(sessionID: id, cwd: cwd, pid: pid)
+        return Found(sessionID: id, cwd: cwd, pid: pid, busy: f.status == "busy", idle: f.status == "idle")
     }
 
     /// Direct children of `pid` from the kernel.
@@ -61,7 +67,16 @@ enum ResumePlan {
     struct Result {
         var state: WorkspaceState; var startups: [UUID: String]
         var dropped: [Dropped] = []; var records = 0
+        /// `.claude` panes that start with `continuePrompt` (were interrupted at quit).
+        var continued: [UUID] = []
+        /// Agent panes that were interrupted at quit; `AgentRegistry.restore` wakes them with the prompt.
+        var interruptedAgents: Set<UUID> = []
+        /// True when the stored file carried interrupted marks, which the returned state has cleared.
+        var consumedMarks = false
     }
+
+    /// The one-time first message for a session that True's quit cut off mid-task.
+    static let continuePrompt = "True restarted while you were working, which interrupted your last step. Continue the task from where you left off. First check whether the interrupted step (a command, build or edit) actually finished before redoing it."
 
     /// For each `.claude` record with a UUID id and a transcript on disk: a startup command and the
     /// pane's cwd set to the record's. Anything invalid is dropped, so the pane is a plain shell.
@@ -71,14 +86,22 @@ enum ResumePlan {
         var out: [UUID: String] = [:]
         var dropped: [Dropped] = []
         var records = 0
+        var continued: [UUID] = []
+        var agents: Set<UUID> = []
+        var consumed = false
         for ti in s.tabs.indices {
+            let marks = s.tabs[ti].interrupted ?? []
+            if s.tabs[ti].interrupted != nil { consumed = true; s.tabs[ti].interrupted = nil }   // consume once
             guard let map = s.tabs[ti].resume else { continue }
             for (pane, r) in map {
                 records += 1
+                if case .agent = r { if marks.contains(pane) { agents.insert(pane) }; continue }
                 guard case let .claude(id, cwd) = r else { continue }
-                if let cmd = PaneStartup.resumeCommand(sessionID: id, settings: settings) {
+                let prompt = marks.contains(pane) ? continuePrompt : nil
+                if let cmd = PaneStartup.resumeCommand(sessionID: id, settings: settings, prompt: prompt) {
                     if AgentLaunch.transcriptExists(id: id, cwd: cwd, claudeDir: claudeDir) {
                         out[pane] = cmd
+                        if prompt != nil { continued.append(pane) }
                         s.tabs[ti].cwds[pane] = cwd
                         continue
                     }
@@ -90,12 +113,23 @@ enum ResumePlan {
             }
             if s.tabs[ti].resume?.isEmpty == true { s.tabs[ti].resume = nil }
         }
-        return Result(state: s, startups: out, dropped: dropped, records: records)
+        return Result(state: s, startups: out, dropped: dropped, records: records,
+                      continued: continued, interruptedAgents: agents, consumedMarks: consumed)
     }
 }
 
 /// Decides what to store for one pane at snapshot time.
 enum SessionRecorder {
+    /// Was this pane cut off mid-task? Working or waiting on Yahia, by the session file's `busy` or by
+    /// True's hook tracking (`hook`: the pane's status from its last hook event, or the seat's status).
+    static func isInterrupted(found: ClaudeSessions.Found?, hook: AgentStatus?) -> Bool {
+        if found?.busy == true { return true }
+        // At its prompt: a hook still saying 'working' is stale (Esc mid-turn fires no Stop). Missing a mark
+        // only costs a quiet resume; a false one restarts work the user stopped.
+        if found?.idle == true { return false }
+        return hook == .working || hook == .needsYou
+    }
+
     /// - `agent`: the pane belongs to an awake agent → always `.agent`.
     /// - `alive`: the pane's view and shell still exist. A late snapshot must not wipe a good record.
     /// - `found`: the Claude under the shell, if any (only meaningful when `alive`).

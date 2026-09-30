@@ -35,7 +35,7 @@ enum BuildFreshness {
     static func workingWarning(_ working: Int) -> String? {
         guard working > 0 else { return nil }
         let who = working == 1 ? "1 Claude session in True is" : "\(working) Claude sessions in True are"
-        return "\(who) mid-task. Restarting interrupts \(working == 1 ? "its" : "their") current step; sessions resume after."
+        return "\(who) mid-task. They will pick up where they left off after the restart."
     }
 
     /// Everything below `root` in the process tree, BFS, cycle-safe, `maxDepth` levels deep.

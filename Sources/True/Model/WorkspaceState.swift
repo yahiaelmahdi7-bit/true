@@ -12,6 +12,9 @@ struct TabState: Codable, Equatable, Identifiable, Sendable {
     /// What to bring back in a pane on the next launch (a Claude conversation, or an awake agent).
     /// Optional so a workspace.json written before this field existed still decodes.
     var resume: [UUID: PaneResume]?
+    /// Panes whose Claude was working or waiting on the user when True quit: the next launch resumes
+    /// them with a "continue" prompt, once. Optional so older files decode.
+    var interrupted: Set<UUID>?
 
     init(id: UUID = UUID(), customName: String? = nil, pane: UUID = UUID(), cwd: String) {
         self.id = id
@@ -118,6 +121,7 @@ struct WorkspaceState: Codable, Equatable, Sendable {
             t.tree = newTree
             t.cwds[pane] = nil
             t.resume?[pane] = nil
+            t.interrupted?.remove(pane)
             if t.focusedPane == pane {
                 let idx = old.firstIndex(of: pane) ?? 0
                 let remaining = newTree.leafIDs

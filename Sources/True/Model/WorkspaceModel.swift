@@ -28,6 +28,8 @@ final class WorkspaceModel {
     /// After the quit-time snapshot the shells die and each one's exit would close its pane; a frozen model
     /// ignores those, so the final workspace.json is the one that gets restored.
     @ObservationIgnored private var frozen = false
+    /// Agent panes that were interrupted at the last quit; read once by `AgentRegistry.restore`.
+    @ObservationIgnored private(set) var interruptedAgentPanes: Set<UUID> = []
     @ObservationIgnored private var saveTask: Task<Void, Never>?
 
     init(store: WorkspaceStore = WorkspaceStore(), claudeDir: URL = AgentLaunch.claudeConfigDir,
@@ -38,7 +40,11 @@ final class WorkspaceModel {
         let plan = ResumePlan.apply(store.load(), claudeDir: claudeDir, settings: settings)
         self.state = plan.state
         for (pane, cmd) in plan.startups { startup.set(cmd, for: pane) }
+        self.interruptedAgentPanes = plan.interruptedAgents
         Self.logRestore(plan)
+        // Marks are consumed: write the cleared state now so a crash before the next save cannot replay "continue".
+        // One file write at launch, only when the file carried marks.
+        if plan.consumedMarks { store.save(plan.state) }
     }
 
     private static let log = Logger(subsystem: "True", category: "restore")
@@ -47,6 +53,8 @@ final class WorkspaceModel {
     private static func logRestore(_ plan: ResumePlan.Result) {
         if plan.records == 0 { log.notice("restore: no resume records in workspace.json"); return }
         log.notice("restore: resumed \(plan.startups.count, privacy: .public), dropped \(plan.dropped.count, privacy: .public)")
+        let n = plan.continued.count + plan.interruptedAgents.count
+        if n > 0 { log.notice("restore: continuing \(n, privacy: .public) interrupted session(s)") }
         for d in plan.dropped {
             log.notice("restore: dropped \(d.sessionID.prefix(8), privacy: .public): \(d.reason.rawValue, privacy: .public)")
         }
@@ -199,6 +207,23 @@ final class WorkspaceModel {
                           pane: p)
             }
         }
+    }
+
+    /// Quit time, after `recordResume`: mark each recorded pane whose Claude was mid-task. Returns the
+    /// marked panes. Stale marks are replaced, so only what is interrupted NOW survives.
+    @discardableResult
+    func markInterrupted(probe: (UUID) -> (alive: Bool, found: ClaudeSessions.Found?),
+                         hook: (UUID) -> AgentStatus?) -> [UUID] {
+        var marked: [UUID] = []
+        for i in state.tabs.indices {
+            var set = Set<UUID>()
+            for p in state.tabs[i].tree.leafIDs where state.tabs[i].resume?[p] != nil {
+                let (alive, found) = probe(p)
+                if alive, SessionRecorder.isInterrupted(found: found, hook: hook(p)) { set.insert(p); marked.append(p) }
+            }
+            state.tabs[i].interrupted = set.isEmpty ? nil : set
+        }
+        return marked
     }
 
     // MARK: Persistence

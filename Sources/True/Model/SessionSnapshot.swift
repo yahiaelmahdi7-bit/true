@@ -25,10 +25,29 @@ enum SessionSnapshot {
     static func atQuit(_ model: WorkspaceModel = .shared, scrollback: ScrollbackStore = .standard) {
         let ran = model.freeze {
             record(model)
+            let marked = model.markInterrupted(probe: probe, hook: hookStatus)
+            log.notice("\(interruptedSummary(marked.map { shortName($0, model) }), privacy: .public)")
             saveScreens(model, scrollback)
             log.notice("\(quitSummary(model.state), privacy: .public)")
         }
         if !ran { log.notice("quit snapshot skipped: workspace already frozen") }
+    }
+
+    /// The pane's status from hook tracking: the seat's status, else its last hook event folded from idle.
+    static func hookStatus(_ pane: UUID) -> AgentStatus? {
+        let reg = AgentRegistry.shared
+        if let n = reg.name(for: pane) { return reg.statusOf(n) }
+        return reg.latest[pane].map { AgentStatus.next(after: $0.kind, from: .idle) }
+    }
+
+    private static func shortName(_ pane: UUID, _ model: WorkspaceModel) -> String {
+        if let n = AgentRegistry.shared.name(for: pane) { return "agent \(n)" }
+        for t in model.state.tabs { if case let .claude(id, _)? = t.resume?[pane] { return String(id.prefix(8)) } }
+        return "pane"
+    }
+
+    static func interruptedSummary(_ names: [String]) -> String {
+        "quit snapshot: \(names.count) interrupted (will continue)" + (names.isEmpty ? "" : ": " + names.sorted().joined(separator: ", "))
     }
 
     private static let log = Logger(subsystem: "True", category: "restore")

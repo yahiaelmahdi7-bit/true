@@ -4,7 +4,7 @@ import Foundation
 /// argv. Nothing here executes anything — `AgentLaunchTests` asserts on the returned strings.
 enum AgentLaunch {
     /// The exact argv (argv[0] = "claude", resolved by the pane's login shell).
-    static func argv(_ a: Agent, paths: AgentPaths, resumeID: String?) -> [String] {
+    static func argv(_ a: Agent, paths: AgentPaths, resumeID: String?, initialPrompt: String? = nil) -> [String] {
         var v = ["claude",
                  "--name", a.name,
                  "--model", a.model.rawValue,
@@ -13,6 +13,7 @@ enum AgentLaunch {
                  "--append-system-prompt-file", paths.rolePath(a.name),
                  "--settings", paths.settingsPath(a.name)]
         if let id = resumeID, !id.isEmpty { v += ["--resume", id] }
+        if let p = initialPrompt, !p.isEmpty { v.append(p) }   // positional prompt: always last
         return v
     }
 

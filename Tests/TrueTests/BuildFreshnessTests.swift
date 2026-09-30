@@ -30,8 +30,8 @@ import Foundation
     }
     @Test func warningWording() {
         #expect(BuildFreshness.workingWarning(0) == nil)
-        #expect(BuildFreshness.workingWarning(1) == "1 Claude session in True is mid-task. Restarting interrupts its current step; sessions resume after.")
-        #expect(BuildFreshness.workingWarning(3) == "3 Claude sessions in True are mid-task. Restarting interrupts their current step; sessions resume after.")
+        #expect(BuildFreshness.workingWarning(1) == "1 Claude session in True is mid-task. They will pick up where they left off after the restart.")
+        #expect(BuildFreshness.workingWarning(3) == "3 Claude sessions in True are mid-task. They will pick up where they left off after the restart.")
     }
     @Test func descendantsWalkTheTreeSafely() {
         let tree: [pid_t: [pid_t]] = [1: [2, 3], 2: [4], 4: [5], 5: [6], 6: [7], 3: [1], 9: [10]]
