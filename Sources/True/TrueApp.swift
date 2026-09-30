@@ -20,6 +20,7 @@ struct TrueApp: App {
             // `.ignoresSafeArea` but never paints them (a red test strip never reached the screen).
             // The tab numbers live in that zone as an AppKit-hosted view instead (`installTabs`).
             .background { Theme.background.ignoresSafeArea(); WindowConfigurator().frame(width: 0, height: 0) }
+            .background(MainWindowMarker().frame(width: 0, height: 0))
             .preferredColorScheme(.dark)
             .frame(minWidth: 480, minHeight: 300)
             .overlay { ProjectPaletteHost() }
@@ -89,8 +90,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Closing the main window quits True, and its views may be dismantled before applicationShouldTerminate.
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil,
                                                queue: .main) { n in
-            guard let w = n.object as? NSWindow, w.title == "True" else { return }
-            MainActor.assumeIsolated { SessionSnapshot.atQuit() }
+            let closing = (n.object as? NSWindow).map(ObjectIdentifier.init)
+            MainActor.assumeIsolated {
+                let main = MainWindow.current.map(ObjectIdentifier.init)
+                guard MainWindow.shouldSnapshot(closing: closing, main: main) else { return }
+                SessionSnapshot.atQuit()
+            }
         }
         NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil,
                                                queue: .main) { n in
