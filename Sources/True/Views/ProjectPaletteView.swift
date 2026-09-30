@@ -42,7 +42,7 @@ struct ProjectPaletteView: View {
         .shadow(color: .black.opacity(0.45), radius: 30, y: 12)
         .background {
             // Key equivalents that work while the text field has focus: ⌘↩ and Esc.
-            Button("") { palette.openHighlighted(withClaude: true) }
+            Button("") { palette.openHighlighted(withClaude: false) }
                 .keyboardShortcut(.return, modifiers: .command)
             Button("") { palette.close() }.keyboardShortcut(.cancelAction)
         }
@@ -55,7 +55,7 @@ struct ProjectPaletteView: View {
                 .textFieldStyle(.plain)
                 .font(.title3)
                 .focused($searchFocused)
-                .onSubmit { palette.openHighlighted(withClaude: false) }
+                .onSubmit { palette.openHighlighted(withClaude: true) }
                 .onKeyPress(.upArrow) { palette.move(by: -1); return .handled }
                 .onKeyPress(.downArrow) { palette.move(by: 1); return .handled }
         }
@@ -77,7 +77,7 @@ struct ProjectPaletteView: View {
                             ProjectRowView(project: p, detail: palette.details[p.path], highlighted: i == palette.highlight)
                                 .frame(height: rowHeight)
                                 .id(p.id)
-                                .onTapGesture { palette.open(p, withClaude: false) }
+                                .onTapGesture { palette.open(p, withClaude: true) }
                         }
                     }
                     .padding(6)
@@ -92,7 +92,7 @@ struct ProjectPaletteView: View {
 
     private var footer: some View {
         HStack {
-            Text("↩ Open beside   ⌘↩ Open with Claude   esc Close")
+            Text("↩ Open with Claude   ⌘↩ Open a shell   esc Close")
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()
             Button("Add Folder…") { palette.addFolder() }

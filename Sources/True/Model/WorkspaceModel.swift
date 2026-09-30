@@ -21,6 +21,9 @@ final class WorkspaceModel {
     /// Set by `AgentRegistry`: is this pane an agent's? Sleeping the only tab must not quit True.
     @ObservationIgnored var isAgentPane: ((UUID) -> Bool)?
 
+    /// Set by `AgentRegistry`: the permission mode this pane's Claude last reported, if any.
+    @ObservationIgnored var paneMode: ((UUID) -> String?)?
+
     /// Set by `AgentRegistry`: the awake agent that owns this pane, if any.
     @ObservationIgnored var agentName: ((UUID) -> String?)?
 
@@ -203,7 +206,8 @@ final class WorkspaceModel {
         for t in state.tabs {
             for p in t.tree.leafIDs {
                 let (alive, found) = probe(p)
-                setResume(SessionRecorder.decide(previous: t.resume?[p], agent: agentName?(p), alive: alive, found: found),
+                setResume(SessionRecorder.decide(previous: t.resume?[p], agent: agentName?(p), alive: alive, found: found,
+                                                   mode: paneMode?(p)),
                           pane: p)
             }
         }

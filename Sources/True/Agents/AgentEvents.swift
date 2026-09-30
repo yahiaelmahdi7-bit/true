@@ -28,6 +28,8 @@ struct PaneEvent: Equatable, Sendable {
     /// For a permission request: the tool asking and a one-line summary of what it wants to do.
     var tool: String? = nil
     var detail: String? = nil
+    /// The session's permission mode when the hook reported one (`permission_mode`).
+    var mode: String? = nil
 
     /// Parse one wire line. Anything malformed returns nil — the socket is a doorbell, never a crash surface.
     static func parse(line: Data, at: Date = Date()) -> PaneEvent? {
@@ -37,11 +39,13 @@ struct PaneEvent: Equatable, Sendable {
             let message: String?
             let tool: String?
             let input: [String: String]?
+            let mode: String?
         }
         guard let w = try? JSONDecoder().decode(Wire.self, from: line),
               let pane = UUID(uuidString: w.pane), let kind = PaneEventKind(rawValue: w.event) else { return nil }
         let s = w.tool.map { ToolSummary.summarize(tool: $0, input: w.input ?? [:]) }
-        return PaneEvent(pane: pane, kind: kind, message: w.message ?? "", at: at, tool: s?.tool, detail: s?.detail)
+        return PaneEvent(pane: pane, kind: kind, message: w.message ?? "", at: at, tool: s?.tool, detail: s?.detail,
+                         mode: (w.mode?.isEmpty == false) ? w.mode : nil)
     }
 }
 

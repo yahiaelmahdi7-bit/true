@@ -116,8 +116,12 @@ character art (no Gemini) · Nova as a separate menu-bar app driving True over a
 
 ## Run 4 — Restore (exactly where he left off)
 - **⌘O** opens the picked project as a split (axis horizontal) beside the focused pane of the selected tab;
-  ⌘↩ starts Claude in that new pane only.
-- **Records:** `TabState.resume: [UUID: PaneResume]?` in `~/.true/workspace.json` (`.claude(sessionID, cwd)` /
+  ↩ (or a click) starts Claude there in bypass mode (`claude --dangerously-skip-permissions`); ⌘↩ opens a plain shell.
+- **Permission mode survives a restart:** the pane hook forwarder passes Claude's `permission_mode` on every event;
+  True keeps the latest per pane and records it as `.claude(sessionID, cwd, mode)` (`mode` optional, old files decode).
+  Resume replays it from an allowlist: `bypassPermissions` → `--dangerously-skip-permissions`, `default` → `--permission-mode manual`
+  (the CLI rejects `default`), other modes the CLI accepts → `--permission-mode <m>`, unknown/nil → no flag (the user's settings default).
+- **Records:** `TabState.resume: [UUID: PaneResume]?` in `~/.true/workspace.json` (`.claude(sessionID, cwd, mode?)` /
   `.agent(name)`). Optional, so v1 files still decode; `version` is NOT bumped.
 - **Snapshot triggers (event-driven, no timers):** `applicationShouldTerminate`, main-window `willClose`,
   a one-shot ~2.5 s after Return in a pane, and any `.session` hook event. A gone view keeps its old record.

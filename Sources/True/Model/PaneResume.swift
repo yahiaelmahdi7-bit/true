@@ -3,8 +3,9 @@ import Darwin
 
 /// What a pane was running when True last looked, so the next launch can put it back.
 enum PaneResume: Codable, Equatable, Sendable {
-    /// A Claude conversation (`claude --resume <sessionID>` in `cwd`).
-    case claude(sessionID: String, cwd: String)
+    /// A Claude conversation (`claude --resume <sessionID>` in `cwd`). `mode` is the permission mode it
+    /// was in (hook `permission_mode`); nil in records saved before it was tracked.
+    case claude(sessionID: String, cwd: String, mode: String? = nil)
     /// A named agent that was awake; re-woken into this same pane.
     case agent(name: String)
 }
@@ -96,9 +97,9 @@ enum ResumePlan {
             for (pane, r) in map {
                 records += 1
                 if case .agent = r { if marks.contains(pane) { agents.insert(pane) }; continue }
-                guard case let .claude(id, cwd) = r else { continue }
+                guard case let .claude(id, cwd, mode) = r else { continue }
                 let prompt = marks.contains(pane) ? continuePrompt : nil
-                if let cmd = PaneStartup.resumeCommand(sessionID: id, settings: settings, prompt: prompt) {
+                if let cmd = PaneStartup.resumeCommand(sessionID: id, settings: settings, mode: mode, prompt: prompt) {
                     if AgentLaunch.transcriptExists(id: id, cwd: cwd, claudeDir: claudeDir) {
                         out[pane] = cmd
                         if prompt != nil { continued.append(pane) }
@@ -134,10 +135,15 @@ enum SessionRecorder {
     /// - `alive`: the pane's view and shell still exist. A late snapshot must not wipe a good record.
     /// - `found`: the Claude under the shell, if any (only meaningful when `alive`).
     static func decide(previous: PaneResume?, agent: String?, alive: Bool,
-                       found: ClaudeSessions.Found?) -> PaneResume? {
+                       found: ClaudeSessions.Found?, mode: String? = nil) -> PaneResume? {
         if let a = agent { return .agent(name: a) }
         guard alive else { return previous }
-        if let f = found { return .claude(sessionID: f.sessionID, cwd: f.cwd) }
+        if let f = found {
+            // No hook has reported a mode this run: keep the one recorded for the same conversation.
+            var kept: String?
+            if case let .claude(id, _, m)? = previous, id == f.sessionID { kept = m }
+            return .claude(sessionID: f.sessionID, cwd: f.cwd, mode: mode ?? kept)
+        }
         if case .claude = previous { return nil }
         return previous
     }

@@ -42,7 +42,7 @@ enum SessionSnapshot {
 
     private static func shortName(_ pane: UUID, _ model: WorkspaceModel) -> String {
         if let n = AgentRegistry.shared.name(for: pane) { return "agent \(n)" }
-        for t in model.state.tabs { if case let .claude(id, _)? = t.resume?[pane] { return String(id.prefix(8)) } }
+        for t in model.state.tabs { if case let .claude(id, _, _)? = t.resume?[pane] { return String(id.prefix(8)) } }
         return "pane"
     }
 
@@ -58,7 +58,7 @@ enum SessionSnapshot {
         for t in state.tabs {
             for r in (t.resume ?? [:]).values {
                 switch r {
-                case let .claude(id, _): ids.append(String(id.prefix(8)))
+                case let .claude(id, _, _): ids.append(String(id.prefix(8)))
                 case let .agent(name): ids.append("agent \(name)")
                 }
             }
@@ -110,7 +110,7 @@ enum SessionSnapshot {
             let m = WorkspaceModel.shared
             guard let t = m.state.tabs.first(where: { $0.tree.contains(pane) }) else { return }
             m.setResume(SessionRecorder.decide(previous: t.resume?[pane], agent: m.agentName?(pane),
-                                               alive: alive, found: found), pane: pane)
+                                               alive: alive, found: found, mode: m.paneMode?(pane)), pane: pane)
         }
     }
 }

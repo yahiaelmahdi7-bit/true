@@ -5,7 +5,7 @@ Owner: ux-designer · Last verified: 2026-09-30
 One user (Yahia, a non-coder who directs builds) [source: ~/.claude/CLAUDE.md]. Jobs: run shells fast and quiet; see which agents are working or waiting; talk to the lead; reopen exactly where he left off.
 
 ## Core flows
-Tabs/splits (⌘T, ⌘D, ⌘⇧D, ⌥⌘arrows) · Open Project ⌘O (⌘↩ starts Claude) · Hub ⌘E · Needs-you tray ⇧⌘U · screenshot tray ⇧⌘S · Context Cleaner sheet from the Agents menu · Settings ⌘, [source: SPEC.md Runs 1, 2, 4; git log].
+Tabs/splits (⌘T, ⌘D, ⌘⇧D, ⌥⌘arrows) · Open Project ⌘O (↩ starts Claude in bypass mode, ⌘↩ a plain shell) · Hub ⌘E · Needs-you tray ⇧⌘U · screenshot tray ⇧⌘S · Context Cleaner sheet from the Agents menu · Settings ⌘, [source: SPEC.md Runs 1, 2, 4; git log].
 
 ## Information architecture
 Title-bar tab strip; terminal area; trailing Hub sidebar (project groups → Seats / Background / Other sessions; All/Seats toggle). [source: SPEC.md Run 7]

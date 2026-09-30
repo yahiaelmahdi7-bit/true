@@ -51,6 +51,8 @@ final class AgentRegistry {
     private(set) var panes: [String: UUID] = [:]
     private(set) var status: [String: AgentStatus] = [:]
     private(set) var latest: [UUID: PaneEvent] = [:]
+    /// The latest permission mode each pane's Claude reported (any hook event); recorded for `--resume` at quit.
+    @ObservationIgnored private(set) var modes: [UUID: String] = [:]
     @ObservationIgnored private(set) var launchSpecs: [UUID: PaneLaunch] = [:]
     var panelOpen = false
     /// The builder sheet's draft; non-nil = sheet showing.
@@ -71,6 +73,7 @@ final class AgentRegistry {
         self.agents = store.load()
         workspace.onPaneClosed = { [weak self] pane in self?.paneClosed(pane) }
         workspace.agentName = { [weak self] pane in self?.name(for: pane) }
+        workspace.paneMode = { [weak self] pane in self?.modes[pane] }
         workspace.isAgentPane = { [weak self] pane in self?.name(for: pane) != nil }
         restore()
     }
@@ -130,12 +133,13 @@ final class AgentRegistry {
     // MARK: Events
 
     func handle(_ e: PaneEvent) {
+        if let m = e.mode { modes[e.pane] = m }
         if e.kind == .session {
             // Any pane's Claude (⌘↩ or typed by hand) reports its session id: that is the resume record.
             let sid = e.message.trimmingCharacters(in: .whitespacesAndNewlines)
             if name(for: e.pane) == nil, UUID(uuidString: sid) != nil,
                let cwd = workspace.state.tabs.compactMap({ $0.cwds[e.pane] }).first {
-                workspace.setResume(.claude(sessionID: sid, cwd: cwd), pane: e.pane)
+                workspace.setResume(.claude(sessionID: sid, cwd: cwd, mode: modes[e.pane]), pane: e.pane)
             }
             guard let name = name(for: e.pane), let i = agents.firstIndex(where: { $0.name == name }) else { return }
             let id = e.message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -190,6 +194,7 @@ final class AgentRegistry {
     func paneClosed(_ pane: UUID) {
         launchSpecs[pane] = nil
         latest[pane] = nil
+        modes[pane] = nil
         if let n = name(for: pane) {
             panes[n] = nil
             status[n] = nil

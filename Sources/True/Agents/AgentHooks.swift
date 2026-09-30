@@ -122,6 +122,9 @@ enum AgentHooks {
                 return
             event, message = verdict
             wire = {"pane": pane, "event": event, "message": message}
+            mode = payload.get("permission_mode")
+            if isinstance(mode, str) and mode:
+                wire["mode"] = mode
             if payload.get("hook_event_name") == "PermissionRequest":
                 wire["tool"] = str(payload.get("tool_name") or "")
                 args = payload.get("tool_input")
