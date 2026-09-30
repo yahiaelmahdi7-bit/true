@@ -127,3 +127,27 @@ character art (no Gemini) · Nova as a separate menu-bar app driving True over a
 - **Plain shells:** at quit/close the normal buffer (scrollback+screen, with colours) is saved to
   `~/.true/scrollback/<pane>.ans` + `.json` (mode 0600) and replayed before the shell starts, followed by a
   dim `── restored · … ──` marker line. Nothing is re-run.
+
+## Run 6 — Jev in the backend (decisions only)
+Jev (TypeSafe System One: typed judgments with probabilities, never prose) supplies judgments; code keeps
+the workflow. Jev slow/down/keyless never breaks anything: every path falls through to the old behaviour.
+- **JevClient** (`Agents/JevClient.swift`): `POST https://api.typesafe.ai/v1/systemone`, Bearer key, body
+  `{model:"jev-latest", state, questions}`. Key order: env `TYPESAFE_API_KEY`, else once per process
+  `/usr/bin/security find-generic-password -s net.prismlens.jev-cli -a typesafe -w` (result cached, including
+  "missing"; never logged). `ask(state:questions:timeout:)` returns nil on no key / network / timeout / non-2xx /
+  undecodable. Transport and key provider are injectable.
+- **Cleaner fact check** (`Cleaner/CleanerFactCheck.swift`, additive only): blocks of the original (blank line or
+  `#`, `- `, `* `, `+ `, `N. `, `>`, `|` starts one); a block is *vanished* if norm length >= 15, not a substring
+  of the normalised output, and best word-Dice vs output blocks < 0.6. First 40 go to two parallel Jev calls
+  (FILLER `f<i>`, KEPT `k<i>`, 8 s). Flag when `max(filler, kept) < 0.5`: orange "possible lost fact" chip
+  (first ~80 chars, full text in tooltip), row unchecked. Jev never removes a regex chip. No reply: grey
+  "fact check off". More than 40 vanished: grey "large rewrite — review by eye", row unchecked.
+- **Ordering** (`Cleaner/CleanerOrdering.swift`): one `pad` score per unique content, 8 in flight, 5 s each and
+  5 s overall; stable sort by score descending, unscored = 1.0. Nothing is skipped or shown.
+- **AI fill** (`Agents/JevFill.swift`): Jev (3 s) picks model / effort / permission (and role when not editing)
+  in parallel with Claude; each pick with confidence >= 0.6 is applied immediately. When Claude returns, the
+  charter and symbol are always Claude's; other fields apply only if still equal to their pre-fill value. Claude
+  failing keeps Jev's picks and shows the existing error. Needs-you stays the deterministic hook.
+- **Tests:** all with injected transport/key provider (no network, no Keychain): JevClientTests,
+  CleanerFactCheckTests, CleanerOrderingTests, JevFillTests. `JevLiveTests` (one noul, choice, score round
+  trip) run only with `JEV_LIVE=1`; the builder never ran them.
