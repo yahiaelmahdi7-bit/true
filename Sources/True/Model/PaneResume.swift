@@ -51,7 +51,17 @@ enum ClaudeSessions {
 
 /// Which panes come back running what. Pure: `WorkspaceModel.init` applies the result.
 enum ResumePlan {
-    struct Result { var state: WorkspaceState; var startups: [UUID: String] }
+    /// Why a `.claude` record did not come back; logged by name at launch.
+    enum DropReason: String, Equatable, Sendable {
+        case invalidSessionID = "session id is not a UUID"
+        case transcriptMissing = "transcript missing"
+    }
+    struct Dropped: Equatable, Sendable { var pane: UUID; var sessionID: String; var reason: DropReason }
+    /// `records` counts every resume record found (claude + agent), so "none at all" is distinguishable.
+    struct Result {
+        var state: WorkspaceState; var startups: [UUID: String]
+        var dropped: [Dropped] = []; var records = 0
+    }
 
     /// For each `.claude` record with a UUID id and a transcript on disk: a startup command and the
     /// pane's cwd set to the record's. Anything invalid is dropped, so the pane is a plain shell.
@@ -59,21 +69,28 @@ enum ResumePlan {
     static func apply(_ state: WorkspaceState, claudeDir: URL, settings: String) -> Result {
         var s = state
         var out: [UUID: String] = [:]
+        var dropped: [Dropped] = []
+        var records = 0
         for ti in s.tabs.indices {
             guard let map = s.tabs[ti].resume else { continue }
             for (pane, r) in map {
+                records += 1
                 guard case let .claude(id, cwd) = r else { continue }
-                if AgentLaunch.transcriptExists(id: id, cwd: cwd, claudeDir: claudeDir),
-                   let cmd = PaneStartup.resumeCommand(sessionID: id, settings: settings) {
-                    out[pane] = cmd
-                    s.tabs[ti].cwds[pane] = cwd
+                if let cmd = PaneStartup.resumeCommand(sessionID: id, settings: settings) {
+                    if AgentLaunch.transcriptExists(id: id, cwd: cwd, claudeDir: claudeDir) {
+                        out[pane] = cmd
+                        s.tabs[ti].cwds[pane] = cwd
+                        continue
+                    }
+                    dropped.append(Dropped(pane: pane, sessionID: id, reason: .transcriptMissing))
                 } else {
-                    s.tabs[ti].resume?[pane] = nil
+                    dropped.append(Dropped(pane: pane, sessionID: id, reason: .invalidSessionID))
                 }
+                s.tabs[ti].resume?[pane] = nil
             }
             if s.tabs[ti].resume?.isEmpty == true { s.tabs[ti].resume = nil }
         }
-        return Result(state: s, startups: out)
+        return Result(state: s, startups: out, dropped: dropped, records: records)
     }
 }
 

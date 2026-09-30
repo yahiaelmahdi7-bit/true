@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Darwin
+import os
 
 /// Glue between the live terminals and the workspace's resume records. All calls are event-driven:
 /// quit, window close, a one-shot after Return, and a Claude `session` hook.
@@ -22,10 +23,29 @@ enum SessionSnapshot {
 
     /// Quit or window close: record, save, then stop reacting to the shells dying.
     static func atQuit(_ model: WorkspaceModel = .shared, scrollback: ScrollbackStore = .standard) {
-        model.freeze {
+        let ran = model.freeze {
             record(model)
             saveScreens(model, scrollback)
+            log.notice("\(quitSummary(model.state), privacy: .public)")
         }
+        if !ran { log.notice("quit snapshot skipped: workspace already frozen") }
+    }
+
+    private static let log = Logger(subsystem: "True", category: "restore")
+
+    /// "quit snapshot: recorded N session(s) across T tab(s)" + short ids, or an explicit "nothing to record".
+    static func quitSummary(_ state: WorkspaceState) -> String {
+        var ids: [String] = []
+        for t in state.tabs {
+            for r in (t.resume ?? [:]).values {
+                switch r {
+                case let .claude(id, _): ids.append(String(id.prefix(8)))
+                case let .agent(name): ids.append("agent \(name)")
+                }
+            }
+        }
+        let head = "quit snapshot: recorded \(ids.count) session(s) across \(state.tabs.count) tab(s)"
+        return ids.isEmpty ? head + " (nothing to record: no live Claude or agent panes)" : head + ": " + ids.sorted().joined(separator: ", ")
     }
 
     /// Plain shells (no Claude, no agent) keep their screen: serialize the normal buffer to disk. A pane whose

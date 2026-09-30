@@ -118,6 +118,23 @@ private func tmp() -> URL {
         #expect(r.startups.isEmpty && r.state.tabs[0].resume == nil && r.state.tabs[0].cwds[p] == "/tmp")
     }
 
+    @Test func dropReasonsAreNamed() throws {
+        let (s, p) = workspace(resume: .claude(sessionID: id, cwd: "/work"), cwd: "/tmp")
+        let missing = ResumePlan.apply(s, claudeDir: tmp(), settings: "/s.json")
+        #expect(missing.dropped == [.init(pane: p, sessionID: id, reason: .transcriptMissing)] && missing.records == 1)
+        let (b, q) = workspace(resume: .claude(sessionID: "not-a-uuid", cwd: "/work"), cwd: "/tmp")
+        let bad = ResumePlan.apply(b, claudeDir: tmp(), settings: "/s.json")
+        #expect(bad.dropped == [.init(pane: q, sessionID: "not-a-uuid", reason: .invalidSessionID)])
+        let none = ResumePlan.apply(.fresh(cwd: "/tmp"), claudeDir: tmp(), settings: "/s.json")
+        #expect(none.records == 0 && none.dropped.isEmpty)
+    }
+
+    @Test func quitSummaryListsShortIds() {
+        let (s, _) = workspace(resume: .claude(sessionID: id, cwd: "/work"), cwd: "/tmp")
+        #expect(SessionSnapshot.quitSummary(s).hasPrefix("quit snapshot: recorded 1 session(s) across 1 tab(s): \(id.prefix(8))"))
+        #expect(SessionSnapshot.quitSummary(.fresh(cwd: "/tmp")).contains("recorded 0 session(s)"))
+    }
+
     @Test func modelRegistersStartupBeforeAnyView() throws {
         let claude = tmp()
         let proj = claude.appendingPathComponent("projects/-work")

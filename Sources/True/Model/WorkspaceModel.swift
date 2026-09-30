@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Observation
+import os
 
 /// The single source of truth for the window: tabs, splits, focus. Views read it; commands and
 /// terminal callbacks mutate it. Every mutation autosaves, debounced (a cancelled Task, not a timer).
@@ -37,6 +38,18 @@ final class WorkspaceModel {
         let plan = ResumePlan.apply(store.load(), claudeDir: claudeDir, settings: settings)
         self.state = plan.state
         for (pane, cmd) in plan.startups { startup.set(cmd, for: pane) }
+        Self.logRestore(plan)
+    }
+
+    private static let log = Logger(subsystem: "True", category: "restore")
+
+    /// One-shot at launch: the "True booted empty" diagnosis. Ids are short and public (not secrets); no paths.
+    private static func logRestore(_ plan: ResumePlan.Result) {
+        if plan.records == 0 { log.notice("restore: no resume records in workspace.json"); return }
+        log.notice("restore: resumed \(plan.startups.count, privacy: .public), dropped \(plan.dropped.count, privacy: .public)")
+        for d in plan.dropped {
+            log.notice("restore: dropped \(d.sessionID.prefix(8), privacy: .public): \(d.reason.rawValue, privacy: .public)")
+        }
     }
 
     // MARK: Queries
@@ -201,11 +214,15 @@ final class WorkspaceModel {
     }
 
     /// Quit / window close: record what each pane runs, write the file, then ignore everything after.
-    func freeze(record: () -> Void) {
-        guard !frozen else { return }
+    /// Returns false when it was already frozen (nothing ran).
+    @discardableResult
+    func freeze(record: () -> Void) -> Bool {
+        guard !frozen else { return false }
         record()
         saveNow()
         frozen = true
+        Self.log.notice("workspace frozen: later saves blocked")
+        return true
     }
 
     func saveNow() {
