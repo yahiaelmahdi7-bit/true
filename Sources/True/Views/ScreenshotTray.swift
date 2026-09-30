@@ -2,15 +2,19 @@ import SwiftUI
 
 /// The "fresh screenshot" slot for the tab bar. Nothing shows normally; when a new screenshot lands a
 /// tiny thumbnail appears until the tray is opened or a shot is used. The slot's container is always
-/// there (1pt wide when empty) so ⇧⌘S has somewhere to anchor the popover.
+/// there (1pt wide when empty) so ⇧⌘S has somewhere to anchor the popover, and the thumbnail stays
+/// while the tray is open: opening clears `fresh`, and a slot shrinking under an open popover would
+/// slide its arrow sideways.
 struct ScreenshotTray: View {
     private let watcher = ScreenshotWatcher.shared
     @State private var appeared = false
 
+    private var showsThumb: Bool { watcher.fresh || watcher.trayOpen }
+
     var body: some View {
         @Bindable var w = watcher
         ZStack {
-            if watcher.fresh, let shot = watcher.shots.first {
+            if showsThumb, let shot = watcher.shots.first {
                 Button { watcher.trayOpen.toggle() } label: {
                     ShotImage(shot: shot, fill: false)
                         .frame(height: 18)
@@ -25,7 +29,7 @@ struct ScreenshotTray: View {
                 .onDisappear { appeared = false }
             }
         }
-        .frame(width: watcher.fresh ? nil : 1, height: 18)
+        .frame(width: showsThumb && !watcher.shots.isEmpty ? nil : 1, height: 18)
         .popover(isPresented: $w.trayOpen, arrowEdge: .bottom) { ScreenshotPopover() }
     }
 }

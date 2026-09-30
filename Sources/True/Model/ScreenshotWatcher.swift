@@ -196,7 +196,9 @@ final class ScreenshotWatcher {
 
     private static func readClipboardImage() -> NSImage? {
         let pb = NSPasteboard.general
-        guard let types = pb.types, types.contains(.png) || types.contains(.tiff) else { return nil }
+        // A file copied in Finder carries its icon as TIFF; that is not a picture the user took.
+        guard let types = pb.types, types.contains(.png) || types.contains(.tiff),
+              !types.contains(.fileURL) else { return nil }
         return NSImage(pasteboard: pb)
     }
 
