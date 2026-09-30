@@ -89,8 +89,11 @@ final class ContextCleaner {
         let engine = CleanerEngine(runner: runner, binary: binary, cwd: CleanerLaunch.emptyDir(),
                                    env: CleanerLaunch.scrubbedEnv(), jev: jev)
         let m = model
+        let jev = self.jev
         work = Task { [weak self] in
-            await engine.rewrite(targets, model: m) { sha, event in
+            // Biggest wins first; Jev being slow or absent leaves scan order (bounded to ~5 s).
+            let queue = await CleanerOrdering.order(targets, jev: jev)
+            await engine.rewrite(queue, model: m) { sha, event in
                 Task { @MainActor in self?.handle(sha: sha, event) }
             }
             guard let self else { return }
