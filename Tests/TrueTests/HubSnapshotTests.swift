@@ -5,7 +5,7 @@ import AppKit
 @testable import True
 
 /// Renders the Hub from fixtures to PNGs (the only way to see it without launching True.app).
-/// Skipped unless TRUE_SNAPSHOT_DIR is set: `TRUE_SNAPSHOT_DIR=$PWD/docs/design/hub-v2 swift test --filter HubSnapshotTests`.
+/// Skipped unless TRUE_SNAPSHOT_DIR is set: `TRUE_SNAPSHOT_DIR=$PWD/docs/design/hub-v4 swift test --filter HubSnapshotTests`.
 @MainActor
 @Suite(.enabled(if: !(ProcessInfo.processInfo.environment["TRUE_SNAPSHOT_DIR"] ?? "").isEmpty,
                 "TRUE_SNAPSHOT_DIR not set"))
@@ -64,7 +64,7 @@ struct HubSnapshotTests {
 
     private func groups(seatsOnly: Bool = false) -> [HubProjectGroup] {
         let peers = [PeerSession(pid: Int32(ProcessInfo.processInfo.processIdentifier), sessionID: "p1",
-                                 cwd: "/Users/y/Projects/true", name: "scratch", kind: "interactive", busy: false,
+                                 cwd: "/Users/y/Projects/true", name: "scratch", kind: "interactive", busy: true,
                                  updatedAt: Self.now - 60)]
         let builders = [builder("true-hub-design", "/Users/y/Projects/true", state: .running, parent: "lead"),
                         builder("true-fixes", "/Users/y/Projects/true", state: .done, parent: nil),
@@ -92,6 +92,77 @@ struct HubSnapshotTests {
 
     @Test func hubEmpty() throws {
         try snapshot("hub-empty", width: HubPanelContent.width, height: 420) { hub(groups: [], seats: []) }
+    }
+
+    // MARK: crew + card
+
+    private func crewAgent(_ n: String, _ d: String, _ m: String = "sonnet") -> CrewAgent {
+        CrewAgent(name: n, summary: d, fullDescription: d, model: m, color: nil)
+    }
+
+    private var crewSnapshot: CrewSnapshot {
+        let project = CrewGroup(title: "Engineering", agents: [
+            crewAgent("true-cto", "Crew lead for True. Routing, architecture calls, ADRs, gate enforcement.", "inherit"),
+            crewAgent("true-swift-engineer", "Swift engineer for True. Writing or fixing SwiftUI and SwiftPM code."),
+            crewAgent("true-security", "Defensive security for True. Secrets, auth, dependencies.")])
+        let design = CrewGroup(title: "Design", agents: [
+            crewAgent("true-ui-designer", "Visual designer for True. Every v1 passes /taste before Yahia sees it.", "opus"),
+            crewAgent("true-ux-designer", "")])
+        let global = [CrewGroup(title: "studio", agents: [crewAgent("studio-ai-engineer", "Implements AI features."),
+                                                          crewAgent("studio-joker", "Lightens the mood.", "haiku")]),
+                      CrewGroup(title: "argus", agents: [crewAgent("argus-orchestrator", "Conducts the Argus build.")])]
+        return CrewSnapshot(projectTitle: "true", project: [project, design], global: global)
+    }
+
+    /// The pop-up as it sits in a window: busy fake terminal text, the 0.35 scrim, and the card centered at the real
+    /// width/height rule. Real glass can't render offscreen, so the backing approximates it (black ~0.7 over
+    /// ultraThinMaterial): judges hierarchy, spacing, width use and contrast, not refraction.
+    private func popUp<V: View>(window: CGSize = CGSize(width: 1000, height: 780), @ViewBuilder _ content: () -> V) -> some View {
+        let w = min(HubPanelContent.width, window.width - 2 * HubOverlay.margin)
+        let h = min(window.height * HubOverlay.heightShare, HubOverlay.maxHeight)
+        return ZStack {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(0..<56, id: \.self) { i in
+                    Text("$ swift test --filter Hub\(i) … Test run with \(320 + i) tests passed after 0.\(i)s in suite HubSnapshotTests")
+                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(.green.opacity(0.8)).lineLimit(1)
+                }
+            }.frame(width: window.width, height: window.height, alignment: .topLeading).clipped()
+            Color.black.opacity(0.35)
+            content()
+                .frame(width: w, height: h)
+                .background(Color.black.opacity(0.7), in: HubOverlay.shape)
+                .background(.ultraThinMaterial, in: HubOverlay.shape)
+                .overlay(HubOverlay.shape.strokeBorder(Theme.hubCardStroke, lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.45), radius: 30, y: 12)
+        }
+    }
+
+    @Test func crewTab() throws {
+        try snapshot("hub-crew", width: HubPanelContent.width) {
+            HubPanelContent(groups: [], allSeats: [lead], filter: .constant(.crew), now: Self.now, actions: actions,
+                            crew: crewSnapshot, crewNotice: "Copied")
+        }
+    }
+
+    @Test func crewCard() throws {
+        try snapshot("hub-crew-card", width: 1000, height: 780) {
+            popUp {
+                HubPanelContent(groups: [], allSeats: [lead], filter: .constant(.crew), now: Self.now, actions: actions,
+                                crew: crewSnapshot, crewNotice: "Copied")
+            }
+        }
+    }
+
+    @Test func seatsCard() throws {
+        try snapshot("hub-seats-card", width: 1000, height: 780) {
+            popUp { hub(groups: groups(seatsOnly: true), seats: [lead, helper, cfo], seatsOnly: true) }
+        }
+    }
+
+    @Test func allCard() throws {
+        try snapshot("hub-all-card", width: 1000, height: 780) {
+            popUp { hub(groups: groups(), seats: [lead, helper, cfo]) }
+        }
     }
 
     @Test func builderColour() throws {

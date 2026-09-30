@@ -4,7 +4,7 @@ import AppKit
 /// runs there (PaneDelivery is the one door), else copy it. Returns the notice to show, nil on success.
 @MainActor
 enum CrewDelivery {
-    static let copiedNotice = "Copied: no Claude pane focused"
+    static let copiedNotice = "Copied. Paste it into a Claude pane."
 
     static func pick(_ agent: CrewAgent, workspace: WorkspaceModel = .shared) -> String? {
         let text = CrewStarter.text(for: agent)

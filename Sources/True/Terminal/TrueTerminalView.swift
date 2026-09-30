@@ -462,6 +462,12 @@ final class TrueTerminalView: LocalProcessTerminalView {
                     WorkspaceModel.shared.selectTab(number: n)
                     return nil
                 }
+                // Esc closes the Hub pop-up and is consumed: reaching Claude Code it would interrupt a running turn.
+                if event.keyCode == 53, AgentRegistry.shared.panelOpen,
+                   event.window?.firstResponder is TrueTerminalView {
+                    AgentRegistry.shared.panelOpen = false
+                    return nil
+                }
                 if let term = event.window?.firstResponder as? TrueTerminalView,
                    event.charactersIgnoringModifiers?.contains("\r") == true {
                     term.onCommandSubmitted?()

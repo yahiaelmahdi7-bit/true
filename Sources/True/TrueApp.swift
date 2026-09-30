@@ -9,13 +9,9 @@ struct TrueApp: App {
 
     var body: some Scene {
         Window("True", id: "main") {
-            HStack(spacing: 0) {
-                TerminalArea(model: model)
-                if registry.panelOpen {
-                    Theme.hairline.frame(width: 1)
-                    HubPanel(registry: registry).transition(.move(edge: .trailing))
-                }
-            }
+            // The Hub is a centered pop-up over the terminal (HubOverlay: scrim + glass card); the terminal never resizes.
+            TerminalArea(model: model)
+                .overlay { HubOverlay(registry: registry) }
             // Content stays below the title-bar zone: on macOS 26 SwiftUI lays views out there under
             // `.ignoresSafeArea` but never paints them (a red test strip never reached the screen).
             // The tab numbers live in that zone as an AppKit-hosted view instead (`installTabs`).
@@ -56,7 +52,7 @@ struct TrueApp: App {
                     .keyboardShortcut("v", modifiers: [.command, .option])
             }
             CommandMenu("Hub") {
-                Button("Toggle Hub") { registry.panelOpen.toggle() }.keyboardShortcut("e")
+                Button(registry.panelOpen ? "Hide Hub" : "Show Hub") { registry.panelOpen.toggle() }.keyboardShortcut("e")
                 Button("Needs You") { NeedsYouQueue.shared.trayOpen.toggle() }
                     .keyboardShortcut("u", modifiers: [.command, .shift])
                 Divider()

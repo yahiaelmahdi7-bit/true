@@ -102,4 +102,18 @@ private func titles(_ g: [CrewGroup]) -> [String: [String]] {
     @Test func starterText() {
         #expect(CrewStarter.text(for: agent("true-swift-engineer")) == "Use the true-swift-engineer agent to ")
     }
+
+    @Test func displayNamesKeepRealIdInPrompt() {
+        let cto = agent("true-cto")
+        #expect(CrewDisplay.name("true-cto") == "CTO")
+        #expect(CrewDisplay.name("true-swift-engineer") == "Swift Engineer")
+        #expect(CrewDisplay.name("true-ui-designer") == "UI Designer")
+        #expect(CrewStarter.text(for: cto) == "Use the true-cto agent to ")
+        #expect(CrewDisplay.groupTitle("Lead") == "Leadership")
+        #expect(CrewDisplay.groupTitle("Everywhere") == "All projects")
+        #expect(CrewDisplay.model("inherit") == "Same model")
+        #expect(CrewDisplay.model("sonnet") == "Sonnet")
+        #expect(CrewDisplay.symbol(family: "Security") == "shield")
+        #expect(CrewDisplay.symbol(family: "Other") == "person")
+    }
 }

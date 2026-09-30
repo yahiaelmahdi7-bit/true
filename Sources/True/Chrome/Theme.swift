@@ -14,9 +14,9 @@ enum Theme {
     static let hairline = Color.white.opacity(0.10)
     static let text = Color.white.opacity(0.88)
     static let dimText = Color.white.opacity(0.38)
-    /// Hub-local secondary text: ≥4.5:1 on black at caption size (`dimText` is too faint for that and
-    /// the terminal chrome still uses it, so it is left alone).
-    static let hubSecondary = Color.white.opacity(0.60)
+    /// Hub-local secondary text: ~0.82 white keeps ≥7:1 even where the pop-up's tinted glass lets terminal
+    /// output bleed through (`dimText` is too faint for that and the terminal chrome still uses it, so it is left alone).
+    static let hubSecondary = Color.white.opacity(0.82)
     static let hubCardFill = Color.white.opacity(0.05)
     static let hubCardStroke = Color.white.opacity(0.08)
     static let hubHoverFill = Color.white.opacity(0.05)

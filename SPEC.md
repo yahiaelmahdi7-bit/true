@@ -261,6 +261,14 @@ exercised through injected runners in tests; HubPanel is not visually verified (
 
 **Asleep avatars:** fade to 10% saturation (in the gradient colours, not `.saturation()`, which ImageRenderer ignores) at 0.55 opacity — near grey, no brown.
 
+## Run 10 — Hub pop-up (as built, 2026-10-01; approved by Yahia)
+The Hub is a **centered pop-up over the terminal**, not a side panel: the terminal never resizes. `HubOverlay` = near-clear black scrim (takes the click that closes it) + a 600 pt card (`HubPanelContent.width`) at 80% of window height (`heightShare`, capped), radius 18, `.glassEffect(.regular.tint(.black.opacity(0.7)))` so text reads over busy output; the list scrolls inside. Closed, the overlay passes every click to the terminal.
+- **Open/close:** ⌘E (menu item reads "Show Hub" / "Hide Hub"); scrim click or **Esc** closes. Esc is consumed in `TrueTerminalView`'s key monitor while the Hub is open, so it never reaches Claude Code (where it interrupts a turn). Waking/focusing a seat or a crew pick that typed its starter closes it; "Copied" keeps it open so the notice shows.
+- **Header:** one row, "Hub" title + live one-line summary across every project; segmented filter **All / Agents / Crew** (UI says "Agents"; code keeps `HubFilter.seats`); New Agent and Close buttons.
+- **Crew:** display names drop the repo prefix (`true-cto` -> "CTO"; `CrewDisplay.name`), the starter prompt keeps the real id (Claude routes by it); global crew sits under "All projects", collapsed teams; avatars use the name-derived hue, faded as asleep; nothing outside the avatar is coloured. Copy fallback reads "Copied. Paste it into a Claude pane."
+- **Type/contrast:** `Theme.hubSecondary` 0.82 white (>=7:1 over the tinted glass); seat card avatar 44 pt, rows 52 pt with 32 pt avatars; sections are a quiet header + one soft card (`hubCardFill` 0.05 / `hubCardStroke` 0.08, radius 14).
+- Snapshots: `HubSnapshotTests` (skipped unless `TRUE_SNAPSHOT_DIR`); approved PNGs in `docs/design/hub-v4/` (hub-glass, then hub-v3, are the earlier rounds, kept for the record).
+
 ## Panes and layout
 - **Even tiling only.** Every add (split), close or drop re-evens the same-axis row/column it touched (1/2, then 1/3 each…); a stacked pair counts as one slot. Other rows keep their sizes; manual divider drags persist until the next add/close/drop in that row. No preset-layout menu.
 - **Pick up:** hovering the top-centre of a pane (only when the tab has 2+ panes) shows a small grip. Only the grip's own rect takes the mouse — terminal clicks, selection and scrolling are never intercepted. Detach = within this window and tab only.

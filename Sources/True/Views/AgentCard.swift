@@ -106,7 +106,7 @@ struct AgentCard: View {
         let showActions = hovering || forceHover
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                AgentAvatar(hue: agent.resolvedHue, symbol: agent.symbol, status: status, size: 40)
+                AgentAvatar(hue: agent.resolvedHue, symbol: agent.symbol, status: status, size: 44)
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(agent.name).font(.body.weight(.semibold)).foregroundStyle(Theme.text)
@@ -129,12 +129,12 @@ struct AgentCard: View {
                             Text(status.label).contentTransition(.opacity)
                         }
                     }
-                    .font(.caption).foregroundStyle(Theme.hubSecondary).lineLimit(1)
+                    .font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1)
                 }
             }
             if agent.role != .helper { messageField }
         }
-        .padding(12)
+        .padding(14)
         .background(Theme.hubCardFill, in: .rect(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hubCardStroke, lineWidth: 1))
         .contentShape(.rect(cornerRadius: 14, style: .continuous))
@@ -167,8 +167,8 @@ struct AgentCard: View {
     private var messageField: some View {
         HStack(spacing: 6) {
             TextField("Message \(agent.name)…", text: $message)
-                .textFieldStyle(.plain).font(.callout).onSubmit(send)
-            if let note { Text(note).font(.caption).foregroundStyle(Theme.hubSecondary).lineLimit(1) }
+                .textFieldStyle(.plain).font(.body).onSubmit(send)
+            if let note { Text(note).font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1) }
             if !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button(action: send) {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 20)).foregroundStyle(.white)
@@ -176,7 +176,7 @@ struct AgentCard: View {
                 .buttonStyle(.plain).help("Send").transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
         }
-        .padding(.leading, 12).padding(.trailing, 4).frame(minHeight: 28)
+        .padding(.leading, 14).padding(.trailing, 4).frame(minHeight: 32)
         .background(Color.white.opacity(0.06), in: .capsule)
         .overlay(Capsule().strokeBorder(Theme.hubCardStroke, lineWidth: 1))
         .animation(reduceMotion ? nil : .snappy, value: message.isEmpty)
