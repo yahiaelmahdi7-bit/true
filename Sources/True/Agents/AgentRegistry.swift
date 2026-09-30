@@ -70,6 +70,7 @@ final class AgentRegistry {
         self.claudeDir = claudeDir
         self.agents = store.load()
         workspace.onPaneClosed = { [weak self] pane in self?.paneClosed(pane) }
+        workspace.agentName = { [weak self] pane in self?.name(for: pane) }
         workspace.isAgentPane = { [weak self] pane in self?.name(for: pane) != nil }
     }
 
@@ -106,6 +107,12 @@ final class AgentRegistry {
 
     func handle(_ e: PaneEvent) {
         if e.kind == .session {
+            // Any pane's Claude (⌘↩ or typed by hand) reports its session id: that is the resume record.
+            let sid = e.message.trimmingCharacters(in: .whitespacesAndNewlines)
+            if name(for: e.pane) == nil, UUID(uuidString: sid) != nil,
+               let cwd = workspace.state.tabs.compactMap({ $0.cwds[e.pane] }).first {
+                workspace.setResume(.claude(sessionID: sid, cwd: cwd), pane: e.pane)
+            }
             guard let name = name(for: e.pane), let i = agents.firstIndex(where: { $0.name == name }) else { return }
             let id = e.message.trimmingCharacters(in: .whitespacesAndNewlines)
             if UUID(uuidString: id) != nil, agents[i].lastSessionID != id {

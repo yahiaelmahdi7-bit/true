@@ -66,6 +66,7 @@ struct EmbeddedTerminal: NSViewRepresentable {
                 try? await Task.sleep(for: .milliseconds(300))
                 WorkspaceModel.shared.refreshCwd(pane: pane)
             }
+            Task { @MainActor in SessionSnapshot.scheduleAfterReturn(pane: pane) }
         }
         TerminalRegistry.shared.register(paneID, term)
 

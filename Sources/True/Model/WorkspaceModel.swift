@@ -20,12 +20,23 @@ final class WorkspaceModel {
     /// Set by `AgentRegistry`: is this pane an agent's? Sleeping the only tab must not quit True.
     @ObservationIgnored var isAgentPane: ((UUID) -> Bool)?
 
+    /// Set by `AgentRegistry`: the awake agent that owns this pane, if any.
+    @ObservationIgnored var agentName: ((UUID) -> String?)?
+
     @ObservationIgnored private let store: WorkspaceStore
+    /// After the quit-time snapshot the shells die and each one's exit would close its pane; a frozen model
+    /// ignores those, so the final workspace.json is the one that gets restored.
+    @ObservationIgnored private var frozen = false
     @ObservationIgnored private var saveTask: Task<Void, Never>?
 
-    init(store: WorkspaceStore = WorkspaceStore()) {
+    init(store: WorkspaceStore = WorkspaceStore(), claudeDir: URL = AgentLaunch.claudeConfigDir,
+         settings: String = AgentPaths.standard.paneSettingsPath, startup: PaneStartup = .shared) {
         self.store = store
-        self.state = store.load()
+        // Panes that had a Claude conversation restart it with --resume: register their one-shot startup
+        // commands now, before any view exists.
+        let plan = ResumePlan.apply(store.load(), claudeDir: claudeDir, settings: settings)
+        self.state = plan.state
+        for (pane, cmd) in plan.startups { startup.set(cmd, for: pane) }
     }
 
     // MARK: Queries
@@ -115,6 +126,7 @@ final class WorkspaceModel {
     func paneExited(_ pane: UUID) { close(pane: pane) }
 
     private func close(pane: UUID) {
+        guard !frozen else { return }
         guard let i = tabIndex(containing: pane) else { return }
         // Putting the last agent to sleep closes the last tab; keep a plain shell so that never quits True.
         if state.tabs.count == 1, state.tabs[i].tree.leafIDs.count == 1, isAgentPane?(pane) == true {
@@ -154,9 +166,32 @@ final class WorkspaceModel {
         for t in state.tabs { for p in t.tree.leafIDs { refreshCwd(pane: p) } }
     }
 
+    // MARK: Resume records
+
+    /// One pane's record, replaced or cleared. Saves only when something changed.
+    func setResume(_ r: PaneResume?, pane: UUID) {
+        guard let i = tabIndex(containing: pane), state.tabs[i].resume?[pane] != r else { return }
+        var m = state.tabs[i].resume ?? [:]
+        m[pane] = r
+        state.tabs[i].resume = m.isEmpty ? nil : m
+    }
+
+    /// Record what every pane is running. `probe` says whether a pane's shell is alive and which Claude
+    /// (if any) runs under it; a pane whose shell is gone keeps its previous record.
+    func recordResume(probe: (UUID) -> (alive: Bool, found: ClaudeSessions.Found?)) {
+        for t in state.tabs {
+            for p in t.tree.leafIDs {
+                let (alive, found) = probe(p)
+                setResume(SessionRecorder.decide(previous: t.resume?[p], agent: agentName?(p), alive: alive, found: found),
+                          pane: p)
+            }
+        }
+    }
+
     // MARK: Persistence
 
     private func scheduleSave() {
+        guard !frozen else { return }
         saveTask?.cancel()
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
@@ -165,7 +200,16 @@ final class WorkspaceModel {
         }
     }
 
+    /// Quit / window close: record what each pane runs, write the file, then ignore everything after.
+    func freeze(record: () -> Void) {
+        guard !frozen else { return }
+        record()
+        saveNow()
+        frozen = true
+    }
+
     func saveNow() {
+        guard !frozen else { return }
         saveTask?.cancel()
         syncCwdsFromLivePids()
         store.save(state)

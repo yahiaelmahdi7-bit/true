@@ -36,9 +36,15 @@ enum AgentLaunch {
         guard let id = a.lastSessionID?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty,
               UUID(uuidString: id) != nil else { return nil }
         let cwd = a.repo.isEmpty ? NSHomeDirectory() : a.repo   // a global with no folder boots in home
+        return transcriptExists(id: id, cwd: cwd, claudeDir: claudeDir) ? id : nil
+    }
+
+    /// Is there a transcript for session `id` under `cwd`? (`id` must already be trusted as a UUID.)
+    static func transcriptExists(id: String, cwd: String, claudeDir: URL = claudeConfigDir) -> Bool {
+        guard UUID(uuidString: id) != nil else { return false }
         let project = cwd.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
         let file = claudeDir.appendingPathComponent("projects/\(project)/\(id).jsonl").path
-        return FileManager.default.fileExists(atPath: file) ? id : nil
+        return FileManager.default.fileExists(atPath: file)
     }
 
     static var claudeConfigDir: URL {

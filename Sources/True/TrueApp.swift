@@ -84,6 +84,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            let icon = NSImage(contentsOf: url) {
             NSApp.applicationIconImage = icon
         }
+        // Closing the main window quits True, and its views may be dismantled before applicationShouldTerminate.
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil,
+                                               queue: .main) { n in
+            guard let w = n.object as? NSWindow, w.title == "True" else { return }
+            Task { @MainActor in SessionSnapshot.atQuit() }
+        }
         NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil,
                                                queue: .main) { n in
             guard let w = n.object as? NSWindow else { return }
@@ -105,6 +111,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         KeepAwake.shared.follow(AgentRegistry.shared)
         // One kqueue watch on the screenshot folder: 0% CPU when idle, and it is what makes "fresh" possible.
         ScreenshotWatcher.shared.start()
+    }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Before any view is torn down: the shells are still alive, so their Claude children can be found.
+        SessionSnapshot.atQuit()
+        return .terminateNow
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationWillTerminate(_ notification: Notification) {

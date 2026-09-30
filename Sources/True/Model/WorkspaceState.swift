@@ -9,6 +9,9 @@ struct TabState: Codable, Equatable, Identifiable, Sendable {
     var focusedPane: UUID
     /// Last known working directory per pane. Drives the tab title and where a restored shell starts.
     var cwds: [UUID: String]
+    /// What to bring back in a pane on the next launch (a Claude conversation, or an awake agent).
+    /// Optional so a workspace.json written before this field existed still decodes.
+    var resume: [UUID: PaneResume]?
 
     init(id: UUID = UUID(), customName: String? = nil, pane: UUID = UUID(), cwd: String) {
         self.id = id
@@ -114,6 +117,7 @@ struct WorkspaceState: Codable, Equatable, Sendable {
             let old = tab.tree.leafIDs
             t.tree = newTree
             t.cwds[pane] = nil
+            t.resume?[pane] = nil
             if t.focusedPane == pane {
                 let idx = old.firstIndex(of: pane) ?? 0
                 let remaining = newTree.leafIDs

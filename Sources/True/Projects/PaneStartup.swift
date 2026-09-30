@@ -1,8 +1,9 @@
 import Foundation
 
 /// A one-shot "run this instead of a bare shell" for a pane about to be created. Consumed by
-/// `EmbeddedTerminal.makeNSView` and never persisted, so a restored tab is always a plain shell.
-/// (Not an agent: no `launchSpecs`, no `TRUE_AGENT`, never counted by `isAgentPane`.)
+/// `EmbeddedTerminal.makeNSView` and never persisted. A restored pane is a plain shell unless the
+/// workspace recorded a Claude conversation for it, in which case `WorkspaceModel.init` registers a
+/// `--resume` command here before any view exists. (Not an agent: no `launchSpecs`, no `TRUE_AGENT`, never counted by `isAgentPane`.)
 @MainActor
 final class PaneStartup {
     static let shared = PaneStartup()
@@ -18,6 +19,12 @@ final class PaneStartup {
     /// hook layer (on top of the user's own settings) so the session reports Working/Needs you/Done.
     nonisolated static func claudeCommand(settings: String) -> String {
         "claude --settings \(AgentLaunch.shellQuote(settings)); exec \"${SHELL:-/bin/zsh}\" -l"
+    }
+
+    /// Resume a recorded conversation in its pane; nil unless `sessionID` is a UUID (it goes into a shell line).
+    nonisolated static func resumeCommand(sessionID: String, settings: String) -> String? {
+        guard UUID(uuidString: sessionID) != nil else { return nil }
+        return "claude --resume \(sessionID) --settings \(AgentLaunch.shellQuote(settings)); exec \"${SHELL:-/bin/zsh}\" -l"
     }
 
     /// The shell argv that runs `command`.
