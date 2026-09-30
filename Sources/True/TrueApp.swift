@@ -26,6 +26,7 @@ struct TrueApp: App {
             .overlay { ProjectPaletteHost() }
             .sheet(item: Bindable(registry).builder) { AgentBuilderSheet(draft: $0, registry: registry) }
             .sheet(isPresented: Bindable(ContextCleaner.shared).isOpen) { CleanerSheet(cleaner: ContextCleaner.shared) }
+            .sheet(isPresented: Bindable(ResultsStore.shared).isOpen) { ResultsSheet(store: ResultsStore.shared) }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentMinSize)
@@ -61,6 +62,8 @@ struct TrueApp: App {
                 Divider()
                 Button("New Agent…") { registry.panelOpen = true; registry.builder = BuilderDraft() }
                 Button("Context Cleaner…") { ContextCleaner.shared.isOpen = true }
+                Button("Show Results") { ResultsStore.shared.open() }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
             }
             CommandMenu("Tabs") {
                 Button("Next Tab") { model.cycleTab(by: 1) }.keyboardShortcut("]", modifiers: [.command, .shift])

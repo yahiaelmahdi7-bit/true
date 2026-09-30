@@ -39,12 +39,17 @@ enum AgentLaunch {
         return transcriptExists(id: id, cwd: cwd, claudeDir: claudeDir) ? id : nil
     }
 
+    /// Where Claude Code keeps session `id`'s transcript for `cwd`: `<claudeDir>/projects/<slugged cwd>/<id>.jsonl`.
+    /// The one slug rule (`/` and `.` become `-`); PaneResume's check and the Results sheet both use it.
+    static func transcriptURL(id: String, cwd: String, claudeDir: URL = claudeConfigDir) -> URL {
+        let project = cwd.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
+        return claudeDir.appendingPathComponent("projects/\(project)/\(id).jsonl")
+    }
+
     /// Is there a transcript for session `id` under `cwd`? (`id` must already be trusted as a UUID.)
     static func transcriptExists(id: String, cwd: String, claudeDir: URL = claudeConfigDir) -> Bool {
         guard UUID(uuidString: id) != nil else { return false }
-        let project = cwd.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
-        let file = claudeDir.appendingPathComponent("projects/\(project)/\(id).jsonl").path
-        return FileManager.default.fileExists(atPath: file)
+        return FileManager.default.fileExists(atPath: transcriptURL(id: id, cwd: cwd, claudeDir: claudeDir).path)
     }
 
     static var claudeConfigDir: URL {
