@@ -146,3 +146,36 @@ private func tmp() -> URL {
         #expect(ws.selectedTab.resume == nil)
     }
 }
+
+@Suite @MainActor struct AgentRestoreTests {
+    @Test func awakeAgentsComeBackInTheSamePaneAndUnknownAreDropped() throws {
+        let dir = tmp()
+        let sid = "9176169f-0000-4000-8000-000000000002"
+        let proj = dir.appendingPathComponent("projects/-tmp-app")
+        try FileManager.default.createDirectory(at: proj, withIntermediateDirectories: true)
+        try Data().write(to: proj.appendingPathComponent("\(sid).jsonl"))
+        var a = Agent(name: "lead-app", role: .lead, repo: "/tmp/app")
+        a.lastSessionID = sid
+        let store = AgentStore(url: dir.appendingPathComponent("agents.json"))
+        store.save([a])
+
+        var s = WorkspaceState.fresh(cwd: "/tmp")
+        let p1 = s.tabs[0].focusedPane
+        let p2 = UUID()
+        s.tabs[0].tree = s.tabs[0].tree.inserting(p2, beside: p1, axis: .horizontal)
+        s.tabs[0].cwds[p2] = "/tmp"
+        s.tabs[0].resume = [p1: .agent(name: "lead-app"), p2: .agent(name: "ghost")]
+        let ws = WorkspaceModel(store: WorkspaceStore(url: dir.appendingPathComponent("w.json")),
+                                claudeDir: dir, startup: PaneStartup())
+        ws.state = s
+        let paths = AgentPaths(root: dir)
+        let reg = AgentRegistry(store: store, paths: paths, workspace: ws, claudeDir: dir)
+        #expect(reg.panes["lead-app"] == p1 && reg.isAwake("lead-app") && reg.statusOf("lead-app") == .idle)
+        let spec = try #require(reg.launchSpecs[p1])
+        #expect(spec.argv.suffix(2) == ["--resume", sid])
+        #expect(reg.panes["ghost"] == nil && reg.launchSpecs[p2] == nil)
+        #expect(ws.state.tabs.count == 1 && ws.state.tabs[0].tree.leafIDs == [p1, p2])
+        #expect(ws.state.tabs[0].resume?[p2] == nil)
+        #expect(ws.state.tabs[0].resume?[p1] == .agent(name: "lead-app"))
+    }
+}

@@ -72,6 +72,27 @@ final class AgentRegistry {
         workspace.onPaneClosed = { [weak self] pane in self?.paneClosed(pane) }
         workspace.agentName = { [weak self] pane in self?.name(for: pane) }
         workspace.isAgentPane = { [weak self] pane in self?.name(for: pane) != nil }
+        restore()
+    }
+
+    /// Agents that were awake when True quit come back awake, in the SAME pane (same tab, same split
+    /// position), resuming their session. Runs before the first render, so the pane's view is made with
+    /// its launch spec already set. An agent that no longer exists loses its record: a plain shell.
+    private func restore() {
+        for t in workspace.state.tabs {
+            for (pane, r) in t.resume ?? [:] {
+                guard case let .agent(name) = r else { continue }
+                guard panes[name] == nil, let a = agent(named: name) else {
+                    workspace.setResume(nil, pane: pane)
+                    continue
+                }
+                AgentHooks.install(for: a, all: agents, paths: paths)
+                let argv = AgentLaunch.argv(a, paths: paths, resumeID: AgentLaunch.resumeID(for: a, claudeDir: claudeDir))
+                launchSpecs[pane] = PaneLaunch(agent: a.name, argv: argv, shellCommand: AgentLaunch.shellCommand(argv: argv))
+                panes[name] = pane
+                status[name] = .idle
+            }
+        }
     }
 
     // MARK: Queries
@@ -144,6 +165,7 @@ final class AgentRegistry {
         launchSpecs[pane] = PaneLaunch(agent: a.name, argv: argv, shellCommand: AgentLaunch.shellCommand(argv: argv))
         panes[name] = pane
         status[name] = .idle
+        workspace.setResume(.agent(name: a.name), pane: pane)   // survives a crash, not just a clean quit
         return pane
     }
 
