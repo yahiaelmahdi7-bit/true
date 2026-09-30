@@ -91,6 +91,10 @@ struct EmbeddedTerminal: NSViewRepresentable {
             // but `truectl` has to resolve for the agent's Bash tool whatever they did to PATH.
             let bin = NSHomeDirectory() + "/.true/bin"
             env["PATH"] = env["PATH"].map { "\($0):\(bin)" } ?? bin
+        } else if let cmd = PaneStartup.shared.take(paneID) {
+            // Open Project ▸ with Claude: interactive login so the user's `claude` alias applies. NOT an agent
+            // (no TRUE_AGENT, no launch spec) and the command's own `exec $SHELL -l` keeps the pane alive.
+            args = PaneStartup.shellArgs(for: cmd)
         }
         term.startProcess(executable: shell, args: args,
                           environment: env.map { "\($0.key)=\($0.value)" },
@@ -111,7 +115,7 @@ struct EmbeddedTerminal: NSViewRepresentable {
             context.coordinator.appliedScrollback = sb
             term.getTerminal().changeScrollback(sb)
         }
-        if isFocused, let w = term.window, w.firstResponder !== term {
+        if isFocused, !ProjectPalette.shared.isOpen, let w = term.window, w.firstResponder !== term {
             w.makeFirstResponder(term)
         }
     }

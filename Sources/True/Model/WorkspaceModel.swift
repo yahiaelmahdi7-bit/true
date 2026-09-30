@@ -45,6 +45,15 @@ final class WorkspaceModel {
         _ = state.addTab(cwd: cwd)
     }
 
+    /// A new tab in `path` (Open Project). No custom name: the title falls back to the folder name.
+    /// `startupCommand` runs once in the new pane instead of a bare shell; it is never persisted.
+    @discardableResult
+    func openProject(path: String, startupCommand: String?) -> UUID {
+        let t = state.addTab(cwd: path)
+        if let c = startupCommand { PaneStartup.shared.set(c, for: t.focusedPane) }
+        return t.focusedPane
+    }
+
     /// An ordinary tab, named after the agent, that the registry then starts `claude` in.
     /// Returns the tab's (only) pane.
     @discardableResult

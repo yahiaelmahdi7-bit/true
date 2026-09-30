@@ -22,6 +22,7 @@ struct TrueApp: App {
             .background { Theme.background.ignoresSafeArea(); WindowConfigurator().frame(width: 0, height: 0) }
             .preferredColorScheme(.dark)
             .frame(minWidth: 480, minHeight: 300)
+            .overlay { ProjectPaletteHost() }
             .sheet(item: Bindable(registry).builder) { AgentBuilderSheet(draft: $0, registry: registry) }
         }
         .windowStyle(.hiddenTitleBar)
@@ -30,6 +31,7 @@ struct TrueApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Tab") { model.newTab() }.keyboardShortcut("t")
+                Button("Open Project…") { ProjectPalette.shared.toggle() }.keyboardShortcut("o")
                 Button("Close Pane") { model.closeFocusedPane() }.keyboardShortcut("w")
             }
             CommandMenu("Shell") {
