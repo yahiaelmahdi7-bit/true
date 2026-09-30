@@ -45,3 +45,6 @@ Owner: cto · Last verified: 2026-09-30
 
 ## 2026-09-30 — Screen stays awake while True is open
 - Superseded earlier rules ("no idle sleep while frontmost" → "only while an agent works" → "for as long as True is open", commit 8c09715). [source: git log]. Status: Latest wins.
+
+## 2026-09-30 — Colour lives only in agent avatars (Run 8)
+- Decision: True is black & white; the single colour is the agent avatar's vivid gradient disc = identity (hue from name via FNV-1a unless chosen). Tier = brightness; status = monochrome. Supersedes the teal/blue/purple/gold tier colours. [source: SPEC.md Run 8]. Status: Accepted.

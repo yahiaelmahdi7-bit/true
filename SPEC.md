@@ -78,7 +78,7 @@ to four **helpers** (`helper-1-<repo>` … `helper-4-<repo>`), the naming Axon's
    Lift the ideas + role cards from Axon `Sources/Axon/Crew/SeatRoles.swift` and `CrewModels.swift`.
 2. **Agents panel** (⌘E toggles; trailing sidebar, Liquid Glass). Grouped by repo, lead first.
    Each agent is a **character card**: SF Symbol avatar (lead `crown`, helper `hammer` by default),
-   a tier colour by model (haiku teal · sonnet blue · opus purple · fable gold), effort shown as a
+   a model tier shown as brightness (`AgentModel.tint`, monochrome; colour is reserved for the avatar — see Run 8), effort shown as a
    5-step meter, a permission badge, and a status pill: Asleep / Working / Needs you / Done / Idle.
 3. **Character builder** (sheet from "+" or Edit): a live card preview on the left that updates as you
    change fields on the right. Fields: repo (folder picker; name auto-fills `lead-<repo>` or the next
@@ -210,3 +210,18 @@ the builder branch. App NOT launched/quit/killed (the orchestrating session runs
 listed above); `truectl status --json` prints the raw reply including `hub`. Helpers are refused for
 `spawn`. `ControlResponse` gained `hub` and `builderID`. `systemRunner` (real builder launch) is only
 exercised through injected runners in tests; HubPanel is not visually verified (app not launched).
+
+## Run 8 — Hub design pass (monochrome + one colour)
+**Goal (Yahia, 2026-09-30):** Hub on par with Apple-level design, keeping the minimal black-and-white look, with a pop of vibrant colour for agent profile pictures.
+
+**Doctrine:** True is black & white. Colour exists in exactly ONE place — agent avatars — and it means *identity*, never state. Model tier stays brightness (`AgentModel.tint`); status stays monochrome (the presence dot + word carry it).
+
+**As built**
+- `Views/AgentAvatar.swift`: `AgentHue` (10 hue-adjacent gradients; FNV-1a 32-bit of the name mod 10 when unset, never `hashValue`), `AgentAvatar` (gradient disc + specular + glass edge + glyph; asleep = desaturated/dim, working = breathing glow (static under Reduce Motion), needsYou = glow + white ring; presence dot; optional parent ring). Other sessions get a grey disc.
+- `Agent.hue: String?` (optional, old JSON decodes); Agent Builder gets a Colour row (10 swatches) and a 56 pt live preview.
+- Hub: header without divider, seat card is the only container (radius 14), attention pill only for needsYou/failed, hover/context-menu/VoiceOver actions, iMessage-style message capsule, lighter 44 pt Background/Other rows, 340 pt wide. `HubPanel` (store-bound) → `HubPanelContent` (pure view) + `SeatActions` closures seam so it renders from fixtures.
+- Snapshot harness `Tests/TrueTests/HubSnapshotTests.swift` (skipped unless `TRUE_SNAPSHOT_DIR`); PNGs in `docs/design/hub-v2/`.
+
+**Deviations:** ringed avatars keep the same outer footprint (the disc shrinks 8 pt inside the ring) so a column of rows stays aligned; "New Agent" empty-state button is a custom white capsule (`.borderedProminent` dims in a non-key window); XCTest is unavailable with the CLT toolchain so the harness uses swift-testing with `.enabled(if:)`.
+
+**Snapshots cannot show:** hover reveal, the breathing animation, row insert/remove transitions, real Liquid Glass; the message capsule shows faint edge ticks from the offscreen text field (not seen as a design issue, unverified live).

@@ -50,7 +50,13 @@ struct HubPanelContent: View {
                 } description: {
                     Text("Agents start asleep. Build your first one.")
                 } actions: {
-                    Button("New Agent", action: onNew).buttonStyle(.borderedProminent).tint(.white).foregroundStyle(.black)
+                    // Custom (not .borderedProminent): prominent buttons dim when the window isn't key. Same inverted
+                    // white-on-black device as the attention pill.
+                    Button(action: onNew) {
+                        Text("New Agent").font(.callout.weight(.semibold)).foregroundStyle(.black)
+                            .padding(.horizontal, 16).padding(.vertical, 6).background(.white, in: .capsule)
+                    }
+                    .buttonStyle(.plain)
                 }
             } else if groups.isEmpty {
                 ContentUnavailableView("Nothing running", systemImage: "moon.zzz",

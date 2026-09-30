@@ -72,19 +72,20 @@ struct AgentAvatar: View {
     @State private var breathe = false
 
     private var ringGap: CGFloat { 2 }
+    private var ringed: Bool { parentHue != nil || (status == .needsYou && hue != nil) }
     private var lit: Bool { status != .asleep }
     private var glows: Bool { hue != nil && (status == .working || status == .needsYou) }
 
     var body: some View {
-        let ringed = parentHue != nil || (status == .needsYou && hue != nil)
+        // The outer footprint is always `size`: a ring shrinks the disc inside it (2pt ring + 2pt gap each side),
+        // so ringed and unringed avatars line up in a column.
         ZStack {
             disc
-                .padding(ringed ? ringGap + 2 : 0)
             if let ring = ringColor {
                 Circle().strokeBorder(ring, lineWidth: 2)
             }
         }
-        .frame(width: size + (ringed ? 8 : 0), height: size + (ringed ? 8 : 0))
+        .frame(width: size, height: size)
         .overlay(alignment: .bottomTrailing) { if showsPresence && hue != nil { presence } }
         .accessibilityHidden(true)
     }
@@ -95,7 +96,7 @@ struct AgentAvatar: View {
     }
 
     @ViewBuilder private var disc: some View {
-        let d = size
+        let d = size - (ringed ? (ringGap + 2) * 2 : 0)
         ZStack {
             if let hue {
                 Circle().fill(hue.gradient)
