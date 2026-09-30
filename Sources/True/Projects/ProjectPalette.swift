@@ -108,7 +108,7 @@ final class ProjectPalette {
         store.save(config)
         isOpen = false
         generation += 1
-        workspace.openProject(path: p.path, startupCommand: withClaude ? PaneStartup.claudeCommand : nil)
+        workspace.openProject(path: p.path, startupCommand: withClaude ? PaneStartup.claudeCommand(settings: AgentPaths.standard.paneSettingsPath) : nil)
         refocusTerminal()
     }
 

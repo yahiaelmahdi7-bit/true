@@ -14,8 +14,11 @@ final class PaneStartup {
     func take(_ pane: UUID) -> String? { commands.removeValue(forKey: pane) }
 
     /// Login + interactive so the user's `claude` alias (claude-burn) and PATH apply. When claude exits,
-    /// the pane becomes a normal login shell in the repo instead of closing.
-    nonisolated static let claudeCommand = #"claude; exec "$SHELL" -l"#
+    /// the pane becomes a normal login shell in the repo instead of closing. `--settings` adds True's
+    /// hook layer (on top of the user's own settings) so the session reports Working/Needs you/Done.
+    nonisolated static func claudeCommand(settings: String) -> String {
+        "claude --settings \(AgentLaunch.shellQuote(settings)); exec \"${SHELL:-/bin/zsh}\" -l"
+    }
 
     /// The shell argv that runs `command`.
     nonisolated static func shellArgs(for command: String) -> [String] { ["-l", "-i", "-c", command] }

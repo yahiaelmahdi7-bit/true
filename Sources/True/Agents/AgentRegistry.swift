@@ -48,6 +48,9 @@ final class AgentRegistry {
     private(set) var panes: [String: UUID] = [:]
     private(set) var status: [String: AgentStatus] = [:]
     private(set) var latest: [UUID: PaneEvent] = [:]
+    /// Every hook-reporting pane's status, named agent or not (a ⌘↩ project tab reports too).
+    /// KeepAwake reads this; `status` above stays the by-name view the cards show.
+    private(set) var paneStatus: [UUID: AgentStatus] = [:]
     @ObservationIgnored private(set) var launchSpecs: [UUID: PaneLaunch] = [:]
     var panelOpen = false
     /// The builder sheet's draft; non-nil = sheet showing.
@@ -114,6 +117,7 @@ final class AgentRegistry {
             return
         }
         latest[e.pane] = e
+        paneStatus[e.pane] = AgentStatus.next(after: e.kind, from: paneStatus[e.pane] ?? .idle)
         if let name = name(for: e.pane) {
             status[name] = AgentStatus.next(after: e.kind, from: statusOf(name))
         }
@@ -155,6 +159,7 @@ final class AgentRegistry {
     func paneClosed(_ pane: UUID) {
         launchSpecs[pane] = nil
         latest[pane] = nil
+        paneStatus[pane] = nil
         if let n = name(for: pane) {
             panes[n] = nil
             status[n] = nil

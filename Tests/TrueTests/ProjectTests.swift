@@ -211,9 +211,15 @@ private func proj(_ name: String, parent: String = "~/Projects") -> Project {
 
 @Suite struct PaneStartupTests {
     @Test func claudeCommandKeepsAShellAfterClaudeExits() {
-        #expect(PaneStartup.claudeCommand == #"claude; exec "$SHELL" -l"#)
-        #expect(PaneStartup.shellArgs(for: PaneStartup.claudeCommand)
-                == ["-l", "-i", "-c", #"claude; exec "$SHELL" -l"#])
+        let cmd = PaneStartup.claudeCommand(settings: "/Users/me/.true/hooks/pane.settings.json")
+        #expect(cmd == #"claude --settings '/Users/me/.true/hooks/pane.settings.json'; exec "${SHELL:-/bin/zsh}" -l"#)
+        #expect(PaneStartup.shellArgs(for: cmd) == ["-l", "-i", "-c", cmd])
+    }
+
+    /// A path with a quote or space still reaches claude as one argument.
+    @Test func claudeCommandQuotesTheSettingsPath() {
+        #expect(PaneStartup.claudeCommand(settings: "/tmp/it's here.json")
+                .hasPrefix(#"claude --settings '/tmp/it'\''s here.json'; "#))
     }
 
     @Test @MainActor func startupCommandIsConsumedOnce() {

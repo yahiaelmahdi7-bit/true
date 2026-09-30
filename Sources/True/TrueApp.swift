@@ -100,8 +100,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controlSocket = AgentControlSocket(path: AgentPaths.standard.controlSocketPath, registry: AgentRegistry.shared)
         _ = controlSocket?.start()
         AgentHooks.installClient(paths: AgentPaths.standard)   // the door's client, before any agent wakes
-        // No idle sleep while True is frontmost: a driven session must outlast an AFK user.
-        KeepAwake.shared.follow(NSApplication.shared)
+        AgentHooks.installPaneHooks(paths: AgentPaths.standard)  // two small files, rewritten only if stale
+        // Screen stays on (so it never locks) only while some agent is working or waiting on you.
+        KeepAwake.shared.follow(AgentRegistry.shared)
         // One kqueue watch on the screenshot folder: 0% CPU when idle, and it is what makes "fresh" possible.
         ScreenshotWatcher.shared.start()
     }

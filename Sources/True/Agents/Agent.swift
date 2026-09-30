@@ -226,6 +226,8 @@ struct AgentPaths: Sendable {
     private func safe(_ name: String) -> String {
         String(name.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "_" })
     }
+    /// The hooks layer for a plain pane that runs claude (⌘↩ in the project palette): same forwarder, no agent.
+    var paneSettingsPath: String { hooksDir.appendingPathComponent("pane.settings.json").path }
     func settingsPath(_ name: String) -> String { hooksDir.appendingPathComponent("\(safe(name)).settings.json").path }
     func rolePath(_ name: String) -> String { rolesDir.appendingPathComponent("\(safe(name)).md").path }
 }

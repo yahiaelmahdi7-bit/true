@@ -32,6 +32,14 @@ enum AgentHooks {
         write(paths.truectlPath, AgentControl.truectl(socketPath: paths.controlSocketPath), executable: true)
     }
 
+    /// The forwarder plus the agent-less settings layer, so a ⌘↩ tab's claude reports status (and
+    /// keeps the screen on while it works) before any named agent has ever woken. Rewrites only if stale.
+    static func installPaneHooks(paths: AgentPaths) {
+        try? FileManager.default.createDirectory(at: paths.hooksDir, withIntermediateDirectories: true)
+        write(paths.forwarderPath, forwarder(socketPath: paths.socketPath), executable: true)
+        write(paths.paneSettingsPath, settingsJSON(paths: paths), executable: false)
+    }
+
     private static func write(_ path: String, _ content: String, executable: Bool) {
         if FileManager.default.contents(atPath: path).flatMap({ String(data: $0, encoding: .utf8) }) != content {
             try? content.write(toFile: path, atomically: true, encoding: .utf8)
