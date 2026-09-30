@@ -140,3 +140,35 @@ import Foundation
         #expect(d == ["bar"])
     }
 }
+
+/// The real runner against real processes (stand-ins for `claude`): pipe draining, timeout, exit errors.
+@Suite struct ProcessCleanerRunnerLiveTests {
+    private let runner = ProcessCleanerRunner()
+    private let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+
+    @Test func roundTripsInputBiggerThanAPipeBuffer() async throws {
+        let big = String(repeating: "0123456789abcdef\n", count: 64_000)   // ~1 MB, 16× a pipe buffer
+        let out = try await runner.run(binary: URL(fileURLWithPath: "/bin/cat"), argv: [], stdin: Data(big.utf8),
+                                       cwd: tmp, env: [:], timeout: 30)
+        #expect(out == big)
+    }
+
+    @Test func timeoutTerminatesTheChild() async {
+        let start = Date()
+        await #expect(throws: CleanerError.self) {
+            try await runner.run(binary: URL(fileURLWithPath: "/bin/sleep"), argv: ["20"], stdin: Data(),
+                                 cwd: tmp, env: [:], timeout: 0.5)
+        }
+        #expect(Date().timeIntervalSince(start) < 5)
+    }
+
+    @Test func nonZeroExitCarriesTheStderrTail() async {
+        do {
+            _ = try await runner.run(binary: URL(fileURLWithPath: "/bin/sh"), argv: ["-c", "echo boom >&2; exit 3"],
+                                     stdin: Data(), cwd: tmp, env: [:], timeout: 10)
+            Issue.record("expected an error")
+        } catch let e as CleanerError {
+            #expect(e.message == "claude exited 3: boom")
+        } catch { Issue.record("wrong error \(error)") }
+    }
+}
