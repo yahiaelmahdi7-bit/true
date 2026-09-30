@@ -205,3 +205,8 @@ fixtures · builder meta per status · spawn parse/validate · builder command a
 card contains the spawn guidance · hub grouping / sort / counts.
 **Done =** suite green (paste output), `scripts/package.sh` builds True.app in the worktree, commits on
 the builder branch. App NOT launched/quit/killed (the orchestrating session runs inside True). No merge.
+
+**Run 7 notes (as built):** `truectl status` text prints hub lines only for non-seat rows (seats are already
+listed above); `truectl status --json` prints the raw reply including `hub`. Helpers are refused for
+`spawn`. `ControlResponse` gained `hub` and `builderID`. `systemRunner` (real builder launch) is only
+exercised through injected runners in tests; HubPanel is not visually verified (app not launched).
