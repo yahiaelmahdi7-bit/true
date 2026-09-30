@@ -41,18 +41,20 @@ indirect enum SplitTree: Codable, Equatable, Sendable {
 
     /// Split `target` in two, putting `newPane` second (right of / below it). Returns self when
     /// `target` is not in the tree.
+    /// `before: true` puts it first instead (left of / above it).
     func inserting(_ newPane: UUID, beside target: UUID, axis: Axis,
-                   splitID: UUID = UUID(), fraction: Double = 0.5) -> SplitTree {
+                   splitID: UUID = UUID(), fraction: Double = 0.5, before: Bool = false) -> SplitTree {
         switch self {
         case .leaf(let id):
             guard id == target else { return self }
             return .split(id: splitID, axis: axis, fraction: fraction,
-                          first: .leaf(id), second: .leaf(newPane))
+                          first: before ? .leaf(newPane) : .leaf(id),
+                          second: before ? .leaf(id) : .leaf(newPane))
         case .split(let sid, let ax, let f, let a, let b):
             guard contains(target) else { return self }
             return .split(id: sid, axis: ax, fraction: f,
-                          first: a.inserting(newPane, beside: target, axis: axis, splitID: splitID, fraction: fraction),
-                          second: b.inserting(newPane, beside: target, axis: axis, splitID: splitID, fraction: fraction))
+                          first: a.inserting(newPane, beside: target, axis: axis, splitID: splitID, fraction: fraction, before: before),
+                          second: b.inserting(newPane, beside: target, axis: axis, splitID: splitID, fraction: fraction, before: before))
         }
     }
 
@@ -94,6 +96,72 @@ indirect enum SplitTree: Codable, Equatable, Sendable {
         if runContains(id, axis: ax) { return equalized(along: ax) }
         return .split(id: sid, axis: ax, fraction: f,
                       first: a.equalizing(split: id), second: b.equalizing(split: id))
+    }
+
+    // MARK: Even tiling (every add / close / drop re-evens the run it touched)
+
+    /// Which side of a target pane a drop lands on; `.center` swaps the two panes.
+    enum DropZone: Sendable, CaseIterable { case left, right, top, bottom, center }
+
+    /// `inserting`, then even out the run the new pane joined (a | b → 1/2, then 1/3 each…).
+    /// Other rows and columns keep their manual sizes.
+    func insertingEvened(_ newPane: UUID, beside target: UUID, axis: Axis, before: Bool = false) -> SplitTree {
+        let sid = UUID()
+        guard contains(target) else { return self }
+        return inserting(newPane, beside: target, axis: axis, splitID: sid, before: before).equalizing(split: sid)
+    }
+
+    /// `removing`, then even out the run the closed pane was in — and only that run.
+    func removingEvened(_ pane: UUID) -> SplitTree? {
+        guard let info = parentInfo(of: pane) else { return removing(pane) }
+        let out = removing(pane)
+        // The closed pane's parent (axis A) collapses into its sibling. The run that lost a slot is
+        // the one the parent belonged to (its own parent, if that also runs along A), or the
+        // sibling's own A-run when the sibling is itself an A-split.
+        if let gp = parentInfo(ofSplit: info.parent), gp.axis == info.axis { return out?.equalizing(split: gp.id) }
+        if case .split(let sid, let ax, _, _, _) = info.sibling, ax == info.axis { return out?.equalizing(split: sid) }
+        return out
+    }
+
+    /// Exchange two panes' places. Fractions don't change; leaf UUIDs stay with their panes.
+    func swapping(_ x: UUID, _ y: UUID) -> SplitTree {
+        guard x != y, contains(x), contains(y) else { return self }
+        return relabeled(x, y)
+    }
+
+    private func relabeled(_ x: UUID, _ y: UUID) -> SplitTree {
+        switch self {
+        case .leaf(let id): return .leaf(id == x ? y : (id == y ? x : id))
+        case .split(let sid, let ax, let f, let a, let b):
+            return .split(id: sid, axis: ax, fraction: f, first: a.relabeled(x, y), second: b.relabeled(x, y))
+        }
+    }
+
+    /// Drag-and-drop: move `pane` to `zone` of `target` (or swap with it for `.center`), re-evening
+    /// the run it left and the run it joined. Dropping a pane on itself changes nothing.
+    func moving(_ pane: UUID, onto target: UUID, zone: DropZone) -> SplitTree {
+        guard pane != target, contains(pane), contains(target) else { return self }
+        if zone == .center { return swapping(pane, target) }
+        guard let rest = removingEvened(pane) else { return self }
+        let axis: Axis = (zone == .left || zone == .right) ? .horizontal : .vertical
+        return rest.insertingEvened(pane, beside: target, axis: axis, before: zone == .left || zone == .top)
+    }
+
+    private struct ParentInfo { var id: UUID; var axis: Axis; var parent: UUID; var sibling: SplitTree }
+
+    /// The split directly above leaf `pane`, with its sibling subtree. `parent` mirrors `id`.
+    private func parentInfo(of pane: UUID) -> ParentInfo? {
+        guard case .split(let sid, let ax, _, let a, let b) = self else { return nil }
+        if case .leaf(let id) = a, id == pane { return ParentInfo(id: sid, axis: ax, parent: sid, sibling: b) }
+        if case .leaf(let id) = b, id == pane { return ParentInfo(id: sid, axis: ax, parent: sid, sibling: a) }
+        return a.parentInfo(of: pane) ?? b.parentInfo(of: pane)
+    }
+
+    /// The split directly above split `child` (id + axis), if any.
+    private func parentInfo(ofSplit child: UUID) -> (id: UUID, axis: Axis)? {
+        guard case .split(let sid, let ax, _, let a, let b) = self else { return nil }
+        for n in [a, b] { if case .split(let cid, _, _, _, _) = n, cid == child { return (sid, ax) } }
+        return a.parentInfo(ofSplit: child) ?? b.parentInfo(ofSplit: child)
     }
 
     /// Whether split `id` is this split or sits below it through splits of `axis` only.

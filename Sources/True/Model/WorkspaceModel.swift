@@ -130,7 +130,7 @@ final class WorkspaceModel {
         let new = UUID()
         refreshCwd(pane: tab.focusedPane)
         let dir = cwd ?? state.tabs[i].cwds[tab.focusedPane] ?? NSHomeDirectory()
-        state.tabs[i].tree = tab.tree.inserting(new, beside: tab.focusedPane, axis: axis)
+        state.tabs[i].tree = tab.tree.insertingEvened(new, beside: tab.focusedPane, axis: axis)
         state.tabs[i].cwds[new] = dir
         state.tabs[i].focusedPane = new
         return new
@@ -167,6 +167,16 @@ final class WorkspaceModel {
     func setFraction(_ f: Double, split: UUID, tab: UUID) {
         guard let i = index(of: tab) else { return }
         state.tabs[i].tree = state.tabs[i].tree.settingFraction(f, forSplit: split)
+    }
+
+    /// Drag-and-drop inside one tab: move `pane` to `zone` of `target`, or swap with it (`.center`).
+    /// Only the tree changes — pane UUIDs, cwds and resume records are untouched, and `TerminalArea`
+    /// keys terminals by UUID, so the running process and scrollback ride along. The mover is focused.
+    func movePane(_ pane: UUID, onto target: UUID, zone: SplitTree.DropZone) {
+        guard !frozen, pane != target, let i = tabIndex(containing: pane), tabIndex(containing: target) == i else { return }
+        let moved = state.tabs[i].tree.moving(pane, onto: target, zone: zone)
+        if moved != state.tabs[i].tree { state.tabs[i].tree = moved }
+        state.tabs[i].focusedPane = pane
     }
 
     /// Even out the row or column a divider belongs to (double-click on it).

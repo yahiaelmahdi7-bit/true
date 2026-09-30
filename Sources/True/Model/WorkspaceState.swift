@@ -114,7 +114,7 @@ struct WorkspaceState: Codable, Equatable, Sendable {
     mutating func closePane(_ pane: UUID, inTab tabID: UUID) -> Bool {
         guard let i = tabs.firstIndex(where: { $0.id == tabID }) else { return !tabs.isEmpty }
         let tab = tabs[i]
-        if let newTree = tab.tree.removing(pane) {
+        if let newTree = tab.tree.removingEvened(pane) {
             var t = tab
             // Focus the pane that took the space — the previous leaf in reading order.
             let old = tab.tree.leafIDs
