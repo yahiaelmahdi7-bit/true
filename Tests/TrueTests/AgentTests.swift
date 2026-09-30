@@ -222,22 +222,6 @@ private func tempDir() -> URL {
         return (reg, ws, store)
     }
 
-    /// A plain ⌘↩ tab is no named agent, but its hooks still drive paneStatus (what KeepAwake reads),
-    /// and closing the tab forgets it, so a closed tab can never pin the screen on.
-    @Test func unnamedPaneStatusFollowsEventsAndClose() {
-        let (reg, _, _) = make()
-        let pane = UUID()
-        reg.handle(PaneEvent(pane: pane, kind: .progress, message: "prompt", at: Date()))
-        #expect(reg.paneStatus[pane] == .working)
-        #expect(KeepAwake.shouldHold(reg.paneStatus.values))
-        reg.handle(PaneEvent(pane: pane, kind: .stop, message: "", at: Date()))
-        #expect(!KeepAwake.shouldHold(reg.paneStatus.values))
-        reg.handle(PaneEvent(pane: pane, kind: .progress, message: "Bash", at: Date()))
-        reg.paneClosed(pane)
-        #expect(reg.paneStatus[pane] == nil)
-        #expect(!KeepAwake.shouldHold(reg.paneStatus.values))
-    }
-
     @Test func statusTable() {
         typealias S = AgentStatus
         #expect(S.next(after: .progress, from: .idle) == .working)

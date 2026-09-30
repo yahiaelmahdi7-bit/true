@@ -112,8 +112,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The Hub's data: one directory scan plus a few kqueue watches on ~/.claude/sessions and
         // ~/.claude/builders — event-driven, 0% CPU when idle, no timer. Read-only; never opens *.key.
         HubStore.shared.start()
-        // Screen stays on (so it never locks) only while some agent is working or waiting on you.
-        KeepAwake.shared.follow(AgentRegistry.shared)
+        // Screen stays on (so it never locks) for as long as True is open; released by the exit itself.
+        KeepAwake.shared.hold()
         // One kqueue watch on the screenshot folder: 0% CPU when idle, and it is what makes "fresh" possible.
         ScreenshotWatcher.shared.start()
     }
