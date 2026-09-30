@@ -36,6 +36,10 @@ struct TrueApp: App {
                 Button("Open Project…") { ProjectPalette.shared.toggle() }.keyboardShortcut("o")
                 Button("Close Pane") { model.closeFocusedPane() }.keyboardShortcut("w")
             }
+            CommandGroup(after: .appInfo) {
+                Button("Restart to Update") { BuildFreshnessWatcher.shared.requestRestart() }
+                    .disabled(!BuildFreshnessWatcher.shared.offersRestart)
+            }
             CommandMenu("Shell") {
                 Button("Split Right") { model.splitFocused(.horizontal) }.keyboardShortcut("d")
                 Button("Split Down") { model.splitFocused(.vertical) }.keyboardShortcut("d", modifiers: [.command, .shift])
@@ -122,6 +126,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         WorkAwake.shared.start()
         // One kqueue watch on the screenshot folder: 0% CPU when idle, and it is what makes "fresh" possible.
         ScreenshotWatcher.shared.start()
+        // One vnode watch on our own executable (+ one stat on activation): 0% idle. It only flips a flag that
+        // shows the "Restart to update" pill; it never restarts anything by itself.
+        BuildFreshnessWatcher.shared.start()
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // Before any view is torn down: the shells are still alive, so their Claude children can be found.
