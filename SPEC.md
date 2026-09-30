@@ -151,3 +151,57 @@ the workflow. Jev slow/down/keyless never breaks anything: every path falls thro
 - **Tests:** all with injected transport/key provider (no network, no Keychain): JevClientTests,
   CleanerFactCheckTests, CleanerOrderingTests, JevFillTests. `JevLiveTests` (one noul, choice, score round
   trip) run only with `JEV_LIVE=1`; the builder never ran them.
+
+## Run 7 — The Hub (every session, every project, live) + background helpers
+
+**Goal:** one place in True showing every Claude session on this Mac, grouped by project, with live
+status — and a lead can launch background helpers (detached `builder` runs) that appear there.
+Pure code, no Jev: the hub is deterministic (code owns it — that IS the doctrine).
+
+**Sources (read-only; never display or read `*.key` files):**
+1. `AgentRegistry` — seats + hook-event status (existing).
+2. Peer registry `~/.claude/sessions/*.json` — fields seen: pid, sessionId, cwd, startedAt, kind,
+   entrypoint, name, status (busy|idle), updatedAt. Alive = `kill(pid, 0)` succeeds or EPERM.
+3. Builders `~/.claude/builders/<id>/meta.json` — id, name, cwd, origin_cwd, worktree, branch, model,
+   budget_usd, session_id, supervisor_pid, claude_pid, started, … Read `~/.claude/bin/builder` for the
+   real status semantics (running / finished / failed / acked) and where the result lives. Show running,
+   finished-not-acked, and anything finished < 24h ago.
+
+**Project key:** `<X>.builders/<id>` → `<X>`; `<repo>/.claude/worktrees/<n>` → `<repo>`; builder →
+`origin_cwd`; else nearest ancestor containing `.git`; else cwd. Display = folder name.
+**Dedupe:** seat ↔ registry by sessionId or pid; builder ↔ registry by session_id / claude_pid. One row
+per real session.
+
+**UI — the ⌘E Agents panel becomes the Hub** (one name everywhere: "Hub"; rename menu item + title).
+Project groups sorted by latest activity, header counts ("3 working · 1 needs you"). Inside each:
+**Seats** (existing character cards, unchanged) · **Background** (builders: name, model tier colour,
+elapsed, status pill, "from lead-x" when `parent` known) · **Other sessions** (live Claude sessions True
+didn't launch: name, kind, status). Pills reuse the existing set + Failed. Clicks: seat → existing;
+builder → read-only sheet (meta + result / recent tail from its files); other → reveal cwd in Finder. No
+kill buttons in v1. Top toggle **All** (default) / **Seats**. Hide empty projects. HIG + Liquid Glass
+consistent with the current panel.
+
+**Live, within the idle-CPU rule:** DispatchSource watchers on both directories (event-driven); pid
+liveness re-checked on each event and when the Hub becomes visible; any elapsed-time ticker runs ONLY
+while the Hub is visible (justify in a comment). File IO off the main actor; diff updates so cards
+don't flicker.
+
+**Background helpers:**
+- `truectl spawn --name <n> --prompt-file <F> [--repo <path>] [--worktree] [--model sonnet]` → control
+  op `spawn` → True runs `~/.claude/bin/builder start --name <n> --cwd <repo> --prompt-file <F>
+  [--worktree] --model <m> --parent <from>` (from = `$TRUE_AGENT`; repo defaults to the caller's repo).
+  Validate: name regex as builder's, prompt file exists, repo under ~/Projects, ~/studio-builds or
+  ~/Prism. Reply = builder id or the error text.
+- `builder --parent` — ADDITIVE edit to live infra other sessions use right now: back up to
+  `~/.claude/bin/builder.bak-20260930-parent` first; add optional `--parent NAME` on `start`, stored as
+  `meta["parent"]`; default from env `TRUE_AGENT` when set, else omitted. Nothing else changes. Verify:
+  `python3 -m py_compile`, `builder -h`, `builder start -h`, `builder status`.
+- Lead role card gains: use `truectl spawn` for long/unattended work (survives resets, shows under
+  Background in the Hub); `truectl summon` for interactive work with a helper seat; run `truectl status`
+  first to avoid duplicate work. `truectl status` reply gains the hub snapshot (project → sessions) as JSON.
+
+**Tests:** cwd normalisation table · dedupe · registry parsing (missing fields, dead pid) with sanitised
+fixtures · builder meta per status · spawn parse/validate · builder command assembly (every flag) · role
+card contains the spawn guidance · hub grouping / sort / counts.
+**Done =** suite green (paste output), `scripts/package.sh` builds True.app in the worktree, commits on
+the builder branch. App NOT launched/quit/killed (the orchestrating session runs inside True). No merge.
