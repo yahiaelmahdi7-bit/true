@@ -33,10 +33,10 @@ struct EffortMeter: View {
         HStack(spacing: 2) {
             ForEach(1...5, id: \.self) { i in
                 Capsule().fill(i <= level ? tint : Color.primary.opacity(0.15))
-                    .frame(width: 5, height: 5 + CGFloat(i) * 2)
+                    .frame(width: 3, height: 3 + CGFloat(i) * 1.6)
             }
         }
-        .frame(height: 15, alignment: .bottom)
+        .frame(height: 11, alignment: .bottom)
         .accessibilityLabel("Effort \(level) of 5")
     }
 }
@@ -52,84 +52,141 @@ struct StatusPill: View {
     }
 }
 
-/// The character card. Pure display from an `Agent` + a status, so the builder reuses it as its
-/// live preview.
-struct AgentCardFace: View {
-    let agent: Agent
-    let name: String
+/// The attention pill on a seat card: only for the two states that want a human. Inverted (white on
+/// black text) for needsYou so it is the loudest thing in the panel without using colour.
+struct AttentionPill: View {
     let status: AgentStatus
-
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: agent.symbol)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(agent.model.tint)
-                .frame(width: 40, height: 40)
-                .background(agent.model.tint.opacity(0.18), in: .circle)
-                .overlay(Circle().strokeBorder(agent.model.tint.opacity(0.5), lineWidth: 1))
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(name).font(.callout.weight(.semibold)).lineLimit(1).truncationMode(.middle)
-                    Spacer(minLength: 0)
-                    StatusPill(status: status)
-                }
-                HStack(spacing: 8) {
-                    Text(agent.model.label).font(.caption.weight(.medium)).foregroundStyle(agent.model.tint)
-                    EffortMeter(level: agent.effort.level, tint: agent.model.tint)
-                    Spacer(minLength: 0)
-                    Label(agent.permission.label, systemImage: agent.permission.symbol)
-                        .font(.caption2).foregroundStyle(.secondary)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(.quaternary, in: .capsule)
-                }
-            }
+        if status == .needsYou {
+            Text(status.label).font(.caption.weight(.semibold)).foregroundStyle(.black)
+                .padding(.horizontal, 8).padding(.vertical, 2).background(.white, in: .capsule)
+        } else if status == .failed {
+            Text(status.label).font(.caption.weight(.semibold)).foregroundStyle(Theme.text)
+                .padding(.horizontal, 8).padding(.vertical, 2)
+                .overlay(Capsule().strokeBorder(.white.opacity(0.35), lineWidth: 1))
         }
-        .padding(10)
-        .background(Color.white.opacity(0.04), in: .rect(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.hairline, lineWidth: 1))
     }
 }
 
-/// A card in the panel: click wakes / focuses, buttons sleep / edit, the lead has a message field.
+/// Everything a seat card needs from the registry, as closures — the seam that lets the Hub render from
+/// fixtures (snapshot tests) while production passes `.live(registry)` and behaves exactly as before.
+struct SeatActions {
+    var status: (String) -> AgentStatus
+    var isAwake: (String) -> Bool
+    var wake: (String) -> Void
+    var sleep: (String) -> Void
+    var edit: (Agent) -> Void
+    var talk: (String, String, @escaping (PaneDelivery.Outcome) -> Void) -> Void
+
+    @MainActor static func live(_ r: AgentRegistry) -> SeatActions {
+        SeatActions(status: { r.statusOf($0) }, isAwake: { r.isAwake($0) }, wake: { r.wake($0) },
+                    sleep: { r.sleep($0) }, edit: { r.builder = BuilderDraft(editing: $0) },
+                    talk: { name, text, done in r.talk(name, text, onOutcome: done) })
+    }
+
+    static var inert: SeatActions { SeatActions(status: { _ in .asleep }, isAwake: { _ in false }, wake: { _ in },
+                                   sleep: { _ in }, edit: { _ in }, talk: { _, _, _ in }) }
+}
+
+/// A seat card — the ONLY container in the Hub. Tap wakes / focuses; sleep and edit appear on hover and
+/// are also in the context menu and as accessibility actions, so nothing is hover-only.
 struct AgentCard: View {
     let agent: Agent
-    let registry: AgentRegistry
+    let actions: SeatActions
+    /// Fixture hook: render the hover state (snapshots can't hover).
+    var forceHover = false
     @State private var message = ""
     @State private var note: String?
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let status = registry.statusOf(agent.name)
-        VStack(alignment: .leading, spacing: 6) {
-            AgentCardFace(agent: agent, name: agent.name, status: status)
-                .contentShape(.rect)
-                .onTapGesture { registry.wake(agent.name) }
-                .help(registry.isAwake(agent.name) ? "Focus its tab" : "Wake \(agent.name)")
-            HStack(spacing: 8) {
-                if registry.isAwake(agent.name) {
-                    Button("Sleep", systemImage: "moon.zzz") { registry.sleep(agent.name) }
-                } else {
-                    Button("Wake", systemImage: "sun.max") { registry.wake(agent.name) }
+        let status = actions.status(agent.name)
+        let awake = actions.isAwake(agent.name)
+        let showActions = hovering || forceHover
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                AgentAvatar(hue: agent.resolvedHue, symbol: agent.symbol, status: status, size: 40)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(agent.name).font(.body.weight(.semibold)).foregroundStyle(Theme.text)
+                            .lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 0)
+                        HStack(spacing: 2) {
+                            iconButton(awake ? "moon.zzz" : "sun.max", awake ? "Sleep" : "Wake") { toggle(awake) }
+                            iconButton("slider.horizontal.3", "Edit") { actions.edit(agent) }
+                        }
+                        .opacity(showActions ? 1 : 0).allowsHitTesting(showActions).accessibilityHidden(true)
+                        AttentionPill(status: status)
+                    }
+                    HStack(spacing: 6) {
+                        Text(agent.model.label)
+                        Text("·").foregroundStyle(Theme.hubSecondary.opacity(0.6))
+                        Label(agent.permission.label, systemImage: agent.permission.symbol).labelStyle(.titleAndIcon)
+                        EffortMeter(level: agent.effort.level, tint: Theme.hubSecondary).padding(.leading, 2)
+                        Spacer(minLength: 0)
+                        if status != .needsYou && status != .failed {
+                            Text(status.label).contentTransition(.opacity)
+                        }
+                    }
+                    .font(.caption).foregroundStyle(Theme.hubSecondary).lineLimit(1)
                 }
-                Button("Edit", systemImage: "slider.horizontal.3") {
-                    registry.builder = BuilderDraft(editing: agent)
-                }
-                Spacer(minLength: 0)
-                if let note { Text(note).font(.caption2).foregroundStyle(Theme.text) }
             }
-            .buttonStyle(.borderless).controlSize(.small).labelStyle(.titleAndIcon)
-            if agent.role != .helper {
-                TextField("Message \(agent.name)…", text: $message)
-                    .textFieldStyle(.roundedBorder).controlSize(.small)
-                    .onSubmit(send)
+            if agent.role != .helper { messageField }
+        }
+        .padding(12)
+        .background(Theme.hubCardFill, in: .rect(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hubCardStroke, lineWidth: 1))
+        .contentShape(.rect(cornerRadius: 14, style: .continuous))
+        .onTapGesture { actions.wake(agent.name) }
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: showActions)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: status)
+        .help(awake ? "Focus its tab" : "Wake \(agent.name)")
+        .contextMenu {
+            Button(awake ? "Sleep" : "Wake") { toggle(awake) }
+            Button("Edit…") { actions.edit(agent) }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(agent.name), \(agent.model.label), effort \(agent.effort.level) of 5, \(agent.permission.label), \(status.label)")
+        .accessibilityAction(named: awake ? "Sleep" : "Wake") { toggle(awake) }
+        .accessibilityAction(named: "Edit") { actions.edit(agent) }
+    }
+
+    private func toggle(_ awake: Bool) { awake ? actions.sleep(agent.name) : actions.wake(agent.name) }
+
+    private func iconButton(_ symbol: String, _ help: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.text)
+                .frame(width: 24, height: 24).contentShape(.circle)
+        }
+        .buttonStyle(.borderless).help(help)
+    }
+
+    /// iMessage-style: a plain field in a capsule; the send arrow only exists once there is text.
+    private var messageField: some View {
+        HStack(spacing: 6) {
+            TextField("Message \(agent.name)…", text: $message)
+                .textFieldStyle(.plain).font(.callout).onSubmit(send)
+            if let note { Text(note).font(.caption).foregroundStyle(Theme.hubSecondary).lineLimit(1) }
+            if !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button(action: send) {
+                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 20)).foregroundStyle(.white)
+                }
+                .buttonStyle(.plain).help("Send").transition(.opacity.combined(with: .scale(scale: 0.8)))
             }
         }
+        .padding(.leading, 12).padding(.trailing, 4).frame(minHeight: 28)
+        .background(Color.white.opacity(0.06), in: .capsule)
+        .overlay(Capsule().strokeBorder(Theme.hubCardStroke, lineWidth: 1))
+        .animation(reduceMotion ? nil : .snappy, value: message.isEmpty)
     }
 
     private func send() {
         let text = message
         message = ""
-        note = registry.isAwake(agent.name) ? nil : "waking…"
-        registry.talk(agent.name, text) { outcome in
+        note = actions.isAwake(agent.name) ? nil : "waking…"
+        actions.talk(agent.name, text) { outcome in
             Task { @MainActor in
                 switch outcome {
                 case .landed, .staged: note = nil

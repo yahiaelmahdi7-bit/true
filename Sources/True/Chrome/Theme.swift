@@ -4,11 +4,22 @@ import SwiftUI
 
 /// True's whole palette. Black, no chrome: every surface is the terminal's own black, and the only
 /// lines are hairlines between panes. Views and the terminal bridge read these, never literals.
+///
+/// COLOUR DOCTRINE (Run 8, 2026-09-30): True is black and white. Colour exists in exactly ONE place —
+/// agent avatars (`AgentAvatar`, `AgentHue`) — and it means IDENTITY ("who"), never state. Model tier
+/// stays brightness (`AgentModel.tint`); status stays monochrome (`AgentStatus.tint`, words, the presence
+/// dot). Anything else that wants a colour is wrong.
 enum Theme {
     static let background = Color.black
     static let hairline = Color.white.opacity(0.10)
     static let text = Color.white.opacity(0.88)
     static let dimText = Color.white.opacity(0.38)
+    /// Hub-local secondary text: ≥4.5:1 on black at caption size (`dimText` is too faint for that and
+    /// the terminal chrome still uses it, so it is left alone).
+    static let hubSecondary = Color.white.opacity(0.60)
+    static let hubCardFill = Color.white.opacity(0.05)
+    static let hubCardStroke = Color.white.opacity(0.08)
+    static let hubHoverFill = Color.white.opacity(0.05)
 
     static let nsBackground = NSColor.black
     static let nsText = NSColor(white: 0.88, alpha: 1)

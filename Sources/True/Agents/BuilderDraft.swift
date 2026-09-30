@@ -17,6 +17,8 @@ struct BuilderDraft: Identifiable, Equatable {
     var team: Set<String>
     /// A global agent's user-chosen name (typed in the builder); unused for lead/helper.
     var globalName: String = ""
+    /// Chosen avatar colour; nil = whatever the name derives to (shown selected in the builder).
+    var hue: AgentHue?
 
     /// ~24 curated SF Symbols. First three are the role defaults.
     static let symbols = ["crown", "hammer", "globe", "star", "shield", "bolt", "flame", "leaf", "moon",
@@ -33,6 +35,7 @@ struct BuilderDraft: Identifiable, Equatable {
     init(editing a: Agent) {
         editing = a.name; repo = a.repo; role = a.role; model = a.model; effort = a.effort
         permission = a.permission; symbol = a.symbol; charter = a.charter; team = Set(a.team)
+        hue = a.hue.flatMap(AgentHue.init(rawValue:))
     }
 
     /// The auto-assigned name, or the fixed one when editing. Nil = no repo yet, or no free slot;
@@ -68,6 +71,6 @@ struct BuilderDraft: Identifiable, Equatable {
         let valid = Set(teamChoices(existing: existing).map(\.name))
         return Agent(name: n, role: role, repo: repo, model: model, effort: effort, permission: permission,
                      charter: charter, team: role == .helper ? [] : team.filter(valid.contains).sorted(),
-                     symbol: symbol)
+                     symbol: symbol, hue: hue?.rawValue)
     }
 }

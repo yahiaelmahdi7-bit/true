@@ -1,8 +1,8 @@
 import SwiftUI
 import AppKit
 
-/// The ⌘E panel: every Claude session on this Mac, grouped by project (SPEC Run 7). Seats keep their
-/// character cards; background builds and other live sessions get slim read-only rows.
+/// The ⌘E panel: every Claude session on this Mac, grouped by project (SPEC Run 7). Store-bound shell;
+/// the drawing lives in `HubPanelContent` so snapshot tests can render it from fixtures.
 struct HubPanel: View {
     let registry: AgentRegistry
     @State private var hub = HubStore.shared
@@ -12,79 +12,129 @@ struct HubPanel: View {
         // The elapsed-time ticker lives here, not in the model: a TimelineView only ticks while it is in
         // the view hierarchy, so a hidden Hub costs no wakeups (idle-CPU rule). 30 s is plenty for "12m".
         TimelineView(.periodic(from: .now, by: 30)) { timeline in
-            content(now: timeline.date.timeIntervalSince1970)
+            let now = timeline.date.timeIntervalSince1970
+            let groups = HubModel.build(seats: registry.agents, seatStatus: { registry.statusOf($0) },
+                                        seatAwake: { registry.isAwake($0) }, peers: hub.peers,
+                                        builders: hub.builders, now: now, seatsOnly: hub.seatsOnly)
+            HubPanelContent(groups: groups, allSeats: registry.agents, seatsOnly: $hub.seatsOnly, now: now,
+                            actions: .live(registry),
+                            onNew: { registry.builder = BuilderDraft() },
+                            onDetail: { detail = $0 },
+                            onReveal: { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: $0.cwd)]) })
         }
-        .frame(width: 330)
-        .background(Theme.background)
         .onAppear { hub.hubAppeared() }
         .sheet(item: $detail) { BuilderDetailSheet(record: $0) }
     }
+}
 
-    private func content(now: Double) -> some View {
-        let groups = HubModel.build(seats: registry.agents, seatStatus: { registry.statusOf($0) },
-                                    seatAwake: { registry.isAwake($0) }, peers: hub.peers,
-                                    builders: hub.builders, now: now, seatsOnly: hub.seatsOnly)
-        return VStack(spacing: 0) {
-            HStack {
-                Text("Hub").font(.headline)
-                Spacer()
-                Button { registry.builder = BuilderDraft() } label: { Image(systemName: "plus") }
-                    .buttonStyle(.borderless).help("New Agent")
-            }
-            .padding(.horizontal, 14).frame(height: 38)
-            Picker("Show", selection: $hub.seatsOnly) {
-                Text("All").tag(false)
-                Text("Seats").tag(true)
-            }
-            .pickerStyle(.segmented).labelsHidden().padding(.horizontal, 12).padding(.bottom, 8)
-            Divider()
-            if groups.isEmpty && registry.agents.isEmpty {
-                ContentUnavailableView("No agents yet", systemImage: "person.crop.circle.badge.plus",
-                                       description: Text("Press + to build your first one. Agents start asleep."))
+/// Pure view over groups + closures. No store, no registry.
+struct HubPanelContent: View {
+    static let width: CGFloat = 340
+    let groups: [HubProjectGroup]
+    /// Every saved seat — a builder's `parent` may live in another project's group.
+    let allSeats: [Agent]
+    @Binding var seatsOnly: Bool
+    let now: Double
+    let actions: SeatActions
+    var onNew: () -> Void = {}
+    var onDetail: (BuilderRecord) -> Void = { _ in }
+    var onReveal: (PeerSession) -> Void = { _ in }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            if groups.isEmpty && allSeats.isEmpty {
+                ContentUnavailableView {
+                    Label("No agents yet", systemImage: "person.crop.circle.badge.plus")
+                } description: {
+                    Text("Agents start asleep. Build your first one.")
+                } actions: {
+                    Button("New Agent", action: onNew).buttonStyle(.borderedProminent).tint(.white).foregroundStyle(.black)
+                }
             } else if groups.isEmpty {
                 ContentUnavailableView("Nothing running", systemImage: "moon.zzz",
                                        description: Text("No live sessions or background builds."))
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
+                    LazyVStack(alignment: .leading, spacing: 24) {
                         ForEach(groups) { group in
-                            groupView(group, now: now)
+                            groupView(group).transition(rowTransition)
                         }
                     }
-                    .padding(12)
+                    .padding(.horizontal, 12).padding(.top, 4).padding(.bottom, 16)
+                    .animation(reduceMotion ? nil : .snappy, value: groups.map(\.id))
                 }
             }
         }
+        .frame(width: Self.width)
+        .background(Theme.background)
     }
 
-    private func groupView(_ g: HubProjectGroup, now: Double) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private var rowTransition: AnyTransition {
+        reduceMotion ? .identity : .opacity.combined(with: .move(edge: .top))
+    }
+
+    private var header: some View {
+        VStack(spacing: 12) {
             HStack {
-                Label(g.title, systemImage: g.key.isEmpty ? "globe" : "folder")
-                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                if !g.summary.isEmpty { Text(g.summary).font(.caption2).foregroundStyle(Theme.dimText) }
+                Text("Hub").font(.title3.weight(.semibold)).foregroundStyle(Theme.text)
+                Spacer()
+                Button(action: onNew) {
+                    Image(systemName: "plus").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.text)
+                        .frame(width: 26, height: 26).background(Color.white.opacity(0.08), in: .circle)
+                        .contentShape(.circle)
+                }
+                .buttonStyle(.plain).help("New Agent").accessibilityLabel("New Agent")
             }
-            ForEach(g.seats) { AgentCard(agent: $0, registry: registry) }
+            Picker("Show", selection: $seatsOnly) {
+                Text("All").tag(false)
+                Text("Seats").tag(true)
+            }
+            .pickerStyle(.segmented).labelsHidden().controlSize(.small)
+        }
+        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 12)
+    }
+
+    private func groupView(_ g: HubProjectGroup) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(g.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 8)
+                if !g.summary.isEmpty {
+                    Text(g.summary).font(.caption.monospacedDigit()).foregroundStyle(Theme.hubSecondary).lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 4)
+            ForEach(g.seats) { AgentCard(agent: $0, actions: actions).transition(rowTransition) }
             if !g.background.isEmpty {
                 sectionLabel("Background")
                 ForEach(g.background) { b in
-                    BuilderRow(record: b, now: now).onTapGesture { detail = b }
+                    BuilderRow(record: b, now: now, parentHue: HubAvatar.parentHue(of: b.parent, seats: allSeats))
+                        .onTapGesture { onDetail(b) }.transition(rowTransition)
                 }
             }
             if !g.others.isEmpty {
                 sectionLabel("Other sessions")
                 ForEach(g.others) { p in
-                    PeerRow(peer: p).onTapGesture {
-                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p.cwd)])
-                    }
+                    PeerRow(peer: p).onTapGesture { onReveal(p) }.transition(rowTransition)
                 }
             }
         }
     }
 
     private func sectionLabel(_ t: String) -> some View {
-        Text(t).font(.caption2.weight(.medium)).foregroundStyle(Theme.dimText).padding(.top, 2)
+        Text(t).font(.caption.weight(.medium)).foregroundStyle(Theme.hubSecondary)
+            .padding(.horizontal, 4).padding(.top, 8)
+    }
+}
+
+enum HubAvatar {
+    /// The hue of the seat a builder was started by (`record.parent` = a seat name), if we have that seat.
+    static func parentHue(of parent: String?, seats: [Agent]) -> AgentHue? {
+        guard let parent else { return nil }
+        return seats.first { $0.name == parent }?.resolvedHue
     }
 }
 
@@ -94,39 +144,48 @@ func hubElapsed(_ seconds: Double) -> String {
     return m < 60 ? "\(max(m, 0))m" : String(format: "%dh %02dm", m / 60, m % 60)
 }
 
+/// A lighter row than a seat card: nothing at rest, a faint fill on hover, 44 pt tall.
 private struct HubRowFrame<Content: View>: View {
     @ViewBuilder var content: Content
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         content
-            .padding(10)
-            .background(Color.white.opacity(0.04), in: .rect(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.hairline, lineWidth: 1))
-            .contentShape(.rect)
+            .padding(.horizontal, 8).padding(.vertical, 6).frame(minHeight: 44)
+            .background(hovering ? Theme.hubHoverFill : .clear, in: .rect(cornerRadius: 12, style: .continuous))
+            .contentShape(.rect(cornerRadius: 12, style: .continuous))
+            .onHover { hovering = $0 }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
     }
 }
 
 struct BuilderRow: View {
     let record: BuilderRecord
     let now: Double
+    var parentHue: AgentHue?
     var body: some View {
-        let tint = AgentModel(rawValue: record.model)?.tint ?? Color(white: 0.55)
+        let hue = AgentHue.derived(from: record.name)
         HubRowFrame {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Image(systemName: "hammer").font(.caption).foregroundStyle(tint)
-                    Text(record.name).font(.callout.weight(.semibold)).lineLimit(1).truncationMode(.middle)
-                    Spacer(minLength: 0)
-                    StatusPill(status: record.status)
+            HStack(spacing: 10) {
+                AgentAvatar(hue: hue, symbol: "hammer", status: record.status, size: 28, parentHue: parentHue)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(record.name).font(.callout).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.middle)
+                    Text(secondary).font(.caption).foregroundStyle(Theme.hubSecondary).lineLimit(1).truncationMode(.tail)
                 }
-                HStack(spacing: 8) {
-                    if !record.model.isEmpty { Text(record.model.capitalized).font(.caption.weight(.medium)).foregroundStyle(tint) }
-                    Text(hubElapsed(record.elapsed(now: now))).font(.caption).foregroundStyle(.secondary)
-                    if let parent = record.parent { Text("from \(parent)").font(.caption2).foregroundStyle(Theme.dimText) }
-                    Spacer(minLength: 0)
-                }
+                Spacer(minLength: 4)
+                Text(hubElapsed(record.elapsed(now: now))).font(.caption.monospacedDigit()).foregroundStyle(Theme.hubSecondary)
             }
         }
         .help("Show this build's result")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(record.name), background build, \(secondary), \(hubElapsed(record.elapsed(now: now)))")
+    }
+
+    private var secondary: String {
+        var parts = [record.status.label]
+        if !record.model.isEmpty { parts.append(record.model.capitalized) }
+        if let parent = record.parent { parts.append("from \(parent)") }
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -134,15 +193,19 @@ struct PeerRow: View {
     let peer: PeerSession
     var body: some View {
         HubRowFrame {
-            HStack(spacing: 6) {
-                Image(systemName: "terminal").font(.caption).foregroundStyle(.secondary)
-                Text(peer.displayName).font(.callout).lineLimit(1).truncationMode(.middle)
-                Text(peer.kind).font(.caption2).foregroundStyle(Theme.dimText)
+            HStack(spacing: 10) {
+                // Not our crew → no colour, no presence dot: strangers stay grey.
+                AgentAvatar(hue: nil, symbol: "terminal", status: peer.busy ? .working : .idle, size: 28)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(peer.displayName).font(.callout).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.middle)
+                    Text("\(peer.busy ? "Working" : "Idle") · \(peer.kind)").font(.caption)
+                        .foregroundStyle(Theme.hubSecondary).lineLimit(1)
+                }
                 Spacer(minLength: 0)
-                StatusPill(status: peer.busy ? .working : .idle)
             }
         }
         .help("Reveal \(peer.cwd) in Finder")
+        .accessibilityElement(children: .combine)
     }
 }
 

@@ -68,6 +68,9 @@ struct Agent: Codable, Equatable, Identifiable, Sendable {
     /// The conversation to resume on next wake. Only used when non-empty AND its transcript exists.
     var lastSessionID: String?
     var symbol: String
+    /// Avatar colour (an `AgentHue` raw value). Optional so agents.json from older builds still decodes;
+    /// nil or unknown = derived from the name (`resolvedHue`).
+    var hue: String?
 
     var id: String { name }
     var repoName: String {
@@ -76,11 +79,12 @@ struct Agent: Codable, Equatable, Identifiable, Sendable {
 
     init(name: String, role: AgentRole, repo: String, model: AgentModel = .sonnet,
          effort: AgentEffort = .medium, permission: AgentPermission = .default,
-         charter: String = "", team: [String] = [], lastSessionID: String? = nil, symbol: String? = nil) {
+         charter: String = "", team: [String] = [], lastSessionID: String? = nil, symbol: String? = nil, hue: String? = nil) {
         self.name = name; self.role = role; self.repo = repo; self.model = model
         self.effort = effort; self.permission = permission; self.charter = charter
         self.team = team; self.lastSessionID = lastSessionID
         self.symbol = symbol ?? role.defaultSymbol
+        self.hue = hue
     }
 
     /// Tolerant on purpose: a file written by an older build (missing fields) or hand-edited
@@ -97,6 +101,7 @@ struct Agent: Codable, Equatable, Identifiable, Sendable {
         team = (try? c.decode([String].self, forKey: .team)) ?? []
         lastSessionID = try? c.decodeIfPresent(String.self, forKey: .lastSessionID)
         symbol = (try? c.decode(String.self, forKey: .symbol)) ?? role.defaultSymbol
+        hue = try? c.decodeIfPresent(String.self, forKey: .hue)
     }
 }
 

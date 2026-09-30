@@ -15,12 +15,20 @@ struct AgentBuilderSheet: View {
         let existing = registry.agents
         let name = draft.name(existing: existing)
         HStack(alignment: .top, spacing: 20) {
-            VStack(spacing: 12) {
-                Text("Preview").font(.caption).foregroundStyle(.secondary)
-                AgentCardFace(agent: preview(existing), name: name ?? (draft.role == .global ? "name it" : "pick a repo"), status: .asleep)
-                    .frame(width: 290)
+            VStack(spacing: 8) {
+                // frame width matches the old card so the sheet doesn't resize
+
+                let a = preview(existing)
+                AgentAvatar(hue: a.resolvedHue, symbol: a.symbol, status: .idle, size: 56, showsPresence: false)
+                    .padding(.top, 24)
+                Text(name ?? (draft.role == .global ? "name it" : "pick a repo"))
+                    .font(.body.weight(.semibold)).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.middle)
+                Text("\(draft.model.label) · \(draft.effort.label) · \(draft.permission.label)")
+                    .font(.caption).foregroundStyle(Theme.hubSecondary)
+                EffortMeter(level: draft.effort.level, tint: Theme.hubSecondary)
                 Spacer(minLength: 0)
             }
+            .frame(width: 290)
             Form {
                 Section("Describe") {
                     // A TextField inside a grouped Form makes its placeholder the row LABEL and right-aligns
@@ -100,12 +108,16 @@ struct AgentBuilderSheet: View {
                         ForEach(AgentPermission.allCases, id: \.self) { Text($0.label).tag($0) }
                     }
                 }
+                Section("Colour") {
+                    HueRow(selection: Binding(get: { draft.hue ?? AgentHue.derived(from: name ?? "") },
+                                              set: { draft.hue = $0 }))
+                }
                 Section("Symbol") {
                     LazyVGrid(columns: Array(repeating: GridItem(.fixed(34)), count: 8), spacing: 6) {
                         ForEach(BuilderDraft.symbols, id: \.self) { s in
                             Button { draft.symbol = s } label: {
                                 Image(systemName: s).frame(width: 30, height: 26)
-                                    .background(draft.symbol == s ? draft.model.tint.opacity(0.3) : .clear,
+                                    .background(draft.symbol == s ? Color.white.opacity(0.15) : .clear,
                                                 in: .rect(cornerRadius: 6))
                             }
                             .buttonStyle(.plain)
@@ -208,6 +220,39 @@ struct AgentBuilderSheet: View {
     private func preview(_ existing: [Agent]) -> Agent {
         Agent(name: draft.name(existing: existing) ?? "", role: draft.role, repo: draft.repo,
               model: draft.model, effort: draft.effort, permission: draft.permission,
-              charter: draft.charter, symbol: draft.symbol)
+              charter: draft.charter, symbol: draft.symbol, hue: draft.hue?.rawValue)
+    }
+}
+
+/// Ten 22 pt swatches; the selected one wears a 2 pt white ring, hover grows it a touch.
+struct HueRow: View {
+    @Binding var selection: AgentHue
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(AgentHue.allCases, id: \.self) { h in HueSwatch(hue: h, selected: h == selection) { selection = h } }
+        }
+    }
+}
+
+private struct HueSwatch: View {
+    let hue: AgentHue
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        Button(action: action) {
+            Circle().fill(hue.gradient).frame(width: 22, height: 22)
+                .overlay(Circle().strokeBorder(.white.opacity(0.22), lineWidth: 0.5))
+                .padding(3)
+                .overlay(Circle().strokeBorder(selected ? Color.white : .clear, lineWidth: 2))
+                .scaleEffect(hovering ? 1.08 : 1)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
+        .help(hue.rawValue.capitalized)
+        .accessibilityLabel(hue.rawValue.capitalized)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
