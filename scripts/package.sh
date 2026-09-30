@@ -42,6 +42,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
+  <!-- macOS charges a child process's mic use to the app that launched it, so Claude Code's
+       hold-space voice mode asks as True. Without this key TCC refuses silently, no prompt. -->
+  <key>NSMicrophoneUsageDescription</key><string>Programs you run in True, such as Claude Code voice mode, use the microphone to hear you.</string>
 </dict>
 </plist>
 PLIST
