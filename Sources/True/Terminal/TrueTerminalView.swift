@@ -111,6 +111,114 @@ final class TrueTerminalView: LocalProcessTerminalView {
         isFlushingCoalesced = false
     }
 
+    // MARK: - Paste and drag-and-drop
+
+    /// ⌘V's path into the PTY, for text that did not come from the pasteboard (a dropped file path,
+    /// later a screenshot tray). SwiftTerm's own `insertText(isPaste:)` is internal, so this repeats
+    /// it: bracketed when the program asked for it — Claude Code only turns an image path into an
+    /// `[Image #N]` attachment for a paste. Never touches `NSPasteboard.general`.
+    /// ESC [ 200 ~ / ESC [ 201 ~ — SwiftTerm's `EscapeSequences` statics are mutable, which Swift 6
+    /// refuses to reference from here, so the two fixed sequences are spelled out.
+    private static let pasteStart: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E]
+    private static let pasteEnd: [UInt8] = [0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E]
+
+    func pasteText(_ text: String) {
+        let bracketed = getTerminal().bracketedPasteMode
+        let txt = TerminalDrop.sanitizedPaste(text, bracketed: bracketed)
+        guard !txt.isEmpty else { return }
+        if bracketed { send(data: Self.pasteStart[0...]) }
+        send(txt: txt)
+        if bracketed { send(data: Self.pasteEnd[0...]) }
+    }
+
+    /// Called once per pane from `makeNSView`. SwiftTerm never registers for drags itself.
+    func enableDrops() {
+        var types: [NSPasteboard.PasteboardType] = [.fileURL, .URL, .string, .png, .tiff]
+        types += NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
+        registerForDraggedTypes(types)
+    }
+
+    private static let dropQueue: OperationQueue = {
+        let q = OperationQueue()
+        q.name = "true.drop.receive"
+        q.maxConcurrentOperationCount = 1
+        q.qualityOfService = .userInitiated
+        return q
+    }()
+
+    private func canAccept(_ pb: NSPasteboard) -> Bool {
+        let ours: [NSPasteboard.PasteboardType] = [.fileURL, .URL, .string, .png, .tiff]
+            + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
+        return pb.types?.contains(where: ours.contains) ?? false
+    }
+
+    private func dragFeedback(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard canAccept(sender.draggingPasteboard) else { setDropHighlight(false); return [] }
+        setDropHighlight(true)
+        return .copy
+    }
+
+    private func setDropHighlight(_ on: Bool) {
+        if on { DropTarget.shared.pane = paneID }
+        else if DropTarget.shared.pane == paneID { DropTarget.shared.pane = nil }
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { dragFeedback(sender) }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { dragFeedback(sender) }
+    override func draggingExited(_ sender: NSDraggingInfo?) { setDropHighlight(false) }
+    override func draggingEnded(_ sender: NSDraggingInfo) { setDropHighlight(false) }
+    override func concludeDragOperation(_ sender: NSDraggingInfo?) { setDropHighlight(false) }
+
+    /// First match wins: file URLs, then file promises (Photos, Mail, browsers), then raw image
+    /// data, then text (dragged links and selections).
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        setDropHighlight(false)
+        let pb = sender.draggingPasteboard
+        let handled = handleDrop(pb)
+        if handled {
+            window?.makeFirstResponder(self)
+            onFocusClick?()
+            NSApp.activate()
+        }
+        return handled
+    }
+
+    private func handleDrop(_ pb: NSPasteboard) -> Bool {
+        if let urls = pb.readObjects(forClasses: [NSURL.self],
+                                     options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            pasteText(TerminalDrop.pasteText(forPaths: urls.map(TerminalDrop.pastePath(for:))))
+            return true
+        }
+        let hasImage = pb.canReadObject(forClasses: [NSImage.self])
+        if let receivers = pb.readObjects(forClasses: [NSFilePromiseReceiver.self]) as? [NSFilePromiseReceiver],
+           !receivers.isEmpty, let folder = TerminalDrop.makePromiseFolder() {
+            // The pasteboard is not guaranteed to outlive the drop, so the fallback image is read now.
+            let fallback = hasImage ? NSImage(pasteboard: pb) : nil
+            for receiver in receivers {
+                receiver.receivePromisedFiles(atDestination: folder, options: [:],
+                                              operationQueue: Self.dropQueue) { [weak self] url, error in
+                    Task { @MainActor in
+                        if error == nil {
+                            self?.pasteText(TerminalDrop.pasteText(forPaths: [url.path]))
+                        } else if let fallback, let png = TerminalDrop.writePNG(fallback) {
+                            self?.pasteText(TerminalDrop.pasteText(forPaths: [png.path]))
+                        }
+                    }
+                }
+            }
+            return true
+        }
+        if hasImage, let image = NSImage(pasteboard: pb), let png = TerminalDrop.writePNG(image) {
+            pasteText(TerminalDrop.pasteText(forPaths: [png.path]))
+            return true
+        }
+        if let text = pb.string(forType: .string), !text.isEmpty {
+            pasteText(text)
+            return true
+        }
+        return false
+    }
+
     // MARK: - Scroll
 
     /// Scroll that actually scrolls — the fix for "I can't scroll up in my Claude session".

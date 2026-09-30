@@ -40,6 +40,11 @@ private struct TabContent: View {
                         .padding(Theme.paneInsets)
                         .frame(width: r.width, height: r.height)
                         .background(Theme.background)
+                        .overlay {
+                            if DropTarget.shared.pane == id {
+                                Rectangle().strokeBorder(Color.white.opacity(0.35), lineWidth: 1).allowsHitTesting(false)
+                            }
+                        }
                         .position(x: r.midX, y: r.midY)
                 }
             }

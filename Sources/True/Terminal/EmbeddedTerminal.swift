@@ -52,6 +52,7 @@ struct EmbeddedTerminal: NSViewRepresentable {
         term.paneID = paneID
         term.applyThemeColors()
         term.hideScroller()
+        term.enableDrops()
         term.processDelegate = context.coordinator
         term.getTerminal().changeScrollback(TerminalSettings.clampScrollback(scrollback))
         term.font = TerminalSettings.font(family: family, size: fontSize)
