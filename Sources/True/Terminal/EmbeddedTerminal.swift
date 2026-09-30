@@ -96,6 +96,12 @@ struct EmbeddedTerminal: NSViewRepresentable {
             // Open Project ▸ with Claude: interactive login so the user's `claude` alias applies. NOT an agent
             // (no TRUE_AGENT, no launch spec) and the command's own `exec $SHELL -l` keeps the pane alive.
             args = PaneStartup.shellArgs(for: cmd)
+        } else if let snap = ScrollbackStore.standard.take(paneID) {
+            // A plain shell gets its last screen back (one-shot, files deleted): the shell prints its prompt below.
+            let t = term.getTerminal()
+            t.resize(cols: snap.header.cols, rows: snap.header.rows)
+            term.feed(byteArray: ArraySlice(snap.bytes))
+            term.feed(byteArray: ArraySlice(Array(("\r\n" + ScrollbackStore.markerLine(snap.header) + "\r\n").utf8)))
         }
         term.startProcess(executable: shell, args: args,
                           environment: env.map { "\($0.key)=\($0.value)" },

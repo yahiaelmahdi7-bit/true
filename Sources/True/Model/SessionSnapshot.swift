@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import Darwin
 
 /// Glue between the live terminals and the workspace's resume records. All calls are event-driven:
 /// quit, window close, a one-shot after Return, and a Claude `session` hook.
@@ -20,8 +21,41 @@ enum SessionSnapshot {
     static func record(_ model: WorkspaceModel = .shared) { model.recordResume(probe: probe) }
 
     /// Quit or window close: record, save, then stop reacting to the shells dying.
-    static func atQuit(_ model: WorkspaceModel = .shared) {
-        model.freeze { record(model) }
+    static func atQuit(_ model: WorkspaceModel = .shared, scrollback: ScrollbackStore = .standard) {
+        model.freeze {
+            record(model)
+            saveScreens(model, scrollback)
+        }
+    }
+
+    /// Plain shells (no Claude, no agent) keep their screen: serialize the normal buffer to disk. A pane whose
+    /// view is already gone is left alone (an earlier file, if any, stays); files of closed panes are pruned.
+    static func saveScreens(_ model: WorkspaceModel, _ store: ScrollbackStore) {
+        var all = Set<UUID>()
+        for t in model.state.tabs {
+            for p in t.tree.leafIDs {
+                all.insert(p)
+                guard let v = TerminalRegistry.shared.view(for: p), v.process.running, v.process.shellPid > 0 else { continue }
+                if t.resume?[p] != nil { store.remove(p); continue }
+                let term = v.getTerminal()
+                if term.isCurrentBufferAlternate { term.feed(text: "\u{1b}[?1049l") }   // vim etc: save the shell's own screen
+                let text = ScrollbackSerializer.serialize(term)
+                guard !text.isEmpty else { store.remove(p); continue }
+                store.save(pane: p, text: text, header: .init(cols: term.cols, rows: term.rows, savedAt: Date(),
+                                                              wasRunning: foregroundName(v)))
+            }
+        }
+        store.prune(keeping: all)
+    }
+
+    /// The command in the foreground of this pane's tty (e.g. "npm"), if it is not the shell itself.
+    static func foregroundName(_ v: TrueTerminalView) -> String? {
+        let fg = tcgetpgrp(v.process.childfd)
+        guard fg > 0, fg != v.process.shellPid else { return nil }
+        var buf = [CChar](repeating: 0, count: 256)
+        guard proc_name(fg, &buf, UInt32(buf.count)) > 0 else { return nil }
+        let n = String(cString: buf)
+        return n.isEmpty ? nil : n
     }
 
     private static var pending: [UUID: Task<Void, Never>] = [:]

@@ -88,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil,
                                                queue: .main) { n in
             guard let w = n.object as? NSWindow, w.title == "True" else { return }
-            Task { @MainActor in SessionSnapshot.atQuit() }
+            MainActor.assumeIsolated { SessionSnapshot.atQuit() }
         }
         NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil,
                                                queue: .main) { n in
