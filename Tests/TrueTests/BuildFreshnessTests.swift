@@ -25,12 +25,20 @@ import Foundation
         #expect(a.count == 5)
         #expect(a[0] == "-c" && a[2] == "sh" && a[3] == "42" && a[4] == path)
         #expect(!a[1].contains("42") && !a[1].contains("rm -rf") && !a[1].contains("open -n"))
+        #expect(a[1].contains("-ge 300 ] && exit 0"))
         #expect(a[1].contains("kill -0 \"$1\"") && a[1].contains("/usr/bin/open \"$2\""))
     }
     @Test func warningWording() {
         #expect(BuildFreshness.workingWarning(0) == nil)
-        #expect(BuildFreshness.workingWarning(1)?.hasPrefix("1 agent is working.") == true)
-        #expect(BuildFreshness.workingWarning(3)?.hasPrefix("3 agents are working.") == true)
+        #expect(BuildFreshness.workingWarning(1) == "1 Claude session in True is mid-task. Restarting interrupts its current step; sessions resume after.")
+        #expect(BuildFreshness.workingWarning(3) == "3 Claude sessions in True are mid-task. Restarting interrupts their current step; sessions resume after.")
+    }
+    @Test func descendantsWalkTheTreeSafely() {
+        let tree: [pid_t: [pid_t]] = [1: [2, 3], 2: [4], 4: [5], 5: [6], 6: [7], 3: [1], 9: [10]]
+        let kids: (pid_t) -> [pid_t] = { tree[$0] ?? [] }
+        #expect(BuildFreshness.descendants(of: 1, children: kids) == [2, 3, 4, 5, 6])   // depth 4, cycle 3->1 ignored
+        #expect(BuildFreshness.descendants(of: 1, children: kids, maxDepth: 1) == [2, 3])
+        #expect(BuildFreshness.descendants(of: 8, children: kids).isEmpty)
     }
     @Test func statReadsRealFile() {
         #expect(BinaryStamp.read(URL(fileURLWithPath: "/bin/sh")) != nil)
