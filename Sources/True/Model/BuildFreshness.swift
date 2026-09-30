@@ -39,7 +39,8 @@ enum BuildFreshness {
     }
 
     /// Everything below `root` in the process tree, BFS, cycle-safe, `maxDepth` levels deep.
-    static func descendants(of root: pid_t, children: (pid_t) -> [pid_t], maxDepth: Int = 4) -> Set<pid_t> {
+    /// 6 levels: True, login, shell, a `claude` launcher script, claude, with headroom.
+    static func descendants(of root: pid_t, children: (pid_t) -> [pid_t], maxDepth: Int = 6) -> Set<pid_t> {
         var seen: Set<pid_t> = [root], level = [root]
         for _ in 0..<maxDepth {
             level = level.flatMap(children).filter { seen.insert($0).inserted }

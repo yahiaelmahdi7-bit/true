@@ -36,7 +36,8 @@ import Foundation
     @Test func descendantsWalkTheTreeSafely() {
         let tree: [pid_t: [pid_t]] = [1: [2, 3], 2: [4], 4: [5], 5: [6], 6: [7], 3: [1], 9: [10]]
         let kids: (pid_t) -> [pid_t] = { tree[$0] ?? [] }
-        #expect(BuildFreshness.descendants(of: 1, children: kids) == [2, 3, 4, 5, 6])   // depth 4, cycle 3->1 ignored
+        #expect(BuildFreshness.descendants(of: 1, children: kids) == [2, 3, 4, 5, 6, 7])   // default depth 6, cycle 3->1 ignored
+        #expect(BuildFreshness.descendants(of: 1, children: kids, maxDepth: 4) == [2, 3, 4, 5, 6])
         #expect(BuildFreshness.descendants(of: 1, children: kids, maxDepth: 1) == [2, 3])
         #expect(BuildFreshness.descendants(of: 8, children: kids).isEmpty)
     }
