@@ -159,7 +159,8 @@ final class TrueTerminalView: LocalProcessTerminalView {
     }
 
     private func setDropHighlight(_ on: Bool) {
-        if on { DropTarget.shared.pane = paneID }
+        // draggingUpdated fires on every mouse move; an @Observable write invalidates even when equal.
+        if on { if DropTarget.shared.pane != paneID { DropTarget.shared.pane = paneID } }
         else if DropTarget.shared.pane == paneID { DropTarget.shared.pane = nil }
     }
 

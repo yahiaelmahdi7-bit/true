@@ -38,11 +38,18 @@ enum TerminalDrop {
         paths.map(shellEscaped).joined(separator: " ") + " "
     }
 
-    /// What actually goes to the PTY. ESC is dropped everywhere: a dropped string holding
-    /// "\e[201~" would otherwise end bracketed paste early and run the rest as typed input. With
-    /// bracketed paste off a newline would execute in a bare shell, so it becomes a space.
+    /// What actually goes to the PTY. Control characters other than tab and newlines are dropped
+    /// everywhere: ESC because "\e[201~" would end bracketed paste early and run the rest as typed
+    /// input, the rest (^C, ^D, C1 CSI…) because they would act as keystrokes. With bracketed paste
+    /// off a newline would execute in a bare shell, so it becomes a space.
     nonisolated static func sanitizedPaste(_ text: String, bracketed: Bool) -> String {
-        var s = text.replacingOccurrences(of: "\u{1B}", with: "")
+        var scalars = String.UnicodeScalarView()
+        for u in text.unicodeScalars {
+            let v = u.value
+            let control = v < 0x20 || (0x7F...0x9F).contains(v)
+            if !control || u == "\t" || u == "\n" || u == "\r" { scalars.append(u) }
+        }
+        var s = String(scalars)
         if !bracketed {
             s = s.replacingOccurrences(of: "\r\n", with: " ")
                 .replacingOccurrences(of: "\n", with: " ")
@@ -109,14 +116,21 @@ enum TerminalDrop {
         (try? FileManager.default.contentsOfDirectory(atPath: url.deletingLastPathComponent().path)) == nil
     }
 
-    nonisolated static func isImage(_ url: URL) -> Bool {
-        (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)?.conforms(to: .image) ?? false
+    /// Above this a protected file keeps its own path rather than being duplicated on disk.
+    nonisolated static let maxCopyBytes = 100 * 1024 * 1024
+
+    /// A plain file small enough to copy — folders and packages are never copied.
+    nonisolated static func isCopyable(_ url: URL) -> Bool {
+        guard let v = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              v.isRegularFile == true else { return false }
+        return (v.fileSize ?? 0) <= maxCopyBytes
     }
 
-    /// The path to paste for a dropped file: an image from a folder the child cannot read is copied
-    /// into the drops folder; anything else (a dev dragging a file from a repo) keeps its own path.
+    /// The path to paste for a dropped file: a file from a folder the child cannot read (a
+    /// screenshot on the Desktop, a PDF in Downloads) is copied into the drops folder; anything
+    /// else (a dev dragging a file from a repo) keeps its own path.
     nonisolated static func pastePath(for url: URL) -> String {
-        guard isImage(url), isProtected(url), let copy = copyIntoDrops(url) else { return url.path }
+        guard isProtected(url), isCopyable(url), let copy = copyIntoDrops(url) else { return url.path }
         return copy.path
     }
 

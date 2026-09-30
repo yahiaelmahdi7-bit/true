@@ -50,4 +50,9 @@ import Foundation
         #expect(TerminalDrop.sanitizedPaste(evil, bracketed: true) == "a[201~b\nc\r\nd")
         #expect(TerminalDrop.sanitizedPaste(evil, bracketed: false) == "a[201~b c d")
     }
+
+    @Test func sanitizedPasteDropsOtherControlCharactersButKeepsTabAndText() {
+        let s = "x\u{03}y\u{04}\tz\u{7F}\u{9B}31m\u{202F}é"
+        #expect(TerminalDrop.sanitizedPaste(s, bracketed: true) == "xy\tz31m\u{202F}é")
+    }
 }
