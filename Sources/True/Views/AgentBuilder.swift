@@ -172,11 +172,15 @@ struct AgentBuilderSheet: View {
         fillError = nil
         let text = request.trimmingCharacters(in: .whitespacesAndNewlines)
         let snapshot = draft
+        let editing = snapshot.editing != nil
         fillTask = Task {
             defer { fillTask = nil }
             do {
-                let profile = try await AgentFill.run(request: text, draft: snapshot)
-                if !Task.isCancelled { AgentFill.apply(profile, to: &draft) }
+                try await JevFill.orchestrate(
+                    prefill: snapshot,
+                    jev: { await JevFill.ask(request: text, editing: editing, jev: .shared) },
+                    claude: { try await AgentFill.run(request: text, draft: snapshot) },
+                    edit: { change in change(&draft) })
             } catch is CancellationError {
             } catch {
                 fillError = error.localizedDescription
