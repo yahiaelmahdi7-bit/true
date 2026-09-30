@@ -42,6 +42,22 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc signature: enough for a local, self-built app to run. (No permission grants to keep stable yet.)
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1 && echo "    ad-hoc signed"
+# Sign with a stable self-signed identity, NOT ad-hoc. macOS keys every privacy grant (Music, Desktop,
+# Documents, ...) to the app's designated requirement. Ad-hoc pins that to the binary's cdhash, so each
+# rebuild reads as a brand-new app and every permission popup comes back. A certificate makes the
+# requirement cert-based, so "Allow" survives rebuilds. Same identity and reasoning as deck/build.sh.
+IDENTITY="Deck Signing"
+KEYCHAIN="$HOME/Library/Keychains/deck-signing.keychain-db"
+if security find-certificate -c "$IDENTITY" "$KEYCHAIN" >/dev/null 2>&1; then
+  # The signing keychain has a blank password and relocks itself; unlock it here or macOS pops a
+  # password dialog that the Mac login password does not satisfy.
+  security unlock-keychain -p "" "$KEYCHAIN" >/dev/null 2>&1 || true
+  codesign --force --sign "$IDENTITY" --keychain "$KEYCHAIN" "$APP"
+  codesign --verify --strict "$APP"
+  echo "    signed with '$IDENTITY' (permission grants survive rebuilds)"
+else
+  echo "WARNING: no '$IDENTITY' certificate in $KEYCHAIN -- falling back to ad-hoc."
+  echo "         Every permission popup will return after this build. See deck/build.sh to recreate it."
+  codesign --force --deep --sign - "$APP" >/dev/null 2>&1 && echo "    ad-hoc signed"
+fi
 echo "OK: built $APP (not launched)"
