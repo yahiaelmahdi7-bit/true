@@ -32,11 +32,13 @@ private struct TabContent: View {
     var body: some View {
         let layout = tab.tree.layout(in: size)
         ZStack(alignment: .topLeading) {
-            ForEach(tab.tree.leafIDs, id: \.self) { id in
+            // Stable order (not tree order): a move reshuffles the tree, and a reordered ForEach would
+            // detach and re-attach terminal views. Panes never overlap, so z-order is irrelevant.
+            ForEach(tab.tree.leafIDs.sorted { $0.uuidString < $1.uuidString }, id: \.self) { id in
                 if let r = layout.panes[id] {
                     let focused = visible && tab.focusedPane == id
                     EmbeddedTerminal(paneID: id, startDir: tab.cwds[id] ?? NSHomeDirectory(), isFocused: focused)
-                        .opacity(focused || tab.tree.leafIDs.count == 1 ? 1 : 0.6)
+                        .opacity(PaneDrag.shared.pane == id ? 0.35 : (focused || tab.tree.leafIDs.count == 1 ? 1 : 0.6))
                         .padding(Theme.paneInsets)
                         .frame(width: r.width, height: r.height)
                         .background(Theme.background)
@@ -52,6 +54,17 @@ private struct TabContent: View {
                 DividerHandle(divider: d,
                               onFraction: { f in model.setFraction(f, split: d.splitID, tab: tab.id) },
                               onEqualize: { model.equalize(split: d.splitID, tab: tab.id) })
+            }
+            if visible, tab.tree.leafIDs.count > 1 {
+                ForEach(tab.tree.leafIDs.sorted { $0.uuidString < $1.uuidString }, id: \.self) { id in
+                    if let r = layout.panes[id], r.width > PaneGrip.width, r.height > PaneGrip.height * 3 {
+                        PaneGrip(pane: id, model: model, tab: tab, size: size)
+                            .position(x: r.midX, y: r.minY + PaneGrip.height / 2)
+                    }
+                }
+                if let t = PaneDrag.shared.target, let r = layout.panes[t.pane] {
+                    PaneDropPreview(rect: SplitTree.previewRect(of: t.zone, in: r))
+                }
             }
         }
         .opacity(visible ? 1 : 0)

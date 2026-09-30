@@ -260,3 +260,9 @@ exercised through injected runners in tests; HubPanel is not visually verified (
 **Verify live:** `pmset -g assertions | grep "True: agents working"` — present while something works, gone ~2 min after everything is idle.
 
 **Asleep avatars:** fade to 10% saturation (in the gradient colours, not `.saturation()`, which ImageRenderer ignores) at 0.55 opacity — near grey, no brown.
+
+## Panes and layout
+- **Even tiling only.** Every add (split), close or drop re-evens the same-axis row/column it touched (1/2, then 1/3 each…); a stacked pair counts as one slot. Other rows keep their sizes; manual divider drags persist until the next add/close/drop in that row. No preset-layout menu.
+- **Pick up:** hovering the top-centre of a pane (only when the tab has 2+ panes) shows a small grip. Only the grip's own rect takes the mouse — terminal clicks, selection and scrolling are never intercepted. Detach = within this window and tab only.
+- **Drop:** onto another pane — its left/right/top/bottom zone moves the pane to that side; the middle zone swaps the two. A shaded preview shows the exact landing zone; Esc or dropping outside cancels. No animated reflow (terminals would be resized every frame).
+- **Survival:** terminals are keyed by pane UUID in one flat list (`TerminalArea`), so a move only changes frames: process, scrollback and focus stay (the mover is focused). Ops: `SplitTree.insertingEvened / removingEvened / swapping / moving` (`Model/SplitTree.swift`), drop geometry in `Model/PaneDrop.swift`, grip UI in `Views/PaneDrag.swift`.

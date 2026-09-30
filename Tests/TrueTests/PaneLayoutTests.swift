@@ -147,4 +147,25 @@ import CoreGraphics
         for r in l.panes.values { area += r.width * r.height }
         #expect(abs(area - size.width * size.height) < 0.01)
     }
+
+    @Test func dropZonesFromGeometry() {
+        let r = CGRect(x: 100, y: 50, width: 400, height: 200)
+        #expect(SplitTree.dropZone(at: CGPoint(x: 300, y: 150), in: r) == .center)
+        #expect(SplitTree.dropZone(at: CGPoint(x: 110, y: 150), in: r) == .left)
+        #expect(SplitTree.dropZone(at: CGPoint(x: 490, y: 150), in: r) == .right)
+        #expect(SplitTree.dropZone(at: CGPoint(x: 300, y: 55), in: r) == .top)
+        #expect(SplitTree.dropZone(at: CGPoint(x: 300, y: 245), in: r) == .bottom)
+        #expect(SplitTree.previewRect(of: .left, in: r) == CGRect(x: 100, y: 50, width: 200, height: 200))
+        #expect(SplitTree.previewRect(of: .bottom, in: r) == CGRect(x: 100, y: 150, width: 400, height: 100))
+    }
+
+    @Test func dropTargetFindsPaneUnderPointerAndIgnoresDragged() {
+        let t = row3()
+        let l = t.layout(in: size).panes
+        let inC = CGPoint(x: l[c]!.midX, y: l[c]!.midY)
+        #expect(t.dropTarget(at: inC, in: size, excluding: a)?.pane == c)
+        #expect(t.dropTarget(at: inC, in: size, excluding: a)?.zone == .center)
+        #expect(t.dropTarget(at: inC, in: size, excluding: c) == nil)            // over itself
+        #expect(t.dropTarget(at: CGPoint(x: -5, y: -5), in: size, excluding: a) == nil)   // outside
+    }
 }
