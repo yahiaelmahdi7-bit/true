@@ -28,6 +28,18 @@ enum AgentHue: String, CaseIterable, Codable, Sendable {
         LinearGradient(colors: [light, deep], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 
+    /// Asleep: each stop pulled to 10% of its saturation (toward its own luma grey) — a faint hint of hue,
+    /// no brown mud. Done in the colours themselves, not with `.saturation()`, so it renders the same in
+    /// snapshots (ImageRenderer ignores that filter) and on screen.
+    var asleepGradient: LinearGradient {
+        func fade(_ hex: UInt32) -> Color {
+            let r = Double((hex >> 16) & 0xFF) / 255, g = Double((hex >> 8) & 0xFF) / 255, b = Double(hex & 0xFF) / 255
+            let y = 0.299 * r + 0.587 * g + 0.114 * b, k = 0.10
+            return Color(red: y + (r - y) * k, green: y + (g - y) * k, blue: y + (b - y) * k)
+        }
+        return LinearGradient(colors: [fade(stops.0), fade(stops.1)], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
     /// Black on the bright hues, white on the rest — whichever keeps the glyph readable.
     var glyphIsDark: Bool {
         switch self {
@@ -99,7 +111,7 @@ struct AgentAvatar: View {
         let d = size - (ringed ? (ringGap + 2) * 2 : 0)
         ZStack {
             if let hue {
-                Circle().fill(hue.gradient)
+                Circle().fill(status == .asleep ? hue.asleepGradient : hue.gradient)
                 Circle().fill(LinearGradient(colors: [.white.opacity(0.30), .clear], startPoint: .top, endPoint: .init(x: 0.5, y: 0.55)))
                     .clipShape(Circle())
                 Circle().strokeBorder(.white.opacity(0.22), lineWidth: 0.5)
@@ -113,8 +125,7 @@ struct AgentAvatar: View {
             }
         }
         .frame(width: d, height: d)
-        .saturation(status == .asleep && hue != nil ? 0.30 : 1)
-        .opacity(status == .asleep && hue != nil ? 0.60 : 1)
+        .opacity(status == .asleep && hue != nil ? 0.55 : 1)
         .shadow(color: glows ? (hue?.deep ?? .clear).opacity(glowOpacity) : .clear, radius: 8)
         .onAppear { if status == .working && !reduceMotion { withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { breathe = true } } }
         .onChange(of: status) { _, s in

@@ -7,7 +7,7 @@ Single macOS app process. SwiftUI shell + AppKit/SwiftTerm terminal panes. Local
 ## Components
 Sources/True/ (~11k lines incl. tests dir count separate) [source: `find Sources -name '*.swift'`]:
 - `Terminal/` SwiftTerm bridge, redraw coalescer, MemoryGuard (SIGSTOP flow control), scrollback snapshot, shell integration, drop handling
-- `Model/` SplitTree, workspace model/store, pane resume, session snapshot, KeepAwake, screenshot watcher
+- `Model/` SplitTree, workspace model/store, pane resume, session snapshot, KeepAwake + IdleGate + WorkAwake (work-gated), screenshot watcher
 - `Agents/` agent model + store, launch builder, hooks, events socket, registry, PaneDelivery, needs-you detector, control socket, JevClient/JevFill
 - `Hub/` HubModel (records, project key, dedupe, grouping), HubStore (DispatchSource watchers), BuilderSpawn
 - `Cleaner/` Context Cleaner (scan, rewrite via claude, apply/undo, Jev fact check/ordering)

@@ -43,8 +43,11 @@ Owner: cto · Last verified: 2026-09-30
 ## 2026-09-30 — True is THE cockpit; Axon forgotten
 - Context: Yahia: "forget axon we work on true only now". [source: ~/.claude/projects/-Users-y/memory/project_true.md]. Status: Accepted.
 
-## 2026-09-30 — Screen stays awake while True is open
+## 2026-09-30 — Screen stays awake while True is open (superseded by Run 9 below)
 - Superseded earlier rules ("no idle sleep while frontmost" → "only while an agent works" → "for as long as True is open", commit 8c09715). [source: git log]. Status: Latest wins.
 
 ## 2026-09-30 — Colour lives only in agent avatars (Run 8)
 - Decision: True is black & white; the single colour is the agent avatar's vivid gradient disc = identity (hue from name via FNV-1a unless chosen). Tier = brightness; status = monochrome. Supersedes the teal/blue/purple/gold tier colours. [source: SPEC.md Run 8]. Status: Accepted.
+
+## 2026-09-30 — KeepAwake is work-gated (Run 9)
+- Decision: hold the display-sleep assertion only while a live busy session, running builder, or fresh `.working` seat exists; release after 120 s continuous idle. Plain shell commands never count. Supersedes "for as long as True is open". [source: SPEC.md Run 9]. Status: Accepted.

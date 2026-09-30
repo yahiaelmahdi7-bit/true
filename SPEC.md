@@ -225,3 +225,19 @@ exercised through injected runners in tests; HubPanel is not visually verified (
 **Deviations:** ringed avatars keep the same outer footprint (the disc shrinks 8 pt inside the ring) so a column of rows stays aligned; "New Agent" empty-state button is a custom white capsule (`.borderedProminent` dims in a non-key window); XCTest is unavailable with the CLT toolchain so the harness uses swift-testing with `.enabled(if:)`.
 
 **Snapshots cannot show:** hover reveal, the breathing animation, row insert/remove transitions, real Liquid Glass; the message capsule shows faint edge ticks from the offscreen text field (not seen as a design issue, unverified live).
+
+## Run 9 — work-gated KeepAwake
+**Goal (Yahia, 2026-09-30):** the Mac may sleep when work is done; if agents are running they must also be idle to confirm idle. Replaces "screen stays on for as long as True is open" (Run 7 KeepAwake): the `PreventUserIdleDisplaySleep` assertion (reason "True: agents working") is now held only while work is happening.
+
+**What counts as work** (`Model/IdleGate.swift`, pure; pids are RE-PROBED at evaluation time, never trusted from scan time):
+- a peer session whose file says `busy` and whose pid is alive (seats in True's panes, interactive Claude sessions anywhere, helpers);
+- a builder in state `running` whose claude pid is alive (pid 0 = launch in progress = busy);
+- an awake seat with status `.working` whose last hook event is under 20 min old (older = stale, the stop hook never fired; a genuinely long tool call is still covered by the first rule because the Claude CLI keeps its session file busy).
+
+**What does not:** `.needsYou` (waiting on the human), idle/done/failed/asleep, dead pids, and plain shell commands in panes — a `tail -f`, ssh or htop would pin the Mac awake forever, so they are deliberately excluded.
+
+**Controller** (`Model/WorkAwake.swift`, backend behind `PowerAssertion`; `KeepAwake` is the real IOPM one): busy → hold immediately. Idle → release only after a 120 s grace of CONTINUOUS idle; any busy verdict inside it cancels (covers a lead finishing before its builder starts, and claude-burn's relaunch gap). Event-driven: `withObservationTracking` on `HubStore.peers/builders` and `AgentRegistry.status/latest/panes`. Only while held (or in grace) a repeating 60 s tick runs `HubStore.reload()` then re-evaluates, to catch processes that died with no file event; it is cancelled on release, so idle costs 0%. os.Logger `True`/`keepawake` logs each hold/release with reasons. Quitting True still drops the assertion (kernel).
+
+**Verify live:** `pmset -g assertions | grep "True: agents working"` — present while something works, gone ~2 min after everything is idle.
+
+**Asleep avatars:** fade to 10% saturation (in the gradient colours, not `.saturation()`, which ImageRenderer ignores) at 0.55 opacity — near grey, no brown.
