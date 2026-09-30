@@ -148,7 +148,8 @@ private func runTruectl(script: String, sock: String, from: String?, args: [Stri
         let paths = AgentPaths(root: dir)
         let reg = AgentRegistry(store: store, paths: paths, workspace: ws, claudeDir: dir)
         let sock = "/tmp/tc-\(UUID().uuidString.prefix(8)).sock"
-        return (reg, AgentControlSocket(path: sock, registry: reg), sock, paths)
+        // A hub over an empty temp ~/.claude: the tests never read the real sessions or builders.
+        return (reg, AgentControlSocket(path: sock, registry: reg, hub: HubStore(claudeDir: dir)), sock, paths)
     }
 
     @Test func statusAndErrorsOverTheSocket() async throws {

@@ -2,15 +2,18 @@ import Foundation
 
 /// The control socket (`~/.true/control.sock`): how an agent, from inside its own pane, asks True to
 /// do something — today, to *summon* another agent. Request/response, one JSON line each way:
-/// `{"op":"status"}` / `{"op":"summon","agent":"…","message":"…","from":"…"}`. The client is the
+/// `{"op":"status"}` / `{"op":"summon","agent":"…","message":"…","from":"…"}` /
+/// `{"op":"spawn","name":"…","promptFile":"…","repo":"…","worktree":true,"model":"…","from":"…"}`. The client is the
 /// `truectl` script (`AgentControl.truectl`), which tags `from` with `$TRUE_AGENT`.
 enum ControlRequest: Equatable, Sendable {
     case status
     case summon(agent: String, message: String, from: String?)
+    case spawn(SpawnRequest)
 
     /// Anything malformed returns nil — the socket is a doorbell, never a crash surface.
     static func parse(_ line: Data) -> ControlRequest? {
-        struct Wire: Decodable { let op: String; let agent: String?; let message: String?; let from: String? }
+        struct Wire: Decodable { let op: String; let agent: String?; let message: String?; let from: String?
+                             let name: String?; let promptFile: String?; let repo: String?; let worktree: Bool?; let model: String? }
         guard let w = try? JSONDecoder().decode(Wire.self, from: line) else { return nil }
         switch w.op {
         case "status":
@@ -18,6 +21,10 @@ enum ControlRequest: Equatable, Sendable {
         case "summon":
             guard let agent = w.agent, let message = w.message else { return nil }
             return .summon(agent: agent, message: message, from: w.from)
+        case "spawn":
+            guard let name = w.name, let promptFile = w.promptFile else { return nil }
+            return .spawn(SpawnRequest(name: name, promptFile: promptFile, repo: w.repo, worktree: w.worktree ?? false,
+                                       model: w.model ?? "sonnet", from: w.from))
         default:
             return nil
         }
@@ -32,6 +39,10 @@ struct ControlResponse: Encodable, Equatable, Sendable {
     var error: String?
     var outcome: String?
     var agents: [Row]?
+    /// The Hub snapshot (project → sessions) on `status`; every session on this Mac, not just seats.
+    var hub: [HubRow]?
+    /// The builder id on `spawn`.
+    var builderID: String?
 
     static func failure(_ message: String) -> ControlResponse { ControlResponse(ok: false, error: message) }
 
@@ -63,6 +74,13 @@ enum AgentControl {
         return message + "\n\n(Summoned by `\(from)`. When you finish or get blocked, reply to `\(from)` with the SendMessage tool — a one-line summary, what changed, the verification output.)"
     }
 
+    @MainActor private static func agentRows(_ registry: AgentRegistry) -> [ControlResponse.Row] {
+        registry.agents.map {
+            ControlResponse.Row(name: $0.name, role: $0.role.rawValue, repo: $0.repoName,
+                                status: registry.statusOf($0.name).rawValue, awake: registry.isAwake($0.name))
+        }
+    }
+
     /// How long a summon may wait for a sleeping agent to boot. `talk` gives up on its own after 60 s
     /// of no SessionStart; this is the backstop for a callback that never comes at all.
     static let summonTimeout: Duration = .seconds(90)
@@ -74,15 +92,33 @@ enum AgentControl {
     }
 
     @MainActor
-    static func handle(_ req: ControlRequest, registry: AgentRegistry,
+    static func handle(_ req: ControlRequest, registry: AgentRegistry, hub: HubStore = .shared,
+                       runner: @escaping BuilderSpawn.Runner = BuilderSpawn.systemRunner,
                        reply: @escaping @Sendable (ControlResponse) -> Void) {
         switch req {
         case .status:
-            let rows = registry.agents.map {
-                ControlResponse.Row(name: $0.name, role: $0.role.rawValue, repo: $0.repoName,
-                                    status: registry.statusOf($0.name).rawValue, awake: registry.isAwake($0.name))
+            // Fresh scan first: a lead asking "what is running?" must not get a 250 ms-old answer.
+            Task { @MainActor in
+                await hub.reload()
+                let groups = HubModel.build(seats: registry.agents, seatStatus: { registry.statusOf($0) },
+                                            seatAwake: { registry.isAwake($0) }, peers: hub.peers,
+                                            builders: hub.builders, now: Date().timeIntervalSince1970)
+                reply(ControlResponse(ok: true, agents: agentRows(registry),
+                                      hub: HubModel.rows(groups, seatStatus: { registry.statusOf($0) })))
             }
-            reply(ControlResponse(ok: true, agents: rows))
+        case .spawn(let request):
+            let caller = request.from.flatMap { registry.agent(named: $0) }
+            // A helper works inside its lead's brief; only a lead or global starts background work.
+            if let caller, caller.role == .helper {
+                return reply(.failure("\(caller.name) may not spawn (helpers work inside their lead's brief)"))
+            }
+            let callerRepo = caller.flatMap { $0.repo.isEmpty ? nil : $0.repo }
+            Task { @MainActor in
+                switch await BuilderSpawn.run(request, callerRepo: callerRepo, runner: runner) {
+                case .success(let id): reply(ControlResponse(ok: true, builderID: id))
+                case .failure(let e): reply(.failure(e.message))
+                }
+            }
         case .summon(let agent, let message, let from):
             guard let target = registry.agent(named: agent) else { return reply(.failure("no agent named \(agent)")) }
             let caller = from.flatMap { registry.agent(named: $0) }?.name
@@ -113,13 +149,17 @@ enum AgentControl {
         #!/usr/bin/env python3
         # truectl — the command-line door to the running True app (control socket).
         #   truectl status                        one line per agent: name  role  status  awake|asleep  repo
+        #   truectl status --json                 the raw reply (agents + the whole Hub: project → sessions)
         #   truectl summon <agent> <message...>   wake <agent> if asleep and deliver the brief ("-" = read stdin)
+        #   truectl spawn --name N --prompt-file F [--repo R] [--worktree] [--model M]
+        #                                         start a detached background build; prints "spawned <id>"
         # Sends one JSON line, waits for one reply line. stdout carries only the result; errors go to
         # stderr. Exit 0 ok, 1 refused/failed, 2 True is not running.
         import json, os, socket, sys
 
         DEFAULT_SOCK = __SOCKET__
-        USAGE = "usage: truectl status | truectl summon <agent> <message words... | ->"
+        USAGE = ("usage: truectl status [--json] | truectl summon <agent> <message words... | -> | "
+                 "truectl spawn --name N --prompt-file F [--repo R] [--worktree] [--model M]")
 
         def die(msg, code=1):
             sys.stderr.write(msg + "\n")
@@ -152,13 +192,46 @@ enum AgentControl {
                 die("True sent no usable reply")
 
         def main(argv):
-            if argv[:1] == ["status"] and len(argv) == 1:
+            if argv[:1] == ["status"] and argv[1:] in ([], ["--json"]):
                 r = call({"op": "status"})
                 if not r.get("ok"):
                     die(r.get("error") or "failed")
+                if argv[1:]:
+                    print(json.dumps(r, sort_keys=True))
+                    return
                 for a in r.get("agents") or []:
                     print("%s  %s  %s  %s  %s" % (a["name"], a["role"], a["status"],
                                                   "awake" if a["awake"] else "asleep", a["repo"]))
+                # The Hub beyond the seats above: background builds and other live sessions.
+                for h in r.get("hub") or []:
+                    if h["kind"] != "seat":
+                        print("hub  %s  %s  %s  %s" % (h["project"], h["kind"], h["name"], h["status"]))
+            elif argv[:1] == ["spawn"]:
+                opts = {"name": None, "prompt-file": None, "repo": None, "model": None}
+                worktree = False
+                i = 1
+                while i < len(argv):
+                    flag = argv[i]
+                    if flag == "--worktree":
+                        worktree = True
+                        i += 1
+                    elif flag.startswith("--") and flag[2:] in opts and i + 1 < len(argv):
+                        opts[flag[2:]] = argv[i + 1]
+                        i += 2
+                    else:
+                        die(USAGE)
+                if not opts["name"] or not opts["prompt-file"]:
+                    die(USAGE)
+                wire = {"op": "spawn", "name": opts["name"], "promptFile": os.path.abspath(opts["prompt-file"]),
+                        "worktree": worktree, "from": os.environ.get("TRUE_AGENT")}
+                if opts["repo"]:
+                    wire["repo"] = os.path.abspath(opts["repo"])
+                if opts["model"]:
+                    wire["model"] = opts["model"]
+                r = call(wire)
+                if not r.get("ok"):
+                    die(r.get("error") or "failed")
+                print("spawned %s" % r.get("builderID"))
             elif argv[:1] == ["summon"] and len(argv) >= 3:
                 agent = argv[1]
                 message = sys.stdin.read() if argv[2:] == ["-"] else " ".join(argv[2:])
@@ -180,13 +253,13 @@ enum AgentControl {
 final class AgentControlSocket: @unchecked Sendable {
     private let server: LineSocketServer
 
-    init(path: String, registry: AgentRegistry) {
+    init(path: String, registry: AgentRegistry, hub: HubStore? = nil, runner: @escaping BuilderSpawn.Runner = BuilderSpawn.systemRunner) {
         server = LineSocketServer(path: path) { line, reply in
             guard let req = ControlRequest.parse(line) else {
                 return reply(ControlResponse.failure("bad request").encoded())
             }
             Task { @MainActor in
-                AgentControl.handle(req, registry: registry) { reply($0.encoded()) }
+                AgentControl.handle(req, registry: registry, hub: hub ?? .shared, runner: runner) { reply($0.encoded()) }
             }
         }
     }
