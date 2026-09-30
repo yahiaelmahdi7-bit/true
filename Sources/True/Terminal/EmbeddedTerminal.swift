@@ -44,6 +44,9 @@ struct EmbeddedTerminal: NSViewRepresentable {
     @AppStorage(TerminalSettings.cursorKey) private var cursor = TerminalSettings.Cursor.steadyBlock.rawValue
     @AppStorage(TerminalSettings.scrollbackKey) private var scrollback = TerminalSettings.defaultScrollback
 
+    /// The pane's claude-burn token: filename-safe, short, and the same for the same pane every launch.
+    nonisolated static func burnToken(_ pane: UUID) -> String { "true-" + pane.uuidString.prefix(8).lowercased() }
+
     func makeCoordinator() -> Coordinator { Coordinator(paneID: paneID) }
 
     func makeNSView(context: Context) -> TrueTerminalView {
@@ -72,11 +75,14 @@ struct EmbeddedTerminal: NSViewRepresentable {
 
         var env: [String: String] = [:]
         for (k, v) in ProcessInfo.processInfo.environment
-        where k != "CLAUDECODE" && !k.hasPrefix("CLAUDE_CODE_") { env[k] = v }
+        where k != "CLAUDECODE" && !k.hasPrefix("CLAUDE_CODE_") && !k.hasPrefix("BURN_") { env[k] = v }
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
         // Every pane names itself so the hook forwarder can say which pane an event came from.
         env["TRUE_PANE_ID"] = paneID.uuidString
+        // Pane ids survive restore, so claude-burn in this pane keeps one token (and one HANDOFF-<token>.md)
+        // across True restarts instead of orphaning it under a fresh pid token.
+        env["BURN_WRAPPER_TOKEN"] = Self.burnToken(paneID)
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         ShellIntegration.apply(to: &env, shell: shell)
         let dir = FileManager.default.fileExists(atPath: startDir) ? startDir : NSHomeDirectory()

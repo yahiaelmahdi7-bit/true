@@ -22,12 +22,15 @@ enum AgentLaunch {
         "'" + s.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
     }
 
-    /// What the pane's login shell runs. `exec` replaces the shell with claude, so SIGTERM on the
-    /// pane's pid lands on claude itself. A missing `claude` leaves a usable shell and says why,
+    /// What the pane's login shell runs: argv[0] goes through `~/.claude/bin/claude-burn` when it is installed
+    /// (the same launcher as the user's `claude` alias, so seats get burn-control resets), plain `claude`
+    /// otherwise. `exec` makes the launcher the pane's pid with claude as its child in the same process group;
+    /// `AgentRegistry.sleep` signals the group. A missing `claude` leaves a usable shell and says why,
     /// rather than a pane that flashes and vanishes.
     static func shellCommand(argv: [String]) -> String {
-        "command -v claude >/dev/null 2>&1 || { echo \"True: 'claude' was not found on PATH\"; exec \"${SHELL:-/bin/zsh}\" -l; }; exec "
-            + argv.map(shellQuote).joined(separator: " ")
+        #"L="$HOME/.claude/bin/claude-burn"; [ -x "$L" ] || L=claude; "#
+            + #"command -v "$L" >/dev/null 2>&1 || { echo "True: 'claude' was not found on PATH"; exec "${SHELL:-/bin/zsh}" -l; }; exec "$L""#
+            + argv.dropFirst().map { " " + shellQuote($0) }.joined()
     }
 
     /// Claude keeps a repo's transcripts in `<config>/projects/<cwd with / and . as ->/<id>.jsonl`.

@@ -129,7 +129,38 @@ private func tempDir() -> URL {
 
     @Test func shellCommandQuotesAndExecs() {
         let cmd = AgentLaunch.shellCommand(argv: ["claude", "--name", "it's"])
-        #expect(cmd.hasSuffix("exec 'claude' '--name' 'it'\\''s'"))
+        #expect(cmd.hasSuffix(#"exec "$L" '--name' 'it'\''s'"#))
+    }
+
+    /// Run the real launch line: claude-burn when installed, plain `claude` on PATH when not.
+    @Test func shellCommandPrefersClaudeBurn() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("burn-\(UUID().uuidString)")
+        let bin = home.appendingPathComponent(".claude/bin"), path = home.appendingPathComponent("path")
+        defer { try? FileManager.default.removeItem(at: home) }
+        func fake(_ url: URL, _ tag: String) throws {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try "#!/bin/sh\necho \(tag) \"$@\"\n".write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+        try fake(path.appendingPathComponent("claude"), "plain")
+        func run() throws -> String {
+            let p = Process(), out = Pipe()
+            p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            p.arguments = ["-c", AgentLaunch.shellCommand(argv: ["claude", "--name", "it's"])]
+            p.environment = ["HOME": home.path, "PATH": path.path + ":/usr/bin:/bin"]
+            p.standardOutput = out
+            try p.run(); p.waitUntilExit()
+            return String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        }
+        #expect(try run() == "plain --name it's\n")
+        try fake(bin.appendingPathComponent("claude-burn"), "burn")
+        #expect(try run() == "burn --name it's\n")
+    }
+
+    @Test func burnTokenIsStablePerPane() {
+        let pane = UUID(uuidString: "1A2B3C4D-0000-4000-8000-000000000000")!
+        #expect(EmbeddedTerminal.burnToken(pane) == "true-1a2b3c4d")
+        #expect(EmbeddedTerminal.burnToken(pane) == EmbeddedTerminal.burnToken(pane))
     }
 
     @Test func globalAndLeadCardsTeachSummon() {

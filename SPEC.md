@@ -269,6 +269,12 @@ The Hub is a **centered pop-up over the terminal**, not a side panel: the termin
 - **Type/contrast:** `Theme.hubSecondary` 0.82 white (>=7:1 over the tinted glass); seat card avatar 44 pt, rows 52 pt with 32 pt avatars; sections are a quiet header + one soft card (`hubCardFill` 0.05 / `hubCardStroke` 0.08, radius 14).
 - Snapshots: `HubSnapshotTests` (skipped unless `TRUE_SNAPSHOT_DIR`); approved PNGs in `docs/design/hub-v4/` (hub-glass, then hub-v3, are the earlier rounds, kept for the record).
 
+## Run 11 — burn control in panes (2026-10-01)
+- **Stable token per pane:** every pane's env gets `BURN_WRAPPER_TOKEN=true-<first 8 of pane UUID>` (`EmbeddedTerminal.burnToken`) and inherited `BURN_*` is dropped. Pane ids survive restore, so `claude-burn` in a restored pane keeps its `HANDOFF-<token>.md` instead of orphaning it under a fresh pid token.
+- **Seats launch through claude-burn:** `AgentLaunch.shellCommand` execs `~/.claude/bin/claude-burn` when executable, else plain `claude` (claude-burn keeps --settings/--name/--model/--effort/--permission-mode/role file on relaunch; drops --resume and the prompt).
+- **Sleep signals the process group** (`kill(-pid, …)`, pid fallback): the pane pid is the launcher and claude is its child in the same group.
+- Hook side (outside this repo, `~/.claude/hooks`): handoff path = claude-burn's launch dir from `state/live-<token>`, not the session's drifting cwd; `lib/bg-pending.py` retires a background task stopped with TaskStop (no notification is ever sent for it).
+
 ## Panes and layout
 - **Even tiling only.** Every add (split), close or drop re-evens the same-axis row/column it touched (1/2, then 1/3 each…); a stacked pair counts as one slot. Other rows keep their sizes; manual divider drags persist until the next add/close/drop in that row. No preset-layout menu.
 - **Pick up:** hovering the top-centre of a pane (only when the tab has 2+ panes) shows a small grip. Only the grip's own rect takes the mouse — terminal clicks, selection and scrolling are never intercepted. Detach = within this window and tab only.

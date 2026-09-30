@@ -184,10 +184,12 @@ final class AgentRegistry {
         view.resumeChild()
         let pid = view.process.shellPid
         guard pid > 0 else { workspace.paneExited(pane); return }
-        kill(pid, SIGTERM)
+        // The pane's pid is claude-burn with claude as its child (same process group): signal the group,
+        // or TERM would end the launcher alone and orphan claude in the pane.
+        if kill(-pid, SIGTERM) != 0 { kill(pid, SIGTERM) }
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(3))
-            if TerminalRegistry.shared.view(for: pane) != nil { kill(pid, SIGKILL) }
+            if TerminalRegistry.shared.view(for: pane) != nil, kill(-pid, SIGKILL) != 0 { kill(pid, SIGKILL) }
         }
     }
 
