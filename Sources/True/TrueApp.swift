@@ -78,6 +78,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // A SwiftPM executable starts with no bundle policy; without this it gets no menu bar/Dock icon.
         NSApp.setActivationPolicy(.regular)
+        // Launch side effect: paint the live Dock tile with the bare cursive T. The bundle icon alone gets
+        // boxed into a grey tile by macOS 26; a runtime image is drawn as-is. One-shot, no ongoing cost.
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: url) {
+            NSApp.applicationIconImage = icon
+        }
         NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil,
                                                queue: .main) { n in
             guard let w = n.object as? NSWindow else { return }
