@@ -20,6 +20,7 @@ extension AgentStatus {
         case .working: return Color(white: 0.90)
         case .needsYou: return Color(white: 1.0)
         case .done: return Color(white: 0.65)
+        case .failed: return Color(white: 0.55)
         }
     }
 }

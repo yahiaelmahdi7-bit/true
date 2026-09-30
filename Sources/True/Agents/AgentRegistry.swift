@@ -6,6 +6,8 @@ import Darwin
 /// watching output.
 enum AgentStatus: String, Sendable {
     case asleep, idle, working, needsYou, done
+    /// Hub only: a background builder that failed, was killed or died. No hook event leads here.
+    case failed
 
     var label: String {
         switch self {
@@ -14,6 +16,7 @@ enum AgentStatus: String, Sendable {
         case .working: return "Working"
         case .needsYou: return "Needs you"
         case .done: return "Done"
+        case .failed: return "Failed"
         }
     }
 
