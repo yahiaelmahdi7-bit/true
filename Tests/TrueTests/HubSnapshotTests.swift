@@ -75,7 +75,7 @@ struct HubSnapshotTests {
     }
 
     private func hub(groups: [HubProjectGroup], seats: [Agent], seatsOnly: Bool = false) -> some View {
-        HubPanelContent(groups: groups, allSeats: seats, seatsOnly: .constant(seatsOnly), now: Self.now, actions: actions)
+        HubPanelContent(groups: groups, allSeats: seats, filter: .constant(seatsOnly ? .seats : .all), now: Self.now, actions: actions)
     }
 
     // MARK: snapshots

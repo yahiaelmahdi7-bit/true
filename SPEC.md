@@ -211,6 +211,8 @@ listed above); `truectl status --json` prints the raw reply including `hub`. Hel
 `spawn`. `ControlResponse` gained `hub` and `builderID`. `systemRunner` (real builder launch) is only
 exercised through injected runners in tests; HubPanel is not visually verified (app not launched).
 
+**Crew tab (as built, 2026-09-30):** the Hub picker is **All / Seats / Crew** (`HubFilter` replaces `seatsOnly`; `HubModel` still takes `seatsOnly: filter == .seats`). Crew = Claude Code sub-agent files (`*.md` + YAML frontmatter), never called seats. Sources: `<project root>/.claude/agents` (root via `HubProject.key`, only when a `.git` exists) and `~/.claude/agents`; a global with the same `name` as a project one is hidden. Project crew groups by job family (Lead, Engineering, Design, Security, Knowledge, Other) after stripping the repo prefix; global groups by name prefix when 3+ share it, else General, each a collapsed disclosure. Click stages `Use the <name> agent to ` (not submitted) via `PaneDelivery.write(.stage)` when the focused pane hosts Claude (awake seat, or `SessionSnapshot.probe(pane).found`), then re-focuses the pane; otherwise copies it and shows "Copied: no Claude pane focused" for 3 s (one-shot `Task.sleep`). Loading: one off-main scan via `.task(id:)` when the Crew tab is visible or the focused cwd changes; no watcher/timer; last result cached in `CrewStore`. Code: `Hub/CrewModel.swift`, `Hub/CrewDelivery.swift`, `Views/CrewView.swift`; tests `CrewTests.swift`. Not visually verified (app not launched).
+
 ## Run 8 — Hub design pass (monochrome + one colour)
 **Goal (Yahia, 2026-09-30):** Hub on par with Apple-level design, keeping the minimal black-and-white look, with a pop of vibrant colour for agent profile pictures.
 

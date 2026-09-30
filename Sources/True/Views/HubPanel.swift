@@ -7,6 +7,15 @@ struct HubPanel: View {
     let registry: AgentRegistry
     @State private var hub = HubStore.shared
     @State private var detail: BuilderRecord?
+    @State private var crew = CrewStore.shared
+    @State private var crewNotice: String?
+
+    private struct CrewTrigger: Hashable { var active: Bool; var cwd: String }
+
+    private var focusedCwd: String {
+        let t = WorkspaceModel.shared.selectedTab
+        return t.cwds[t.focusedPane] ?? NSHomeDirectory()
+    }
 
     var body: some View {
         // The elapsed-time ticker lives here, not in the model: a TimelineView only ticks while it is in
@@ -15,14 +24,27 @@ struct HubPanel: View {
             let now = timeline.date.timeIntervalSince1970
             let groups = HubModel.build(seats: registry.agents, seatStatus: { registry.statusOf($0) },
                                         seatAwake: { registry.isAwake($0) }, peers: hub.peers,
-                                        builders: hub.builders, now: now, seatsOnly: hub.seatsOnly)
-            HubPanelContent(groups: groups, allSeats: registry.agents, seatsOnly: $hub.seatsOnly, now: now,
+                                        builders: hub.builders, now: now, seatsOnly: hub.filter == .seats)
+            HubPanelContent(groups: groups, allSeats: registry.agents, filter: $hub.filter, now: now,
                             actions: .live(registry),
                             onNew: { registry.builder = BuilderDraft() },
                             onDetail: { detail = $0 },
-                            onReveal: { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: $0.cwd)]) })
+                            onReveal: { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: $0.cwd)]) },
+                            crew: crew.snapshot, crewNotice: crewNotice,
+                            onCrewPick: { crewNotice = CrewDelivery.pick($0) })
         }
         .onAppear { hub.hubAppeared() }
+        // Crew scan: only while the Crew tab is showing, and again when the focused pane's cwd changes.
+        // `.task(id:)` runs once per id change and cancels with the view: no watcher, timer or poll.
+        .task(id: CrewTrigger(active: hub.filter == .crew, cwd: focusedCwd)) {
+            if hub.filter == .crew { await crew.refresh(cwd: focusedCwd) }
+        }
+        // One-shot auto-hide of the "Copied" notice; a new notice restarts it.
+        .task(id: crewNotice) {
+            guard crewNotice != nil else { return }
+            try? await Task.sleep(for: .seconds(3))
+            if !Task.isCancelled { crewNotice = nil }
+        }
         .sheet(item: $detail) { BuilderDetailSheet(record: $0) }
     }
 }
@@ -33,18 +55,24 @@ struct HubPanelContent: View {
     let groups: [HubProjectGroup]
     /// Every saved seat — a builder's `parent` may live in another project's group.
     let allSeats: [Agent]
-    @Binding var seatsOnly: Bool
+    @Binding var filter: HubFilter
     let now: Double
     let actions: SeatActions
     var onNew: () -> Void = {}
     var onDetail: (BuilderRecord) -> Void = { _ in }
     var onReveal: (PeerSession) -> Void = { _ in }
+    var crew: CrewSnapshot?
+    var crewNotice: String?
+    var onCrewPick: (CrewAgent) -> Void = { _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
             header
-            if groups.isEmpty && allSeats.isEmpty {
+            if filter == .crew {
+                CrewTabView(snapshot: crew, notice: crewNotice, onPick: onCrewPick)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: crewNotice)
+            } else if groups.isEmpty && allSeats.isEmpty {
                 ContentUnavailableView {
                     Label("No agents yet", systemImage: "person.crop.circle.badge.plus")
                 } description: {
@@ -93,9 +121,10 @@ struct HubPanelContent: View {
                 }
                 .buttonStyle(.plain).help("New Agent").accessibilityLabel("New Agent")
             }
-            Picker("Show", selection: $seatsOnly) {
-                Text("All").tag(false)
-                Text("Seats").tag(true)
+            Picker("Show", selection: $filter) {
+                Text("All").tag(HubFilter.all)
+                Text("Seats").tag(HubFilter.seats)
+                Text("Crew").tag(HubFilter.crew)
             }
             .pickerStyle(.segmented).labelsHidden().controlSize(.small)
         }
@@ -151,7 +180,7 @@ func hubElapsed(_ seconds: Double) -> String {
 }
 
 /// A lighter row than a seat card: nothing at rest, a faint fill on hover, 44 pt tall.
-private struct HubRowFrame<Content: View>: View {
+struct HubRowFrame<Content: View>: View {
     @ViewBuilder var content: Content
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

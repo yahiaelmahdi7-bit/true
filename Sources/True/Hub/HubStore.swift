@@ -59,6 +59,8 @@ enum HubScanner {
     }
 }
 
+enum HubFilter: Hashable, CaseIterable { case all, seats, crew }
+
 /// The Hub's live data: peer sessions and builders, refreshed when either directory changes (and when
 /// the Hub becomes visible). Event-driven — no timers: a DispatchSource per watched path parks in
 /// kqueue at 0% CPU. Directory sources catch files added/removed/renamed; a running builder's meta.json
@@ -70,8 +72,8 @@ final class HubStore {
 
     private(set) var peers: [PeerSession] = []
     private(set) var builders: [BuilderRecord] = []
-    /// "All" (default) or "Seats" — the toggle at the top of the Hub.
-    var seatsOnly = false
+    /// All (default) / Seats / Crew — the toggle at the top of the Hub.
+    var filter: HubFilter = .all
 
     @ObservationIgnored private let sessionsDir: URL
     @ObservationIgnored private let buildersDir: URL
