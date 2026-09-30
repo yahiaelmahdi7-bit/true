@@ -90,8 +90,8 @@ to four **helpers** (`helper-1-<repo>` … `helper-4-<repo>`), the naming Axon's
    --append-system-prompt-file ~/.true/roles/<name>.md --settings ~/.true/hooks/<name>.settings.json
    [--resume <id>]`. Write the role file from charter + role card (a lead's card must tell it to
    hand work to its helpers by name with SendMessage). Sleeping ends the process cleanly (Axon memory:
-   SIGTERM-proof teardown) and keeps the session id. Agents start ASLEEP on launch — a running agent
-   costs ~22 processes, so nothing wakes by itself.
+   SIGTERM-proof teardown) and keeps the session id. Agents that were awake when True quit are re-woken on
+   launch into the same pane with `--resume`; nothing else wakes by itself.
 5. **Live status:** per-agent hook settings post Claude Code hook events (SessionStart, UserPromptSubmit,
    PreToolUse, Notification, PermissionRequest, Stop) to `~/.true/agent-events.sock`. Lift Axon
    `Sources/Axon/Desk/AgentEvents.swift` (socket) and `AgentHooks.swift` (hook script + settings),
@@ -113,3 +113,17 @@ to four **helpers** (`helper-1-<repo>` … `helper-4-<repo>`), the naming Axon's
 ## Later (not v1)
 Smart input (one box: shell command vs agent request, next-command, commit/PR text) · 3D/illustrated
 character art (no Gemini) · Nova as a separate menu-bar app driving True over a control socket.
+
+## Run 4 — Restore (exactly where he left off)
+- **⌘O** opens the picked project as a split (axis horizontal) beside the focused pane of the selected tab;
+  ⌘↩ starts Claude in that new pane only.
+- **Records:** `TabState.resume: [UUID: PaneResume]?` in `~/.true/workspace.json` (`.claude(sessionID, cwd)` /
+  `.agent(name)`). Optional, so v1 files still decode; `version` is NOT bumped.
+- **Snapshot triggers (event-driven, no timers):** `applicationShouldTerminate`, main-window `willClose`,
+  a one-shot ~2.5 s after Return in a pane, and any `.session` hook event. A gone view keeps its old record.
+- **Claude discovery:** walk the shell's descendants (≤5 deep) for a `<claudeConfigDir>/sessions/<pid>.json`
+  with `kind == "interactive"`; resume with `claude --resume <id>` if the transcript exists.
+- **Agents** recorded as awake are re-woken in the same pane before first render.
+- **Plain shells:** at quit/close the normal buffer (scrollback+screen, with colours) is saved to
+  `~/.true/scrollback/<pane>.ans` + `.json` (mode 0600) and replayed before the shell starts, followed by a
+  dim `── restored · … ──` marker line. Nothing is re-run.
