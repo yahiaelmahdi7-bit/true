@@ -92,7 +92,7 @@ struct ProjectPaletteView: View {
 
     private var footer: some View {
         HStack {
-            Text("↩ Open   ⌘↩ Open with Claude   esc Close")
+            Text("↩ Open beside   ⌘↩ Open with Claude   esc Close")
                 .font(.caption).foregroundStyle(.secondary)
             Spacer()
             Button("Add Folder…") { palette.addFolder() }

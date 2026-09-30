@@ -114,4 +114,34 @@ import Foundation
         t.customName = "  api "
         #expect(t.title == "api")
     }
+
+    // MARK: Open Project as a split (⌘O)
+
+    @MainActor @Test func openProjectSplitsBesideFocusedPaneInSelectedTab() {
+        let m = WorkspaceModel(store: WorkspaceStore(url: tempURL()))
+        _ = m.state.addTab(cwd: "/usr")          // two tabs; the new one is selected
+        let before = m.state.tabs.count
+        let tab = m.selectedTab
+        let name = "keep me"
+        m.rename(tab: tab.id, to: name)
+        let new = m.openProjectBeside(path: "/tmp/proj", startupCommand: "echo hi")
+        let after = m.selectedTab
+        #expect(m.state.tabs.count == before)                       // no new tab
+        #expect(after.id == tab.id && after.customName == name)     // same tab, name untouched
+        #expect(after.tree.leafIDs == [tab.focusedPane, new])       // beside the focused pane
+        #expect(after.focusedPane == new && after.cwds[new] == "/tmp/proj")
+        #expect(PaneStartup.shared.take(new) == "echo hi")          // startup on the NEW pane only
+        #expect(PaneStartup.shared.take(tab.focusedPane) == nil)
+        let plain = m.openProjectBeside(path: "/tmp/other", startupCommand: nil)
+        #expect(PaneStartup.shared.take(plain) == nil)
+    }
+
+    @MainActor @Test func splitFocusedInheritsCwd() {
+        let m = WorkspaceModel(store: WorkspaceStore(url: tempURL()))
+        let first = m.selectedTab.focusedPane
+        m.updateCwd(pane: first, "/var")
+        m.splitFocused(.vertical)
+        let t = m.selectedTab
+        #expect(t.tree.leafIDs.count == 2 && t.cwds[t.focusedPane] == "/var")
+    }
 }

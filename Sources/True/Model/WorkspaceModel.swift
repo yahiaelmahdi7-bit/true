@@ -45,13 +45,14 @@ final class WorkspaceModel {
         _ = state.addTab(cwd: cwd)
     }
 
-    /// A new tab in `path` (Open Project). No custom name: the title falls back to the folder name.
-    /// `startupCommand` runs once in the new pane instead of a bare shell; it is never persisted.
+    /// Open Project: a new pane beside the selected tab's focused pane (Split Right), in `path`, focused.
+    /// The tab count and its custom name are untouched. `startupCommand` runs once in the new pane
+    /// instead of a bare shell; it is never persisted.
     @discardableResult
-    func openProject(path: String, startupCommand: String?) -> UUID {
-        let t = state.addTab(cwd: path)
-        if let c = startupCommand { PaneStartup.shared.set(c, for: t.focusedPane) }
-        return t.focusedPane
+    func openProjectBeside(path: String, startupCommand: String?) -> UUID {
+        let new = split(.horizontal, cwd: path)
+        if let c = startupCommand { PaneStartup.shared.set(c, for: new) }
+        return new
     }
 
     /// An ordinary tab, named after the agent, that the registry then starts `claude` in.
@@ -83,15 +84,21 @@ final class WorkspaceModel {
         if state.selectedTab != state.tabs[i].id { state.selectedTab = state.tabs[i].id }
     }
 
-    func splitFocused(_ axis: SplitTree.Axis) {
+    func splitFocused(_ axis: SplitTree.Axis) { split(axis, cwd: nil) }
+
+    /// The one split path: a new leaf beside the selected tab's focused pane, focused. `cwd` nil = inherit
+    /// the focused pane's current directory.
+    @discardableResult
+    func split(_ axis: SplitTree.Axis, cwd: String?) -> UUID {
         let i = state.selectedIndex
         let tab = state.tabs[i]
         let new = UUID()
         refreshCwd(pane: tab.focusedPane)
-        let cwd = state.tabs[i].cwds[tab.focusedPane] ?? NSHomeDirectory()
+        let dir = cwd ?? state.tabs[i].cwds[tab.focusedPane] ?? NSHomeDirectory()
         state.tabs[i].tree = tab.tree.inserting(new, beside: tab.focusedPane, axis: axis)
-        state.tabs[i].cwds[new] = cwd
+        state.tabs[i].cwds[new] = dir
         state.tabs[i].focusedPane = new
+        return new
     }
 
     func moveFocus(_ dir: SplitTree.Direction) {

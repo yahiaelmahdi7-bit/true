@@ -102,13 +102,13 @@ final class ProjectPalette {
         open(rows[highlight], withClaude: withClaude)
     }
 
-    /// New tab in the project's folder; with Claude, the pane boots into `claude` and falls back to a shell.
+    /// A split beside the focused pane, in the project's folder; with Claude, the pane boots into `claude` and falls back to a shell.
     func open(_ p: Project, withClaude: Bool) {
         config.recordOpen(p.path)
         store.save(config)
         isOpen = false
         generation += 1
-        workspace.openProject(path: p.path, startupCommand: withClaude ? PaneStartup.claudeCommand(settings: AgentPaths.standard.paneSettingsPath) : nil)
+        workspace.openProjectBeside(path: p.path, startupCommand: withClaude ? PaneStartup.claudeCommand(settings: AgentPaths.standard.paneSettingsPath) : nil)
         refocusTerminal()
     }
 
