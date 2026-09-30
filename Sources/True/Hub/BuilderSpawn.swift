@@ -74,8 +74,10 @@ enum BuilderSpawn {
     }
 
     /// Reply text for `truectl`: `.success(id)` or `.failure(error text)`.
-    static func run(_ req: SpawnRequest, callerRepo: String?, runner: Runner) async -> Result<String, SpawnError> {
-        switch req.command(callerRepo: callerRepo) {
+    static func run(_ req: SpawnRequest, callerRepo: String?, runner: Runner, home: String = NSHomeDirectory(),
+                    fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+                    isDirectory: (String) -> Bool = { var d: ObjCBool = false; return FileManager.default.fileExists(atPath: $0, isDirectory: &d) && d.boolValue }) async -> Result<String, SpawnError> {
+        switch req.command(callerRepo: callerRepo, home: home, fileExists: fileExists, isDirectory: isDirectory) {
         case .failure(let e): return .failure(e)
         case .success(let argv):
             let (code, out) = await runner(argv)
