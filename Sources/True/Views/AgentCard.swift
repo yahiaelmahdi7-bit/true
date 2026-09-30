@@ -141,39 +141,3 @@ struct AgentCard: View {
         }
     }
 }
-
-struct AgentsPanel: View {
-    let registry: AgentRegistry
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Agents").font(.headline)
-                Spacer()
-                Button { registry.builder = BuilderDraft() } label: { Image(systemName: "plus") }
-                    .buttonStyle(.borderless).help("New Agent")
-            }
-            .padding(.horizontal, 14).frame(height: 38)
-            Divider()
-            if registry.agents.isEmpty {
-                ContentUnavailableView("No agents yet", systemImage: "person.crop.circle.badge.plus",
-                                       description: Text("Press + to build your first one. Agents start asleep."))
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        ForEach(AgentRegistry.grouped(registry.agents), id: \.key) { group in
-                            VStack(alignment: .leading, spacing: 8) {
-                                Label(group.title, systemImage: group.key.isEmpty ? "globe" : "folder")
-                                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                                ForEach(group.agents) { AgentCard(agent: $0, registry: registry) }
-                            }
-                        }
-                    }
-                    .padding(12)
-                }
-            }
-        }
-        .frame(width: 330)
-        .background(Theme.background)
-    }
-}

@@ -89,6 +89,12 @@ enum AgentLaunch {
             4. If a helper is waiting on a decision only you can make, answer it before anything else.
             5. A global agent may summon you. When it does, do the work through your helpers as usual and
                reply to that global agent by name with `SendMessage` when done or blocked.
+            6. Run `truectl status` before starting anything sizeable: it lists every agent and, under
+               `hub`, every background build and other live session — so you do not duplicate work.
+            7. For long or unattended work, start a background build: `truectl spawn --name <name>
+               --prompt-file <file> [--repo <path>] [--worktree] [--model sonnet]`. It survives context
+               resets and shows under Background in the Hub. Use `truectl summon` instead when the work
+               is interactive and needs a helper seat.
             """
         case .helper:
             let lead = all.first { $0.role == .lead && AgentNaming.repoSlug($0.repo) == slug }?.name

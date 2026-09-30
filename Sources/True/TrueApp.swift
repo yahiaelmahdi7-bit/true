@@ -13,7 +13,7 @@ struct TrueApp: App {
                 TerminalArea(model: model)
                 if registry.panelOpen {
                     Theme.hairline.frame(width: 1)
-                    AgentsPanel(registry: registry).transition(.move(edge: .trailing))
+                    HubPanel(registry: registry).transition(.move(edge: .trailing))
                 }
             }
             // Content stays below the title-bar zone: on macOS 26 SwiftUI lays views out there under
@@ -49,8 +49,8 @@ struct TrueApp: App {
                 Button("Paste Latest Screenshot") { ScreenshotWatcher.shared.pasteLatest() }
                     .keyboardShortcut("v", modifiers: [.command, .option])
             }
-            CommandMenu("Agents") {
-                Button("Toggle Agents Panel") { registry.panelOpen.toggle() }.keyboardShortcut("e")
+            CommandMenu("Hub") {
+                Button("Toggle Hub") { registry.panelOpen.toggle() }.keyboardShortcut("e")
                 Button("Needs You") { NeedsYouQueue.shared.trayOpen.toggle() }
                     .keyboardShortcut("u", modifiers: [.command, .shift])
                 Divider()
@@ -109,6 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = controlSocket?.start()
         AgentHooks.installClient(paths: AgentPaths.standard)   // the door's client, before any agent wakes
         AgentHooks.installPaneHooks(paths: AgentPaths.standard)  // two small files, rewritten only if stale
+        // The Hub's data: one directory scan plus a few kqueue watches on ~/.claude/sessions and
+        // ~/.claude/builders — event-driven, 0% CPU when idle, no timer. Read-only; never opens *.key.
+        HubStore.shared.start()
         // Screen stays on (so it never locks) only while some agent is working or waiting on you.
         KeepAwake.shared.follow(AgentRegistry.shared)
         // One kqueue watch on the screenshot folder: 0% CPU when idle, and it is what makes "fresh" possible.
