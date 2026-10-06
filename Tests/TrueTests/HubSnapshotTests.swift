@@ -94,6 +94,38 @@ struct HubSnapshotTests {
         try snapshot("hub-empty", width: HubPanelContent.width, height: 420) { hub(groups: [], seats: []) }
     }
 
+    // MARK: Overseer
+
+    @Test func overseerVerdicts() throws {
+        let t = Date(timeIntervalSince1970: Self.now)
+        let kinds: [(VerdictKind, String, Double)] = [
+            (.blocked, "Hit an error", 90), (.asksYou, "Waiting on your answer", 300),
+            (.unverified, "Says done; no check ran", 600), (.asksToContinue, "Wants to carry on", 900),
+            (.partial, "Stopped with work left", 1500), (.verified, "A check ran after the work", 30)]
+        var verdicts: [UUID: OverseerVerdict] = [:]
+        var names: [UUID: String] = [:]
+        for (i, k) in kinds.enumerated() {
+            let id = UUID()
+            verdicts[id] = OverseerVerdict(kind: k.0, reason: k.1, at: t.addingTimeInterval(-k.2), sessionID: "v\(i)",
+                                           cwd: i % 2 == 0 ? "/Users/y/Projects/true" : "/Users/y/Projects/finance-desk")
+            if i < 2 { names[id] = i == 0 ? "lead" : "cfo" }
+        }
+        let rows = YourMoveRow.build(verdicts, seatName: { names[$0] }, tabTitle: { _ in "2" })
+        var a = actions
+        a.verdict = { $0 == "lead" ? .blocked : $0 == "cfo" ? .asksYou : nil }
+        try snapshot("overseer-all-card", width: 1000, height: 780) {
+            popUp {
+                HubPanelContent(groups: groups(), allSeats: [lead, helper, cfo], filter: .constant(.all), now: Self.now,
+                                actions: a, yourMove: rows, peerVerdict: { _ in .unverified })
+            }
+        }
+        try snapshot("overseer-badges", width: 420) {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(VerdictKind.allCases, id: \.self) { VerdictBadge(kind: $0) }
+            }.padding(20)
+        }
+    }
+
     // MARK: crew + card
 
     private func crewAgent(_ n: String, _ d: String, _ m: String = "sonnet") -> CrewAgent {
