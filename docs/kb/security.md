@@ -22,5 +22,7 @@ One dependency, SwiftTerm, pinned in Package.resolved. [source: Package.swift]. 
 ## Open risks (ranked)
 1. Socket access control unverified. 2. Scrollback at rest is plaintext (0600 only). 3. Signing cert is self-signed, not notarized. 4. Builder `--parent` edit touches shared live infra (backup exists at `~/.claude/bin/builder.bak-20260930-parent`). [source: SPEC.md]
 
+- Command bar: `~/.true/commandbar/routes.jsonl`, `history.json` and `prompts/` hold what was typed: directory 0700, files 0600, text redacted before write, routes.jsonl rotated at 5 MB, history capped at 50. Shell text that is destructive or unjudged is typed, never submitted (SPEC Run 14).
+
 ## Incident steps
 If a key leaks: rotate at TypeSafe, update Keychain item. If a runaway agent: `truectl status`, sleep the agent from the Hub/tab; never kill True.app from an agent. [assumption]

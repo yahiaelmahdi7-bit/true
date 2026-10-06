@@ -473,6 +473,11 @@ final class TrueTerminalView: LocalProcessTerminalView {
                     AgentRegistry.shared.panelOpen = false
                     return nil
                 }
+                if event.keyCode == 53, CommandBarStore.shared.isOpen,
+                   event.window?.firstResponder is TrueTerminalView {
+                    CommandBarStore.shared.close()
+                    return nil
+                }
                 if let term = event.window?.firstResponder as? TrueTerminalView,
                    event.charactersIgnoringModifiers?.contains("\r") == true {
                     term.onCommandSubmitted?()
