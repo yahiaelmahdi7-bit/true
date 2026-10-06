@@ -52,7 +52,10 @@ private struct TabChip: View {
             } else {
                 Text(label).lineLimit(1).fixedSize().monospacedDigit()
             }
-            if let status = AgentRegistry.shared.tabStatus(tab) {
+            if let v = OverseerStore.shared.verdict(in: tab), v.kind == .unverified || v.kind == .blocked || v.kind == .asksYou {
+                // A tinted pane verdict wins over the seat status, and shows on plain panes too.
+                Circle().fill(v.kind.tint).frame(width: 6, height: 6).help("\(v.kind.label) — \(v.reason)")
+            } else if let status = AgentRegistry.shared.tabStatus(tab) {
                 Circle().fill(status.tint).frame(width: 6, height: 6).help(status.label)
             }
             if hovering {

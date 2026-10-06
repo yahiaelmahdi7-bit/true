@@ -21,6 +21,8 @@ enum Theme {
     static let hubCardFill = Color.white.opacity(0.05)
     static let hubCardStroke = Color.white.opacity(0.08)
     static let hubHoverFill = Color.white.opacity(0.05)
+    /// The one warm colour (Run 12): an Overseer "Unverified" verdict. Everything else stays monochrome.
+    static let verdictWarn = Color(red: 1.0, green: 0.62, blue: 0.24)
 
     static let nsBackground = NSColor.black
     static let nsText = NSColor(white: 0.88, alpha: 1)
