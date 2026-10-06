@@ -233,15 +233,19 @@ enum HubModel {
 
 struct HubRow: Encodable, Equatable, Sendable {
     let project: String, kind: String, name: String, status: String
+    /// Overseer verdict raw value (seat and other rows); nil = none.
+    var verdict: String? = nil
 }
 
 extension HubModel {
     /// project → sessions, flattened for `truectl status`. `kind` is seat | background | other.
-    static func rows(_ groups: [HubProjectGroup], seatStatus: (String) -> AgentStatus) -> [HubRow] {
+    static func rows(_ groups: [HubProjectGroup], seatStatus: (String) -> AgentStatus,
+                     seatVerdict: (Agent) -> String? = { _ in nil },
+                     peerVerdict: (PeerSession) -> String? = { _ in nil }) -> [HubRow] {
         groups.flatMap { g in
-            g.seats.map { HubRow(project: g.title, kind: "seat", name: $0.name, status: seatStatus($0.name).rawValue) }
+            g.seats.map { HubRow(project: g.title, kind: "seat", name: $0.name, status: seatStatus($0.name).rawValue, verdict: seatVerdict($0)) }
             + g.background.map { HubRow(project: g.title, kind: "background", name: $0.name, status: $0.status.rawValue) }
-            + g.others.map { HubRow(project: g.title, kind: "other", name: $0.displayName, status: $0.busy ? "working" : "idle") }
+            + g.others.map { HubRow(project: g.title, kind: "other", name: $0.displayName, status: $0.busy ? "working" : "idle", verdict: peerVerdict($0)) }
         }
     }
 }

@@ -194,6 +194,7 @@ final class AgentRegistry {
     }
 
     func paneClosed(_ pane: UUID) {
+        OverseerStore.shared.paneClosed(pane)
         launchSpecs[pane] = nil
         latest[pane] = nil
         modes[pane] = nil

@@ -77,11 +77,14 @@ struct SeatActions {
     var sleep: (String) -> Void
     var edit: (Agent) -> Void
     var talk: (String, String, @escaping (PaneDelivery.Outcome) -> Void) -> Void
+    /// Overseer verdict for a seat by name; nil = none.
+    var verdict: (String) -> VerdictKind? = { _ in nil }
 
     @MainActor static func live(_ r: AgentRegistry) -> SeatActions {
         SeatActions(status: { r.statusOf($0) }, isAwake: { r.isAwake($0) }, wake: { r.wake($0) },
                     sleep: { r.sleep($0) }, edit: { r.builder = BuilderDraft(editing: $0) },
-                    talk: { name, text, done in r.talk(name, text, onOutcome: done) })
+                    talk: { name, text, done in r.talk(name, text, onOutcome: done) },
+                    verdict: { n in OverseerStore.shared.verdict(forSession: r.agent(named: n)?.lastSessionID)?.kind })
     }
 
     static var inert: SeatActions { SeatActions(status: { _ in .asleep }, isAwake: { _ in false }, wake: { _ in },
@@ -117,6 +120,8 @@ struct AgentCard: View {
                             iconButton("slider.horizontal.3", "Edit") { actions.edit(agent) }
                         }
                         .opacity(showActions ? 1 : 0).allowsHitTesting(showActions).accessibilityHidden(true)
+                        // A live Needs you pill already says "look here"; a second badge would repeat it.
+                        if status != .needsYou, let v = actions.verdict(agent.name) { VerdictBadge(kind: v) }
                         AttentionPill(status: status)
                     }
                     HStack(spacing: 6) {

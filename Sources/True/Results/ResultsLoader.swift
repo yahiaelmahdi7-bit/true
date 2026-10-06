@@ -77,7 +77,7 @@ enum TranscriptParser {
     }
 
     /// A real prompt's text (String content, or text blocks); nil for tool results and empty content.
-    private static func promptText(_ content: Any?) -> String? {
+    static func promptText(_ content: Any?) -> String? {
         if let s = content as? String { return s }
         guard let blocks = content as? [[String: Any]] else { return nil }
         if blocks.contains(where: { ($0["type"] as? String) == "tool_result" }) { return nil }

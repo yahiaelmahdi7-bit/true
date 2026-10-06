@@ -55,6 +55,7 @@ struct HubPanel: View {
     @State private var hub = HubStore.shared
     @State private var detail: BuilderRecord?
     @State private var crew = CrewStore.shared
+    @State private var overseer = OverseerStore.shared
     @State private var crewNotice: String?
 
     private struct CrewTrigger: Hashable { var active: Bool; var cwd: String }
@@ -79,7 +80,11 @@ struct HubPanel: View {
                             onDetail: { detail = $0 },
                             onReveal: { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: $0.cwd)]) },
                             crew: crew.snapshot, crewNotice: crewNotice,
-                            onCrewPick: { pickCrew($0) })
+                            onCrewPick: { pickCrew($0) },
+                            yourMove: YourMoveRow.build(overseer.verdicts, seatName: { registry.name(for: $0) },
+                                                        tabTitle: { p in WorkspaceModel.shared.state.tabs.first { $0.tree.leafIDs.contains(p) }?.title }),
+                            onFocusPane: { WorkspaceModel.shared.focus(pane: $0); registry.panelOpen = false },
+                            peerVerdict: { overseer.verdict(forSession: $0.sessionID)?.kind })
         }
         .onAppear { hub.hubAppeared() }
         // Crew scan: only while the Crew tab is showing, and again when the focused pane's cwd changes.
@@ -127,6 +132,10 @@ struct HubPanelContent: View {
     var crew: CrewSnapshot?
     var crewNotice: String?
     var onCrewPick: (CrewAgent) -> Void = { _ in }
+    /// Overseer: panes whose last turn needs a look (All filter only) and the verdict of an Other-session row.
+    var yourMove: [YourMoveRow] = []
+    var onFocusPane: (UUID) -> Void = { _ in }
+    var peerVerdict: (PeerSession) -> VerdictKind? = { _ in nil }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -155,6 +164,9 @@ struct HubPanelContent: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 28) {
+                        if filter == .all && !yourMove.isEmpty {
+                            YourMoveSection(rows: yourMove, now: now, onFocus: onFocusPane)
+                        }
                         ForEach(groups) { group in
                             groupView(group).transition(rowTransition)
                         }
@@ -240,7 +252,7 @@ struct HubPanelContent: View {
             if !g.others.isEmpty {
                 sectionLabel("Other Claude sessions")
                 ForEach(g.others) { p in
-                    PeerRow(peer: p).onTapGesture { onReveal(p) }.transition(rowTransition)
+                    PeerRow(peer: p, verdict: peerVerdict(p)).onTapGesture { onReveal(p) }.transition(rowTransition)
                 }
             }
         }
@@ -336,6 +348,7 @@ struct BuilderRow: View {
 
 struct PeerRow: View {
     let peer: PeerSession
+    var verdict: VerdictKind?
     var body: some View {
         HubRowFrame {
             HStack(spacing: 12) {
@@ -346,6 +359,7 @@ struct PeerRow: View {
                     Text(hubKindLabel(peer.kind)).font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
+                if let verdict { VerdictBadge(kind: verdict) }
                 HubStatusWord(status: peer.busy ? .working : .idle)
             }
         }

@@ -104,7 +104,9 @@ enum AgentControl {
                                             seatAwake: { registry.isAwake($0) }, peers: hub.peers,
                                             builders: hub.builders, now: Date().timeIntervalSince1970)
                 reply(ControlResponse(ok: true, agents: agentRows(registry),
-                                      hub: HubModel.rows(groups, seatStatus: { registry.statusOf($0) })))
+                                      hub: HubModel.rows(groups, seatStatus: { registry.statusOf($0) },
+                                                   seatVerdict: { OverseerStore.shared.verdict(forSession: $0.lastSessionID)?.kind.rawValue },
+                                                   peerVerdict: { OverseerStore.shared.verdict(forSession: $0.sessionID)?.kind.rawValue })))
             }
         case .spawn(let request):
             let caller = request.from.flatMap { registry.agent(named: $0) }

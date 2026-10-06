@@ -15,3 +15,5 @@ Owner: knowledge-keeper · Last verified: 2026-09-30
 | Context Cleaner | Sheet that rewrites bloated Claude context/memory with backup+undo | terminal clear |
 | PaneDelivery | Single door for writing into a pane | paste |
 | Axon | Older parked cockpit (tag `axon-parked-2026-09-29`) | True |
+| Overseer | Jev reads each finished Claude turn in a True pane and posts a verdict; read-only (SPEC Run 12) | autopilot |
+| Verdict | The Overseer's one-word read of a turn: verified, unverified, partial, asksToContinue, asksYou, blocked | status |

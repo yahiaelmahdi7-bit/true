@@ -2,7 +2,7 @@
 Owner: security · Last verified: 2026-09-30
 
 ## Data classification
-Local personal state, no server, no cloud. Sensitive: terminal scrollback (`~/.true/scrollback/*.ans`, mode 0600), workspace/agents JSON, Jev API key. [source: SPEC.md Run 4, Run 6]
+Local personal state, no server, no cloud. Sensitive: terminal scrollback (`~/.true/scrollback/*.ans`, mode 0600), workspace/agents JSON, Jev API key, Overseer log `~/.true/overseer/verdicts.jsonl` (dir 0700, file 0600, secrets redacted before write, rotated at 5 MB keeping one old file). [source: SPEC.md Run 4, Run 6, Run 12]
 
 ## Threat model (assets, actors, entry points, top risks)
 - Assets: Yahia's shell sessions, agent transcripts/permissions, API key.

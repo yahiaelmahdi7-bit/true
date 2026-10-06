@@ -112,7 +112,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The only launch-time side effect of Agents mode: a listening socket. It is event-driven
         // (blocks in accept) and costs nothing until an awake agent's hook rings it; it wakes nobody.
         agentSocket = AgentEventSocket(path: AgentPaths.standard.socketPath) { e in
-            Task { @MainActor in AgentRegistry.shared.handle(e) }
+            Task { @MainActor in
+                AgentRegistry.shared.handle(e)
+                OverseerStore.shared.handle(e)
+            }
         }
         _ = agentSocket?.start()
         // Same kind of side effect, for `truectl`: one more thread parked in accept() — 0% idle, nothing

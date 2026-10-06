@@ -10,6 +10,10 @@ enum TerminalSettings {
     static let scrollbackKey = "terminal.scrollback"
     static let colorKey = "terminal.color"
 
+    static let overseerKey = "overseer.enabled"
+    /// The Overseer (Jev reads each finished turn). On by default; off = no Jev calls at all.
+    static var overseer: Bool { UserDefaults.standard.object(forKey: overseerKey) as? Bool ?? true }
+
     static let systemMono = "System Mono"
     /// Programs' own colours on by default: Claude Code's orange spinner is how you see it working.
     /// Off = the Run 8 black-and-white look (grey ANSI ladder + desaturation filter).
