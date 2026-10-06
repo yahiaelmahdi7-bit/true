@@ -5,7 +5,7 @@ Owner: ui-designer · Last verified: 2026-09-30
 Apple HIG native; SF Symbols; system materials / Liquid Glass (`.glassEffect`) on bars and the Hub; dark + light follow system. Reference skill `~/.claude/skills/apple-hig/`. [source: SPEC.md Hard rules]
 
 ## Tokens
-**Colour doctrine (2026-09-30):** True is black & white; colour exists only in agent avatars and means identity, never state. Model tier = brightness (`AgentModel.tint`). Status = monochrome presence dot + word. Effort = 5-step meter. Status pills: Asleep / Working / Needs you / Done / Idle / Failed. Tokens live in `Sources/True/Chrome/Theme.swift`. [source: SPEC.md Run 2, Run 7]
+**Colour doctrine (2026-09-30, amended 2026-10-06):** True's chrome is black & white (terminal output keeps program colours unless Settings ▸ "Colour in terminals" is off); colour exists only in agent avatars and means identity, never state. Model tier = brightness (`AgentModel.tint`). Status = monochrome presence dot + word. Effort = 5-step meter. Status pills: Asleep / Working / Needs you / Done / Idle / Failed. Tokens live in `Sources/True/Chrome/Theme.swift`. [source: SPEC.md Run 2, Run 7]
 
 ## Components
 Agent avatar (`AgentAvatar`: 10 hue-adjacent gradient discs + glyph; 40/28/56 pt; grey for other sessions), character card (SF Symbol avatar: lead `crown`, helper `hammer`), builder sheet with live preview, tab bar, Hub panel, needs-you tray, screenshot tray, project palette. [source: SPEC.md Run 2; Sources/True/Views]

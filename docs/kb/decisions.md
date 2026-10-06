@@ -51,3 +51,6 @@ Owner: cto · Last verified: 2026-09-30
 
 ## 2026-09-30 — KeepAwake is work-gated (Run 9)
 - Decision: hold the display-sleep assertion only while a live busy session, running builder, or fresh `.working` seat exists; release after 120 s continuous idle. Plain shell commands never count. Supersedes "for as long as True is open". [source: SPEC.md Run 9]. Status: Accepted.
+
+## 2026-10-06 — Terminal output keeps its colours
+- Decision: the black & white doctrine covers True's chrome, not what programs print. Terminals show program colours by default (Terminal.app 16-colour palette, no desaturation filter); Settings ▸ "Colour in terminals" off restores the monochrome look. Why: with Claude Code's orange spinner greyed out, Yahia could not tell working from done. Amends the Run 8 entry. [source: SPEC.md Run 8 amendment]. Status: Accepted.

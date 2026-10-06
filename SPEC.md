@@ -234,6 +234,7 @@ exercised through injected runners in tests; HubPanel is not visually verified (
 **Goal (Yahia, 2026-09-30):** Hub on par with Apple-level design, keeping the minimal black-and-white look, with a pop of vibrant colour for agent profile pictures.
 
 **Doctrine:** True is black & white. Colour exists in exactly ONE place — agent avatars — and it means *identity*, never state. Model tier stays brightness (`AgentModel.tint`); status stays monochrome (the presence dot + word carry it).
+**Amended 2026-10-06:** the doctrine governs True's own chrome. Terminal *output* keeps the colours programs paint (Terminal.app palette, no desaturation) — Yahia could not tell Claude working from done with the orange spinner greyed out. Settings ▸ "Colour in terminals" (`terminal.color`, default on) brings back the grey ladder + desaturation filter.
 
 **As built**
 - `Views/AgentAvatar.swift`: `AgentHue` (10 hue-adjacent gradients; FNV-1a 32-bit of the name mod 10 when unset, never `hashValue`), `AgentAvatar` (gradient disc + specular + glass edge + glyph; asleep = desaturated/dim, working = breathing glow (static under Reduce Motion), needsYou = glow + white ring; presence dot; optional parent ring). Other sessions get a grey disc.

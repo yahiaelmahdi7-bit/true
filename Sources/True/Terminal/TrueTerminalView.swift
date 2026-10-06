@@ -51,15 +51,20 @@ final class TrueTerminalView: LocalProcessTerminalView {
         // view's shadow is cast by the glyphs alone: a zero-offset white shadow reads as a glow.
         backgroundOpacity = 0
         shadow = Theme.textGlow
-        // Black and white only, whatever a program asks for: Claude Code paints its orange in
-        // 24-bit colour, which no 16-colour palette can catch, so the pixels are desaturated.
         wantsLayer = true
         // Stale layer contents (a resize pass before the repaint lands) stay anchored top-left
         // instead of AppKit's default of stretching them to the new bounds, which shook the text.
         layerContentsPlacement = .topLeft
         layerUsesCoreImageFilters = true
-        contentFilters = Theme.monochrome
-        installColors(Self.ansiGreys)
+        applyColorMode(TerminalSettings.color)
+    }
+
+    /// Colour on: programs paint what they ask for (Terminal.app's 16-colour palette). Colour off:
+    /// black and white whatever a program asks for — Claude Code paints its orange in 24-bit colour,
+    /// which no 16-colour palette can catch, so the pixels are desaturated too.
+    func applyColorMode(_ color: Bool) {
+        contentFilters = color ? [] : Theme.monochrome
+        installColors(color ? SwiftTerm.Color.terminalAppColors : Self.ansiGreys)
     }
 
     /// The 16 ANSI colours as a ladder of greys. Desaturating the stock palette left blue and red

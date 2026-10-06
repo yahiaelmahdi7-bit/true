@@ -1,11 +1,12 @@
 import SwiftUI
 
-/// ⌘, — four settings, applied live to every open pane (EmbeddedTerminal.updateNSView).
+/// ⌘, — five settings, applied live to every open pane (EmbeddedTerminal.updateNSView).
 struct SettingsView: View {
     @AppStorage(TerminalSettings.fontFamilyKey) private var family = TerminalSettings.systemMono
     @AppStorage(TerminalSettings.fontSizeKey) private var size = TerminalSettings.defaultFontSize
     @AppStorage(TerminalSettings.cursorKey) private var cursor = TerminalSettings.Cursor.steadyBlock.rawValue
     @AppStorage(TerminalSettings.scrollbackKey) private var scrollback = TerminalSettings.defaultScrollback
+    @AppStorage(TerminalSettings.colorKey) private var color = TerminalSettings.defaultColor
 
     var body: some View {
         Form {
@@ -21,6 +22,7 @@ struct SettingsView: View {
             Stepper(value: $scrollback, in: 500...100_000, step: 500) {
                 Text("Scrollback: \(scrollback.formatted()) lines")
             }
+            Toggle("Colour in terminals", isOn: $color)
         }
         .formStyle(.grouped)
         .frame(width: 420)

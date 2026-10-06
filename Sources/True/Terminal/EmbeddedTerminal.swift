@@ -43,6 +43,7 @@ struct EmbeddedTerminal: NSViewRepresentable {
     @AppStorage(TerminalSettings.fontSizeKey) private var fontSize = TerminalSettings.defaultFontSize
     @AppStorage(TerminalSettings.cursorKey) private var cursor = TerminalSettings.Cursor.steadyBlock.rawValue
     @AppStorage(TerminalSettings.scrollbackKey) private var scrollback = TerminalSettings.defaultScrollback
+    @AppStorage(TerminalSettings.colorKey) private var color = TerminalSettings.defaultColor
 
     /// The pane's claude-burn token: filename-safe, short, and the same for the same pane every launch.
     nonisolated static func burnToken(_ pane: UUID) -> String { "true-" + pane.uuidString.prefix(8).lowercased() }
@@ -128,6 +129,10 @@ struct EmbeddedTerminal: NSViewRepresentable {
             context.coordinator.appliedScrollback = sb
             term.getTerminal().changeScrollback(sb)
         }
+        if context.coordinator.appliedColor != color {
+            context.coordinator.appliedColor = color
+            term.applyColorMode(color)
+        }
         if isFocused, !ProjectPalette.shared.isOpen, let w = term.window, w.firstResponder !== term {
             w.makeFirstResponder(term)
         }
@@ -141,6 +146,7 @@ struct EmbeddedTerminal: NSViewRepresentable {
         let paneID: UUID
         var appliedCursor: String?
         var appliedScrollback: Int?
+        var appliedColor: Bool?
         init(paneID: UUID) { self.paneID = paneID }
 
         func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}

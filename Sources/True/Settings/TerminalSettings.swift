@@ -8,8 +8,13 @@ enum TerminalSettings {
     static let fontSizeKey = "terminal.fontSize"
     static let cursorKey = "terminal.cursor"
     static let scrollbackKey = "terminal.scrollback"
+    static let colorKey = "terminal.color"
 
     static let systemMono = "System Mono"
+    /// Programs' own colours on by default: Claude Code's orange spinner is how you see it working.
+    /// Off = the Run 8 black-and-white look (grey ANSI ladder + desaturation filter).
+    static let defaultColor = true
+    static var color: Bool { UserDefaults.standard.object(forKey: colorKey) as? Bool ?? defaultColor }
     static let defaultFontSize = 13.0
     static let defaultScrollback = 10_000
 

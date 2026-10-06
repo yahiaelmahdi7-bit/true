@@ -8,7 +8,8 @@ import SwiftUI
 /// COLOUR DOCTRINE (Run 8, 2026-09-30): True is black and white. Colour exists in exactly ONE place —
 /// agent avatars (`AgentAvatar`, `AgentHue`) — and it means IDENTITY ("who"), never state. Model tier
 /// stays brightness (`AgentModel.tint`); status stays monochrome (`AgentStatus.tint`, words, the presence
-/// dot). Anything else that wants a colour is wrong.
+/// dot). Anything else that wants a colour is wrong. That governs True's own chrome: terminal OUTPUT keeps
+/// the colours programs paint unless Settings turns colour off (amended 2026-10-06).
 enum Theme {
     static let background = Color.black
     static let hairline = Color.white.opacity(0.10)
@@ -34,7 +35,7 @@ enum Theme {
         return s
     }
 
-    /// Drains all colour from what a terminal draws (see `TrueTerminalView.applyThemeColors`).
+    /// Drains all colour from what a terminal draws when colour is off (see `TrueTerminalView.applyColorMode`).
     static var monochrome: [CIFilter] {
         guard let f = CIFilter(name: "CIColorControls") else { return [] }
         f.setValue(0, forKey: kCIInputSaturationKey)
