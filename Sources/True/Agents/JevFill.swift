@@ -13,21 +13,36 @@ enum JevFill {
         var permission: AgentPermission?
     }
 
+    /// The model and effort questions, shared with the Command bar (one source). `subject` is the state field the
+    /// instructions point at: `request` for AI fill, `text` for the bar.
+    static func modelQuestion(subject: String = "request") -> JevQuestion {
+        .choice("Which model fits the weight of `\(subject)`?", [
+            (id: "haiku", what: "search, inventories and read-only sweeps"),
+            (id: "sonnet", what: "routine implementation, tests, mechanical edits"),
+            (id: "opus", what: "architecture, coordination and hard debugging"),
+            (id: "fable", what: "the highest-stakes judgment calls"),
+        ])
+    }
+
+    static func effortQuestion(subject: String = "request") -> JevQuestion {
+        .score("How much reasoning effort does `\(subject)` need?", levels: [
+            "low: a lookup or listing",
+            "medium: routine code changes",
+            "high: tricky debugging or multi-part coordination",
+            "xhigh: architecture across many parts",
+            "max: a decision where a mistake is very expensive",
+        ])
+    }
+
+    /// A score answer (0-4) → the effort level it sits on.
+    static func effort(fromScore s: Double) -> AgentEffort {
+        AgentEffort.allCases[min(max(Int(s.rounded()), 0), AgentEffort.allCases.count - 1)]
+    }
+
     static func questions(editing: Bool) -> [String: JevQuestion] {
         var q: [String: JevQuestion] = [
-            "model": .choice("Which model fits the weight of `request`?", [
-                (id: "haiku", what: "search, inventories and read-only sweeps"),
-                (id: "sonnet", what: "routine implementation, tests, mechanical edits"),
-                (id: "opus", what: "architecture, coordination and hard debugging"),
-                (id: "fable", what: "the highest-stakes judgment calls"),
-            ]),
-            "effort": .score("How much reasoning effort does `request` need?", levels: [
-                "low: a lookup or listing",
-                "medium: routine code changes",
-                "high: tricky debugging or multi-part coordination",
-                "xhigh: architecture across many parts",
-                "max: a decision where a mistake is very expensive",
-            ]),
+            "model": modelQuestion(),
+            "effort": effortQuestion(),
             "permission": .choice("How much autonomy does `request` imply?", [
                 (id: "default", what: "acts but asks before each change"),
                 (id: "acceptEdits", what: "edits files freely inside its task"),
@@ -56,7 +71,7 @@ enum JevFill {
         p.permission = sure("permission")?.choice.flatMap(AgentPermission.init(rawValue:))
         if !editing { p.role = sure("role")?.choice.flatMap(AgentRole.init(rawValue:)) }
         if let s = sure("effort")?.score {
-            p.effort = AgentEffort.allCases[min(max(Int(s.rounded()), 0), AgentEffort.allCases.count - 1)]
+            p.effort = effort(fromScore: s)
         }
         return p
     }
