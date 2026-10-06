@@ -37,6 +37,10 @@ struct TrueApp: App {
                 Button("Restart to Update") { BuildFreshnessWatcher.shared.requestRestart() }
                     .disabled(!BuildFreshnessWatcher.shared.offersRestart)
             }
+            CommandGroup(after: .windowArrangement) {
+                Button("Fill All Displays") { MainWindow.fillAllDisplays() }
+                    .keyboardShortcut("f", modifiers: [.control, .option, .command])
+            }
             CommandMenu("Shell") {
                 Button("Split Right") { model.splitFocused(.horizontal) }.keyboardShortcut("d")
                 Button("Split Down") { model.splitFocused(.vertical) }.keyboardShortcut("d", modifiers: [.command, .shift])

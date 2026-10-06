@@ -11,6 +11,19 @@ enum MainWindow {
 
     static func register(_ window: NSWindow) { current = window }
 
+    /// One window across every monitor: the union of the screens' usable areas. macOS only draws a
+    /// window on more than one display when System Settings ▸ Desktop & Dock ▸ "Displays have separate
+    /// Spaces" is OFF; with it on, the parts beyond the window's own display stay hidden.
+    static func fillAllDisplays() {
+        guard let current else { return }
+        current.setFrame(spanningFrame(NSScreen.screens.map(\.visibleFrame)) ?? current.frame, display: true, animate: true)
+    }
+
+    /// Smallest rectangle covering all `frames`; nil for none.
+    nonisolated static func spanningFrame(_ frames: [CGRect]) -> CGRect? {
+        frames.dropFirst().reduce(frames.first) { $0?.union($1) }
+    }
+
     /// Pure decision for the willClose observer: snapshot only when the closing window IS the main one.
     /// Sheets, popovers, Settings and any other window (whatever its title) answer false.
     /// Identities (not windows) so the notification closure can carry the value across isolation.
