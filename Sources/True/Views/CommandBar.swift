@@ -26,37 +26,57 @@ struct CommandBarView: View {
     }
 
     private var card: some View {
+        CommandBarCard(text: $store.text, route: store.route, plan: store.plan, reading: store.reading, armed: store.armed,
+                       focus: $focused, submit: { store.run() }, up: { store.historyUp() }, down: { store.historyDown() },
+                       tab: { store.takeRunnerUp() }, choose: { store.choose($0) })
+            .background {
+                Button("") { store.run(background: true) }.keyboardShortcut(.return, modifiers: .command)
+                Button("") { store.close() }.keyboardShortcut(.cancelAction)
+            }
+    }
+}
+
+/// The card itself, free of the store so snapshots can render it from fixtures.
+struct CommandBarCard: View {
+    @Binding var text: String
+    var route: Route?
+    var plan: Plan?
+    var reading = false
+    var armed = false
+    var focus: FocusState<Bool>.Binding
+    var submit: () -> Void = {}
+    var up: () -> Void = {}
+    var down: () -> Void = {}
+    var tab: () -> Void = {}
+    var choose: (CommandKind) -> Void = { _ in }
+
+    var body: some View {
         VStack(spacing: 0) {
             field
-            if store.route != nil || store.reading {
+            if route != nil || reading {
                 Divider().opacity(0.5)
-                RouteLine(route: store.route, plan: store.plan, reading: store.reading, armed: store.armed,
-                          choose: { store.choose($0) })
+                RouteLine(route: route, plan: plan, reading: reading, armed: armed, choose: choose)
                     .padding(.horizontal, 16).padding(.vertical, 10)
             }
         }
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.45), radius: 30, y: 12)
-        .background {
-            Button("") { store.run(background: true) }.keyboardShortcut(.return, modifiers: .command)
-            Button("") { store.close() }.keyboardShortcut(.cancelAction)
-        }
     }
 
     private var field: some View {
         HStack(spacing: 10) {
             Image(systemName: "chevron.right").font(.title3).foregroundStyle(.secondary)
-            TextField("Run, ask, or tell True…", text: $store.text)
+            TextField("Run, ask, or tell True…", text: $text)
                 .textFieldStyle(.plain)
                 .font(.title3)
-                .focused($focused)
-                .onSubmit { store.run() }
-                .onKeyPress(.upArrow) { store.historyUp(); return .handled }
-                .onKeyPress(.downArrow) { store.historyDown(); return .handled }
-                .onKeyPress(.tab) { store.takeRunnerUp(); return .handled }
+                .focused(focus)
+                .onSubmit(submit)
+                .onKeyPress(.upArrow) { up(); return .handled }
+                .onKeyPress(.downArrow) { down(); return .handled }
+                .onKeyPress(.tab) { tab(); return .handled }
         }
         .padding(.horizontal, 16).padding(.vertical, 14)
-        .onAppear { DispatchQueue.main.async { focused = true } }
+        .onAppear { DispatchQueue.main.async { focus.wrappedValue = true } }
     }
 }
 
@@ -72,7 +92,7 @@ struct RouteLine: View {
         HStack(spacing: 6) {
             if let r = route {
                 if r.twoChoice {
-                    Text("Which one?").font(.callout).foregroundStyle(.secondary)
+                    Text("Which one?").font(.callout).foregroundStyle(Color.white.opacity(0.62))
                     choice("Run in shell", .shellCommand)
                     choice("Send to Claude", .agentTask)
                 } else {
@@ -82,7 +102,7 @@ struct RouteLine: View {
             Spacer(minLength: 8)
             if reading {
                 ProgressView().controlSize(.mini)
-                Text("reading…").font(.caption).foregroundStyle(.tertiary)
+                Text("reading…").font(.caption).foregroundStyle(Color.white.opacity(0.4))
             }
         }
         .frame(minHeight: 22)
@@ -102,15 +122,21 @@ struct RouteLine: View {
             }
         }
         if r.kind.sendsToClaude, r.isDestructive {
-            Text(armed ? "Return again to send" : "will ask first")
-                .font(.caption.weight(.medium)).foregroundStyle(.orange)
+            warn(armed ? "Return again to send" : "will ask first")
         }
         if r.kind == .shellCommand, let p = plan, !p.autoSubmit {
-            Text("typed, not sent").font(.caption).foregroundStyle(.orange)
+            warn("typed, not sent")
         }
         if let alt = r.alternatives.first {
-            Text("Tab: \(kindLabel(alt))").font(.caption).foregroundStyle(.tertiary)
+            Text("Tab: \(kindLabel(alt))").font(.caption).foregroundStyle(Color.white.opacity(0.4))
         }
+    }
+
+    private func warn(_ text: String) -> some View {
+        Text(text).font(.caption.weight(.medium))
+            .foregroundStyle(Color(red: 1, green: 0.72, blue: 0.35))
+            .padding(.horizontal, 8).padding(.vertical, 3)
+            .background(Color(red: 1, green: 0.6, blue: 0.2).opacity(0.16), in: Capsule())
     }
 
     private func newProcess(_ t: CommandTarget) -> Bool { t == .newClaudePane || t == .backgroundBuilder }
@@ -139,7 +165,7 @@ struct RouteLine: View {
             if let icon { Image(systemName: icon).font(.caption2) }
             Text(unsure ? text + " ?" : text).font(.caption)
         }
-        .foregroundStyle(unsure ? .primary : .secondary)
+        .foregroundStyle(Color.white.opacity(unsure ? 0.92 : 0.62))
         .padding(.horizontal, 8).padding(.vertical, 3)
         .background(.white.opacity(unsure ? 0.12 : 0.07), in: Capsule())
     }
@@ -148,6 +174,7 @@ struct RouteLine: View {
         Button(text) { choose(k) }
             .buttonStyle(.plain)
             .font(.caption.weight(.medium))
+            .foregroundStyle(Color.white.opacity(0.92))
             .padding(.horizontal, 10).padding(.vertical, 3)
             .background(.white.opacity(0.14), in: Capsule())
     }
