@@ -281,3 +281,101 @@ The Hub is a **centered pop-up over the terminal**, not a side panel: the termin
 - **Pick up:** hovering the top-centre of a pane (only when the tab has 2+ panes) shows a small grip. Only the grip's own rect takes the mouse — terminal clicks, selection and scrolling are never intercepted. Detach = within this window and tab only.
 - **Drop:** onto another pane — its left/right/top/bottom zone moves the pane to that side; the middle zone swaps the two. A shaded preview shows the exact landing zone; Esc or dropping outside cancels. No animated reflow (terminals would be resized every frame).
 - **Survival:** terminals are keyed by pane UUID in one flat list (`TerminalArea`), so a move only changes frames: process, scrollback and focus stay (the mover is focused). Ops: `SplitTree.insertingEvened / removingEvened / swapping / moving` (`Model/SplitTree.swift`), drop geometry in `Model/PaneDrop.swift`, grip UI in `Views/PaneDrag.swift`.
+
+## Run 12 — The Overseer (Jev reads every finished turn)
+**One sentence:** each time Claude in a True pane ends a turn, Jev reads what was asked, which tools ran and what
+Claude answered, and True shows a **verdict** on the tab and in the Hub, listing the panes that need you first.
+**Read-only:** the Overseer never types into a pane. Autopilot (Run 13, not built here) will act on
+`asks to continue`; Run 12 already computes and logs the judgment Autopilot will need, so its thresholds can be
+calibrated on real data first.
+
+**Verdicts (one name each, UI labels in quotes):** `verified` "Verified" · `unverified` "Unverified" ·
+`partial` "Partial" · `asksToContinue` "Asks to continue" · `asksYou` "Asks you" · `blocked` "Blocked".
+No verdict = nothing shown (today's behaviour).
+
+**Scope:** Claude sessions running in True panes (seats and plain ⌘O / ⌘↩ panes) — the only sessions whose
+hooks report to True. Not background builders, not sessions in other terminals.
+
+**Hard-rule check:** event-driven — one Jev call per Stop event, nothing on a timer. Jev slow / down / keyless →
+no verdict, everything as before. Settings toggle off → no calls at all.
+
+1. **Forwarder** (`Agents/AgentHooks.swift`): the Stop wire line adds `transcript` (payload `transcript_path`) and
+   `session` (payload `session_id`) when they are non-empty strings; other events unchanged. `PaneEvent` gains
+   optional `transcript` and `session` (old lines still parse). The forwarder file is rewritten when stale and read
+   fresh on every hook call, so running sessions pick it up after True's next launch.
+2. **TurnDigest** (`Overseer/TurnDigest.swift`, pure): read the transcript from its END (reuse the chunked
+   approach in `Results/ResultsLoader.swift`; grow the window until the last real user prompt is inside, cap 8 MB)
+   and build the LAST turn:
+   - `asked`: the turn's prompt (same rules as `TranscriptParser.promptText`; skip isMeta / sidechain /
+     compact-summary / API-error lines), first 1,500 chars.
+   - `steps`: tool calls in order, each `{n, tool, what, result, failed}`. `tool`/`what` from
+     `ToolSummary.summarize` on the tool_use input's string values; `result` = the matching tool_result
+     (paired by `tool_use_id`) text, whitespace-collapsed, last 240 chars; `failed` = `is_error == true`.
+     Keep the last 30 steps.
+   - `edited` (code fact): any Edit / Write / MultiEdit / NotebookEdit step in the turn.
+   - `answer`: the Stop event's message (else the digest's final text). Over 3,000 chars → first 800 + " … " +
+     last 2,200.
+   - `Redact.secrets` runs on asked / steps / answer before anything leaves the process: `sk-…` / `sk-ant-…`,
+     `ghp_` / `gho_` / `github_pat_`, `AKIA…`, `xox[bp]-…`, `Bearer <token>`, PEM private-key blocks, and
+     `NAME=value` where NAME contains KEY / TOKEN / SECRET / PASSWORD → `[redacted]`.
+3. **Questions** (`Overseer/OverseerJudge.swift`, pure; ONE `JevClient.ask`, 8 s timeout, state =
+   `{asked, steps, edited, answer}`):
+   - `outcome` choice:
+     `finished` — `answer` says the work asked for in `asked` is complete ·
+     `partial` — some of the asked work is done and `answer` names work still left, or it stopped midway ·
+     `asks_to_continue` — `answer` ends by offering or asking to carry on with the next step of the same task ·
+     `asks_you` — `answer` needs something only the user can give: a choice between options, missing
+     information, credentials, or approval for something outside the task ·
+     `blocked` — `answer` reports an error or obstacle it could not get past ·
+     `answered` — `asked` was a question or conversation, not work, and `answer` replies to it ·
+     `none` — none of these fit.
+   - `proof` noul: "Does `steps` show a check that ran successfully after the work it checks — tests or a build
+     that passed, a command whose output confirms the result, an HTTP or live check — supporting what `answer`
+     says was done?"
+   - `contradiction` noul: "Does any `result` in `steps` show a failure — a failing test, an error, a non-zero
+     exit — that `answer` does not mention?"
+   - `next_safe` noul (shadow: logged, never acted on in Run 12): "Would the next step that `answer` proposes stay
+     inside the task in `asked` and be easy to undo, touching only local files and local commands?"
+4. **Verdict mapping** (code; policy next to the numbers, all constants in one place):
+   - outcome confidence < 0.5 → no verdict.
+   - `finished`: contradiction ≥ 0.7 → `unverified` (reason names the last failed step's `what`); else no steps and
+     not `edited` → no verdict; else proof ≥ 0.7 → `verified`; proof ≤ 0.35 → `unverified`; between → no verdict.
+   - `partial` / `asks_to_continue` / `asks_you` / `blocked` → that verdict. `answered` / `none` → no verdict.
+   - Reason lines are code-composed, never Jev text (e.g. "Says done; no check ran", "A step failed that the
+     answer doesn't mention: <what>", "Stopped with work left", "Wants to carry on", "Waiting on your answer",
+     "Hit an error").
+   - Urgency (code): blocked 0 · asksYou 1 · unverified 2 · asksToContinue 3 · partial 4 · verified 5; ties newest first.
+5. **OverseerStore** (`Overseer/OverseerStore.swift`, `@Observable @MainActor`, fed from the same event tap as
+   `AgentRegistry.shared.handle` in `TrueApp.swift`): `verdicts: [UUID: OverseerVerdict]` (pane → verdict, reason,
+   at, sessionID, cwd). On `.stop` with a transcript: bump that pane's turn token, digest off-main, ask Jev, store
+   only if the token still matches. A pane's next `.progress` "prompt" event, or pane close, clears its verdict.
+   `.error` events are not judged. At most one call per pane in flight; at most 6 overall (over that: skip + log).
+   Settings: "Overseer" toggle (default on; key in `Settings/TerminalSettings.swift` style); off clears verdicts.
+6. **UI** (HIG, monochrome + one colour as in Run 8; Unverified uses one warm orange token, Blocked / Asks you reuse
+   the existing needs-you colour, the rest are neutral):
+   - **Hub "Your move"** section at the top of the card (All filter only), shown when any non-Verified verdict
+     exists: one row per pane ordered by urgency — name (seat name, else the tab title), project title, verdict
+     label + reason, age. Click → focus that pane and close the Hub (same path as waking a seat).
+   - **Badges:** seat cards and Other-session rows (matched by session id) show a small verdict capsule beside the
+     status pill.
+   - **Tab dot:** a pane verdict of Unverified tints the tab's dot orange; Blocked / Asks you use the needs-you
+     colour; the dot's tooltip reads the verdict label + reason.
+   - Extend `HubSnapshotTests` with a fixture that has one of each verdict; save PNGs to `docs/design/overseer/`.
+7. **truectl status:** `HubRow` gains optional `verdict` (raw value) for seat and other rows.
+8. **Logging:** os.Logger subsystem `net.prismlens.true`, category `overseer`, one line per judgment (pane prefix,
+   outcome + confidence, proof, contradiction, next_safe, verdict, ms, state chars). File
+   `~/.true/overseer/verdicts.jsonl` (dir 0700, file 0600): at, pane, session, cwd, verdict, every answer with its
+   probabilities, latencyMs, and the redacted state — the calibration set for these thresholds and for Run 13.
+   Over 5 MB → rename to `verdicts.1.jsonl` (keep one).
+9. **Tests** (injected transport / key provider, no network, no Keychain): TurnDigest on synthetic JSONL (tail
+   starting mid-turn, tool_use ↔ tool_result pairing, is_error, sidechain lines ignored, empty answer, 30-step cap);
+   redaction; question JSON shape; the full mapping table (every outcome, the 0.5 floor, the 0.7 / 0.35 edges,
+   contradiction override, no-steps rule); store (stop → verdict, new prompt clears, late reply dropped, toggle off
+   makes no call, Jev nil → no verdict, per-pane in-flight guard); urgency ordering; HubRow encoding; forwarder
+   adds `transcript` / `session` on Stop only. `OverseerLiveTests` gated by `JEV_LIVE=1`: at least 3 hand-labelled
+   synthetic turns per category (verified, unverified-no-check, unverified-contradiction, partial,
+   asks_to_continue, asks_you, blocked, answered), labels written BEFORE any run, printing a table of label vs
+   verdict + probabilities.
+
+**Run 12 done =** `swift build` clean with no new warnings, all tests green (paste the output), `scripts/package.sh`
+produced `True.app`, commits on the branch. App NOT launched; JEV_LIVE suite NOT run.
