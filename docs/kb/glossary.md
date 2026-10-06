@@ -16,4 +16,6 @@ Owner: knowledge-keeper · Last verified: 2026-09-30
 | PaneDelivery | Single door for writing into a pane | paste |
 | Axon | Older parked cockpit (tag `axon-parked-2026-09-29`) | True |
 | Overseer | Jev reads each finished Claude turn in a True pane and posts a verdict; read-only (SPEC Run 12) | autopilot |
+| Command bar | ⌘K line that routes one typed sentence to a shell, a Claude pane, a seat or a True action (SPEC Run 14) | command-bar |
+| Route | What the Command bar decided for a line: kind, project, target, destructive flag; Jev picks among code-built candidates, code owns the floors | command-bar |
 | Verdict | The Overseer's one-word read of a turn: verified, unverified, partial, asksToContinue, asksYou, blocked | status |
