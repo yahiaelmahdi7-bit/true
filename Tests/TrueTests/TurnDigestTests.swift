@@ -115,6 +115,10 @@ enum TL {
             "Bearer abcdefgh12345678.xyz",
             "-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----",
             "API_KEY=hunter2", "github_token=abc123", "MY_SECRET=s3", "DB_PASSWORD=pw",
+            "sk_live_abcdefgh12345678", "rk_test_abcdefgh12345678", "whsec_abcdefgh12345678", "ghs_abcdefgh12345678",
+            "AIzaabcdefgh1234567890abcdefgh12345678",
+            "eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoic2VydmljZSJ9.abcdefgh12345678",
+            "\"apiKey\": \"hunter2\"", "'password': 'hunter2'", "apikey: hunter2", "client_secret:hunter2",
         ]
         for s in samples {
             let out = Redact.secrets("before \(s) after")

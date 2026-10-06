@@ -8,13 +8,20 @@ enum Redact {
     private static let patterns: [NSRegularExpression] = [
         #"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"#,
         #"\bsk-(?:ant-)?[A-Za-z0-9_\-]{8,}"#,
-        #"\b(?:ghp|gho)_[A-Za-z0-9]{8,}"#,
+        // Stripe secret / restricted keys and webhook signing secrets (underscores, not dashes).
+        #"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{8,}"#,
+        #"\bwhsec_[A-Za-z0-9]{8,}"#,
+        #"\bgh[opsur]_[A-Za-z0-9]{8,}"#,
         #"\bgithub_pat_[A-Za-z0-9_]{8,}"#,
         #"\bAKIA[0-9A-Z]{12,}"#,
+        #"\bAIza[0-9A-Za-z_\-]{30,}"#,
         #"\bxox[bp]-[A-Za-z0-9\-]{8,}"#,
+        // JWTs: Supabase service-role / anon keys and most session tokens.
+        #"\beyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}"#,
         #"\bBearer\s+[A-Za-z0-9._~+/=\-]{8,}"#,
-        // NAME=value where NAME contains KEY / TOKEN / SECRET / PASSWORD (any case).
-        #"\b[A-Za-z0-9_]*(?i:key|token|secret|password)[A-Za-z0-9_]*=\S+"#,
+        // NAME=value, NAME: value, "name": "value" where NAME contains KEY / TOKEN / SECRET / PASSWORD
+        // (any case) — env files, JSON/YAML config, HTTP headers like `apikey: …`.
+        #"(?i)\b[A-Za-z0-9_\-]*(?:key|token|secret|passw(?:or)?d)[A-Za-z0-9_\-]*["']?\s*[:=]\s*["']?[^\s"',;}]+"#,
     ].compactMap { try? NSRegularExpression(pattern: $0) }
 
     static func secrets(_ text: String) -> String {
