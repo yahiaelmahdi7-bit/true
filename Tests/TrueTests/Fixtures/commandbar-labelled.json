@@ -1,0 +1,815 @@
+{
+ "_readme": [
+  "Hand-labelled by Claude on 2026-10-06 BEFORE any run, from Yahia's real prompts (~/.claude/history.jsonl, verbatim, typos kept). source=spec = phrasing from SPEC Run 14 item 7 not found verbatim in history.",
+  "FIXED LABELS: builders and agents must never edit this file. A wrong label is reported to Yahia, not fixed in place.",
+  "Candidates are fixed (projects, seats below) so results do not depend on what is on disk; the suite still passes them through ProjectMatcher.rank like the app.",
+  "Scoring: compare each non-null expect slot. project 'current' resolves to focused.project before comparing; 'none' = no project. target null = not scored. action 'none' = no True verb. destructive null = not scored.",
+  "ambiguous=true: kind passes if it matches OR the bar shows the two-choice state (kind confidence < 0.5).",
+  "model/effort are not labelled (subjective): print them only."
+ ],
+ "projects": [
+  {
+   "name": "Prism",
+   "path": "~/Prism"
+  },
+  {
+   "name": "TradingAgents",
+   "path": "~/Projects/TradingAgents"
+  },
+  {
+   "name": "UUAR-Podcast",
+   "path": "~/Projects/UUAR-Podcast"
+  },
+  {
+   "name": "true",
+   "path": "~/Projects/true"
+  },
+  {
+   "name": "axon",
+   "path": "~/Projects/axon"
+  },
+  {
+   "name": "argus",
+   "path": "~/Projects/argus"
+  },
+  {
+   "name": "egypt-sudan-trade",
+   "path": "~/Projects/egypt-sudan-trade"
+  },
+  {
+   "name": "finance-desk",
+   "path": "~/Projects/finance-desk"
+  },
+  {
+   "name": "streambox",
+   "path": "~/streambox"
+  },
+  {
+   "name": "Sukan",
+   "path": "~/Projects/Sukan"
+  },
+  {
+   "name": "second-brain-rag",
+   "path": "~/Projects/second-brain-rag"
+  },
+  {
+   "name": "invictus-trading",
+   "path": "~/Projects/invictus-trading"
+  }
+ ],
+ "seats": [
+  {
+   "name": "ben",
+   "project": "Prism",
+   "awake": true
+  },
+  {
+   "name": "cto",
+   "project": "true",
+   "awake": false
+  }
+ ],
+ "cases": [
+  {
+   "id": "c01",
+   "text": "ls",
+   "source": "spec",
+   "focused": {
+    "kind": "shell",
+    "project": "true",
+    "seat": null
+   },
+   "expect": {
+    "kind": "shell_command",
+    "project": "current",
+    "target": null,
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "bare executable"
+  },
+  {
+   "id": "c02",
+   "text": "git status",
+   "source": "spec",
+   "focused": {
+    "kind": "claude",
+    "project": "Prism",
+    "seat": null
+   },
+   "expect": {
+    "kind": "shell_command",
+    "project": "current",
+    "target": null,
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "shell even while a Claude pane is focused"
+  },
+  {
+   "id": "c03",
+   "text": "npm run dev",
+   "source": "history",
+   "focused": {
+    "kind": "shell",
+    "project": "Prism",
+    "seat": null
+   },
+   "expect": {
+    "kind": "shell_command",
+    "project": "current",
+    "target": null,
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": ""
+  },
+  {
+   "id": "c04",
+   "text": "npm i @vercel/analytics",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "Prism",
+    "seat": null
+   },
+   "expect": {
+    "kind": "shell_command",
+    "project": "current",
+    "target": null,
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "package install is not destructive by the definition"
+  },
+  {
+   "id": "c05",
+   "text": "!git log -4 --format=\"%h %an <%ae>\"",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "Prism",
+    "seat": null
+   },
+   "expect": {
+    "kind": "shell_command",
+    "project": "current",
+    "target": null,
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "rule: ! prefix"
+  },
+  {
+   "id": "c06",
+   "text": "launchctl bootout gui/$(id -u)/com.tradingagents.live",
+   "source": "history",
+   "focused": {
+    "kind": "shell",
+    "project": "TradingAgents",
+    "seat": null
+   },
+   "expect": {
+    "kind": "shell_command",
+    "project": "current",
+    "target": null,
+    "action": "none",
+    "destructive": null
+   },
+   "ambiguous": false,
+   "note": "stops the live engine locally; outside the destructive definition, so unscored"
+  },
+  {
+   "id": "c07",
+   "text": "! cd ~/Prism && supabase db push --include-all",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "Prism",
+    "seat": null
+   },
+   "expect": {
+    "kind": "shell_command",
+    "project": "Prism",
+    "target": null,
+    "action": "none",
+    "destructive": true
+   },
+   "ambiguous": false,
+   "note": "rule-matched shell that writes a live DB: destructive must still gate it"
+  },
+  {
+   "id": "c08",
+   "text": "! pbpaste | vercel env add SUPABASE_SERVICE_ROLE_KEY production",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "Prism",
+    "seat": null
+   },
+   "expect": {
+    "kind": "shell_command",
+    "project": "current",
+    "target": null,
+    "action": "none",
+    "destructive": true
+   },
+   "ambiguous": false,
+   "note": "writes a live third-party service via a ! rule"
+  },
+  {
+   "id": "c09",
+   "text": "npm init @shopify/app@latest here",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "Sukan",
+    "seat": null
+   },
+   "expect": {
+    "kind": "shell_command",
+    "project": "current",
+    "target": null,
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": true,
+   "note": "shell with a natural-language tail"
+  },
+  {
+   "id": "c10",
+   "text": "fix all issues found",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "Prism",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "contextual: only means something to the focused pane"
+  },
+  {
+   "id": "c11",
+   "text": "yes go ahead do 1 and 2",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "TradingAgents",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "contextual"
+  },
+  {
+   "id": "c12",
+   "text": "lets knock out #2",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "TradingAgents",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "contextual"
+  },
+  {
+   "id": "c13",
+   "text": "fix it",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "axon",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "contextual"
+  },
+  {
+   "id": "c14",
+   "text": "add the avatar picker to settings",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "streambox",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": ""
+  },
+  {
+   "id": "c15",
+   "text": "keep working we need to find profitabilityb",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "TradingAgents",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "typo kept"
+  },
+  {
+   "id": "c16",
+   "text": "test it on the last week of data to see how it owuld preform now",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "TradingAgents",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": ""
+  },
+  {
+   "id": "c17",
+   "text": "can u check out why streambox/mkstreams is not wokring i get no streams palying",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "true",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "streambox",
+    "target": "new_claude_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "names another project than the focused one"
+  },
+  {
+   "id": "c18",
+   "text": "fix the subtitle drift in streambox",
+   "source": "spec",
+   "focused": {
+    "kind": "shell",
+    "project": "true",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "streambox",
+    "target": "new_claude_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": ""
+  },
+  {
+   "id": "c19",
+   "text": "deploy the agents to build the indexer backfill and sync monitoring",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "argus",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "'deploy' means spawn agents here, not ship: destructive trap"
+  },
+  {
+   "id": "c20",
+   "text": "dont send out any emails without asking first",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "Prism",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "mentions sending but forbids it: destructive trap"
+  },
+  {
+   "id": "c21",
+   "text": "commit just the watchdog hunks locally",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "streambox",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "local commit only"
+  },
+  {
+   "id": "c22",
+   "text": "open the env file so i can just paste it",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "TradingAgents",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": true,
+   "note": "'open' trap: not open_project; shell 'open .env' also fair"
+  },
+  {
+   "id": "c23",
+   "text": "make sure my mac doesnt go to sleep",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "true",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "'sleep' trap: not sleep_seat"
+  },
+  {
+   "id": "c24",
+   "text": "im going to sleep now byee",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "streambox",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "'sleep' trap: a sign-off to the focused agent"
+  },
+  {
+   "id": "c25",
+   "text": "we need to wipe all emtpy runs as they are crowding our hub",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "TradingAgents",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": true
+   },
+   "ambiguous": false,
+   "note": "'hub' trap: not show_hub; deletes data"
+  },
+  {
+   "id": "c26",
+   "text": "why did the engine fire today ?",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "TradingAgents",
+    "seat": null
+   },
+   "expect": {
+    "kind": "question_for_claude",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": ""
+  },
+  {
+   "id": "c27",
+   "text": "is the run over",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "TradingAgents",
+    "seat": null
+   },
+   "expect": {
+    "kind": "question_for_claude",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": ""
+  },
+  {
+   "id": "c28",
+   "text": "what are the current shows we cover",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "UUAR-Podcast",
+    "seat": null
+   },
+   "expect": {
+    "kind": "question_for_claude",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": ""
+  },
+  {
+   "id": "c29",
+   "text": "why is the prism build red",
+   "source": "spec",
+   "focused": {
+    "kind": "claude",
+    "project": "true",
+    "seat": null
+   },
+   "expect": {
+    "kind": "question_for_claude",
+    "project": "Prism",
+    "target": "new_claude_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "names another project"
+  },
+  {
+   "id": "c30",
+   "text": "what is using up all this ram and cpi",
+   "source": "history",
+   "focused": {
+    "kind": "shell",
+    "project": null,
+    "seat": null
+   },
+   "expect": {
+    "kind": "question_for_claude",
+    "project": "none",
+    "target": "new_claude_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "machine question, no project"
+  },
+  {
+   "id": "c31",
+   "text": "where is my global claude file?",
+   "source": "history",
+   "focused": {
+    "kind": "empty",
+    "project": null,
+    "seat": null
+   },
+   "expect": {
+    "kind": "question_for_claude",
+    "project": "none",
+    "target": "new_claude_pane",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "nothing focused"
+  },
+  {
+   "id": "c32",
+   "text": "commit and push",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "egypt-sudan-trade",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": true
+   },
+   "ambiguous": false,
+   "note": ""
+  },
+  {
+   "id": "c33",
+   "text": "push to remote im done for the night",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "Prism",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": true
+   },
+   "ambiguous": false,
+   "note": ""
+  },
+  {
+   "id": "c34",
+   "text": "ok just run a audit of a then force push it without sentinal",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "Prism",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": true
+   },
+   "ambiguous": false,
+   "note": "force push"
+  },
+  {
+   "id": "c35",
+   "text": "delete any outstanding auth emails registerd that arent verifed yet",
+   "source": "history",
+   "focused": {
+    "kind": "claude",
+    "project": "Prism",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "current",
+    "target": "focused_pane",
+    "action": "none",
+    "destructive": true
+   },
+   "ambiguous": false,
+   "note": "deletes data"
+  },
+  {
+   "id": "c36",
+   "text": "deploy prism to prod",
+   "source": "spec",
+   "focused": {
+    "kind": "claude",
+    "project": "true",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "Prism",
+    "target": "new_claude_pane",
+    "action": "none",
+    "destructive": true
+   },
+   "ambiguous": false,
+   "note": ""
+  },
+  {
+   "id": "c37",
+   "text": "have ben refactor the uploader",
+   "source": "spec",
+   "focused": {
+    "kind": "claude",
+    "project": "true",
+    "seat": null
+   },
+   "expect": {
+    "kind": "agent_task",
+    "project": "Prism",
+    "target": "seat_ben",
+    "action": "none",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "target must be seat_ben (see seats)"
+  },
+  {
+   "id": "c38",
+   "text": "split right",
+   "source": "spec",
+   "focused": {
+    "kind": "claude",
+    "project": "true",
+    "seat": null
+   },
+   "expect": {
+    "kind": "true_action",
+    "project": "current",
+    "target": null,
+    "action": "split_right",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": ""
+  },
+  {
+   "id": "c39",
+   "text": "open trading",
+   "source": "spec",
+   "focused": {
+    "kind": "shell",
+    "project": "true",
+    "seat": null
+   },
+   "expect": {
+    "kind": "true_action",
+    "project": "TradingAgents",
+    "target": null,
+    "action": "open_project",
+    "destructive": false
+   },
+   "ambiguous": false,
+   "note": "project lifted by code"
+  }
+ ]
+}

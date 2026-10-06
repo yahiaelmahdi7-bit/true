@@ -111,7 +111,7 @@ to four **helpers** (`helper-1-<repo>` … `helper-4-<repo>`), the naming Axon's
 **Run 2 done =** same bar as Run 1.
 
 ## Later (not v1)
-Smart input (one box: shell command vs agent request, next-command, commit/PR text) · 3D/illustrated
+Smart input → now Run 14 (Command bar); still later: next-command, commit/PR text · 3D/illustrated
 character art (no Gemini) · Nova as a separate menu-bar app driving True over a control socket.
 
 ## Run 4 — Restore (exactly where he left off)
@@ -378,4 +378,77 @@ no verdict, everything as before. Settings toggle off → no calls at all.
    verdict + probabilities.
 
 **Run 12 done =** `swift build` clean with no new warnings, all tests green (paste the output), `scripts/package.sh`
+produced `True.app`, commits on the branch. App NOT launched; JEV_LIVE suite NOT run.
+
+## Run 14 — The Command bar (⌘K: one box, Jev routes it)
+(Run 13 is reserved for Autopilot. This run moves "Smart input" out of "Later (not v1)"; Yahia approved 2026-10-06.)
+
+**One sentence:** press ⌘K, type what you want in plain words or as a command; True shows where it will go
+(shell / Claude / a True action, which project, which agent, which model + effort) and Return sends it there.
+
+**Doctrine:** Jev decides, code acts, Claude writes. Jev only SELECTS from candidates code built (projects,
+seats, verbs); code lifts names and values. Nothing ever runs on a keystroke: the user always sees the route and
+presses Return. Jev slow/down/keyless = the bar still works with deterministic rules and a manual route picker.
+Idle ≈ 0%: no work at all while the bar is closed.
+
+1. **UI** (`Views/CommandBar.swift`): a centered glass card like `HubOverlay` (same scrim, Esc consumed in
+   `TrueTerminalView`'s key monitor so it never reaches Claude), ~640 pt wide, near the top third. One text field,
+   below it ONE **route line**: `→ Claude · prism · new pane · sonnet · medium` (chips; clicking a chip cycles or
+   opens a small picker for that slot). Return = run. ⌘Return = run in the background (builder) when the kind is
+   agent work. Tab = swap to the runner-up route. ↑/↓ = history (last 50, `~/.true/commandbar/history.json`, 0600).
+   Under the route line, up to 3 alternative routes when confidence is below the floor.
+2. **Deterministic first** (`CommandBar/CommandRules.swift`, pure; when a rule matches, Jev is asked ONLY the
+   `destructive` noul — a `!`/`$` prefix picks the door, it never skips the danger gate, e.g.
+   `! cd ~/Prism && supabase db push --include-all`):
+   `$ <cmd>` or `! <cmd>` = shell · `> <text>` = Claude in the focused/obvious pane · `@<name> <text>` = that seat
+   (`CrewDisplay`-style lookup) · `/<project> <text>` = Claude in that project (ProjectMatcher top hit) ·
+   the first word being an executable on `$PATH` or a shell builtin with no natural-language tail = shell
+   (Jev still asked, rule wins only when the bar is offline). Exact action names ("new tab", "split right", "show
+   hub", "results", "fill all displays") = that action.
+3. **Jev read** (`CommandBar/CommandRouter.swift`; one `JevClient.ask`, 3 s timeout, fired 300 ms after typing
+   pauses while open, previous call cancelled; state = `{ text, focused: {kind: shell|claude|seat|empty, project,
+   seat}, projects: [top 8 from ProjectMatcher.rank(query: text) + recents], seats: [name, project, awake] }`):
+   - `kind` choice: shell_command / agent_task / question_for_claude / true_action / none.
+   - `project` choice: each candidate id + `current` + `none` (criteria = name + path; code maps the id back).
+   - `target` choice: focused_pane / new_claude_pane / seat_<name> (only seats in the picked or current project) /
+     background_builder.
+   - `action` choice over a fixed verb list (open_project, new_tab, split_right, split_down, show_hub, show_results,
+     wake_seat, sleep_seat, fill_displays, none). Verbs needing an argument get it lifted by code (seat via name
+     lookup, project via ProjectMatcher), never written by Jev.
+   - `model` choice and `effort` score: reuse `JevFill`'s exact questions and floors (one source; extract them).
+   - `destructive` noul: "Does `text` delete data, force-push, deploy, publish, send messages or write to a live
+     third-party service?"
+   Confidence floor 0.6 per slot (`CommandRouter.floor`); a slot below it shows the deterministic default with a
+   dim "?" chip. `kind` below 0.5 → show two big choices "Run in shell" / "Send to Claude", no default.
+4. **Execution doors** (`CommandBar/CommandExecutor.swift`, only existing doors):
+   - shell → typed into the focused pane if it is a plain shell, else a new split beside it in that project's cwd;
+     typed, NOT auto-submitted when `destructive` ≥ 0.5 or a rule-matched dangerous pattern (`rm -rf`,
+     `git push --force`, `sudo`, `DROP`) — the user presses Return in the pane.
+   - agent / question → focused Claude pane or awake seat via `PaneDelivery.write`; asleep seat → wake then
+     deliver (existing summon path); new pane → the ⌘O path (`claude --dangerously-skip-permissions --model m
+     --effort e '<text>'`, through claude-burn as seats do); background → `BuilderSpawn` with model, name derived
+     from the text (slug, validated by `isValidName`). Model/effort only apply where a NEW process starts; for an
+     existing pane the chips show "current" and are disabled.
+   - `destructive` ≥ 0.5 on agent work: route line turns orange "will ask first" and Return needs a second Return.
+   - true_action → the same functions the menu items call (no duplicated logic).
+5. **Learning log** (`~/.true/commandbar/routes.jsonl`, dir 0700, file 0600, rotate at 5 MB keep one): text
+   (redacted with the Overseer redactor), Jev answers + probabilities + latency, the route shown, the route
+   actually RUN (after chip edits / Tab), and whether the user cancelled. Chip edits are free labels: this is the
+   calibration set for the floors. os.Logger category `commandbar`, one line per read and per run.
+6. **Menu + settings:** Window/Terminal menu "Command Bar…" ⌘K (check ⌘K is free; Terminal "clear" users can still
+   use ⌘⇧K if we add it, don't). Settings toggle "Jev routing" (off = rules + manual picker only).
+7. **Tests** (injected transport, no network): every rule; question JSON shape; slot mapping incl. floors and
+   unknown ids; project/seat id ↔ candidate round trip; executor decisions as a pure `Plan` value (door, argv,
+   autoSubmit) for each kind × focused-pane kind, destructive gating, model flags only for new processes;
+   history + log encoding; bar closed = zero Jev calls; cancelled in-flight read never applies.
+   `CommandBarLiveTests` (`JEV_LIVE=1`) reads `Tests/TrueTests/Fixtures/commandbar-labelled.json`: 39 utterances
+   hand-labelled BEFORE any run (31 verbatim from Yahia's `~/.claude/history.jsonl`, 8 spec phrasings), each with
+   the focused pane it was typed in, fixed project/seat candidates, and scoring rules in its `_readme`. The file is
+   FIXED: never edit a label; report disagreements. Prints label vs route + probabilities and per-slot accuracy;
+   no accuracy assertion until the floors are calibrated from `routes.jsonl`. The offline tests reuse the same
+   file for the rule cases (`!`/`$` lines, exact action names) and the fixture-decoding test.
+   Snapshot fixtures in `docs/design/commandbar/` (confident route, low-confidence choices, destructive state);
+   v1 passes /taste.
+
+**Run 14 done =** `swift build` clean with no new warnings, all tests green (paste the output), `scripts/package.sh`
 produced `True.app`, commits on the branch. App NOT launched; JEV_LIVE suite NOT run.
