@@ -16,11 +16,14 @@ extension VerdictKind {
 struct VerdictBadge: View {
     let kind: VerdictKind
     var body: some View {
+        // Blocked / Asks you are inverted like the Needs you pill (`AttentionPill`): the most urgent rows must
+        // not look like Partial.
+        let loud = kind == .blocked || kind == .asksYou
         Text(kind.label)
             .font(.caption2.weight(.semibold))
             .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(kind.tint.opacity(0.22), in: .capsule)
-            .foregroundStyle(kind.tint)
+            .background(loud ? Color.white : kind.tint.opacity(0.22), in: .capsule)
+            .foregroundStyle(loud ? Color.black : kind.tint)
             .accessibilityLabel("Verdict: \(kind.label)")
     }
 }
@@ -35,15 +38,20 @@ struct YourMoveRow: Identifiable, Equatable {
     let at: Date
     var id: UUID { pane }
 
-    /// Non-verified verdicts, most urgent first. `name` is the seat name, else the tab title.
+    /// Non-verified verdicts, most urgent first. `name` is the seat name, else the tab title, else the project.
+    /// `project` is empty when it would repeat `name` (a plain pane's tab title is usually the folder name).
     @MainActor static func build(_ verdicts: [UUID: OverseerVerdict], seatName: (UUID) -> String?,
                                  tabTitle: (UUID) -> String?) -> [YourMoveRow] {
         OverseerStore.ordered(verdicts).filter { $0.verdict.kind != .verified }.map { p, v in
-            YourMoveRow(pane: p, name: seatName(p) ?? tabTitle(p) ?? "Terminal",
-                        project: HubProject.title(HubProject.key(forCwd: v.cwd ?? "")),
-                        kind: v.kind, reason: v.reason, at: v.at)
+            let project = HubProject.title(HubProject.key(forCwd: v.cwd ?? ""))
+            let name = seatName(p) ?? tabTitle(p) ?? project
+            return YourMoveRow(pane: p, name: name,
+                               project: name.caseInsensitiveCompare(project) == .orderedSame ? "" : project,
+                               kind: v.kind, reason: v.reason, at: v.at)
         }
     }
+
+    var spoken: String { [name, project, kind.label, reason].filter { !$0.isEmpty }.joined(separator: ", ") }
 }
 
 struct YourMoveSection: View {
@@ -60,7 +68,9 @@ struct YourMoveSection: View {
                         VStack(alignment: .leading, spacing: 1) {
                             HStack(spacing: 6) {
                                 Text(r.name).font(.body).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.middle)
-                                Text(r.project).font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1)
+                                if !r.project.isEmpty {
+                                    Text(r.project).font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1)
+                                }
                             }
                             Text(r.reason).font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1).truncationMode(.tail)
                         }
@@ -72,7 +82,7 @@ struct YourMoveSection: View {
                 }
                 .onTapGesture { onFocus(r.pane) }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(r.name), \(r.project), \(r.kind.label), \(r.reason)")
+                .accessibilityLabel(r.spoken)
                 .accessibilityHint("Focuses this pane")
                 .accessibilityAddTraits(.isButton)
             }

@@ -120,7 +120,8 @@ struct AgentCard: View {
                             iconButton("slider.horizontal.3", "Edit") { actions.edit(agent) }
                         }
                         .opacity(showActions ? 1 : 0).allowsHitTesting(showActions).accessibilityHidden(true)
-                        if let v = actions.verdict(agent.name) { VerdictBadge(kind: v) }
+                        // A live Needs you pill already says "look here"; a second badge would repeat it.
+                        if status != .needsYou, let v = actions.verdict(agent.name) { VerdictBadge(kind: v) }
                         AttentionPill(status: status)
                     }
                     HStack(spacing: 6) {

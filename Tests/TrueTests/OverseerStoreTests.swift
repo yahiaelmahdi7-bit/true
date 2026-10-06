@@ -218,3 +218,22 @@ private let fixedDigest = TurnDigest(asked: "ship it API_KEY=abc123", steps: [Tu
         #expect(other.transcript == nil)
     }
 }
+
+@MainActor
+@Suite struct YourMoveRowTests {
+    @Test func folderTitleIsSaidOnceAndVerifiedIsLeftOut() {
+        let a = UUID(), b = UUID(), c = UUID()
+        let at = Date(timeIntervalSince1970: 1_000)
+        let cwd = "/tmp/true-overseer-nogit/true"
+        let v: [UUID: OverseerVerdict] = [
+            a: OverseerVerdict(kind: .unverified, reason: "r", at: at, sessionID: nil, cwd: cwd),
+            b: OverseerVerdict(kind: .blocked, reason: "r", at: at, sessionID: nil, cwd: cwd),
+            c: OverseerVerdict(kind: .verified, reason: "r", at: at, sessionID: nil, cwd: cwd),
+        ]
+        let rows = YourMoveRow.build(v, seatName: { $0 == b ? "lead" : nil }, tabTitle: { _ in "true" })
+        #expect(rows.map(\.pane) == [b, a])
+        #expect(rows[0].name == "lead" && rows[0].project == "true")
+        #expect(rows[1].name == "true" && rows[1].project.isEmpty)
+        #expect(rows[1].spoken == "true, Unverified, r")
+    }
+}

@@ -104,13 +104,16 @@ struct HubSnapshotTests {
             (.partial, "Stopped with work left", 1500), (.verified, "A check ran after the work", 30)]
         var verdicts: [UUID: OverseerVerdict] = [:]
         var names: [UUID: String] = [:]
+        var titles: [UUID: String] = [:]
         for (i, k) in kinds.enumerated() {
             let id = UUID()
             verdicts[id] = OverseerVerdict(kind: k.0, reason: k.1, at: t.addingTimeInterval(-k.2), sessionID: "v\(i)",
                                            cwd: i % 2 == 0 ? "/Users/y/Projects/true" : "/Users/y/Projects/finance-desk")
             if i < 2 { names[id] = i == 0 ? "lead" : "cfo" }
+            // Plain panes: a default title (the folder name, said once) and a custom-named tab.
+            else { titles[id] = i == 3 ? "invoices" : (verdicts[id]?.cwd as NSString?)?.lastPathComponent }
         }
-        let rows = YourMoveRow.build(verdicts, seatName: { names[$0] }, tabTitle: { _ in "2" })
+        let rows = YourMoveRow.build(verdicts, seatName: { names[$0] }, tabTitle: { titles[$0] })
         var a = actions
         a.verdict = { $0 == "lead" ? .blocked : $0 == "cfo" ? .asksYou : nil }
         try snapshot("overseer-all-card", width: 1000, height: 780) {
