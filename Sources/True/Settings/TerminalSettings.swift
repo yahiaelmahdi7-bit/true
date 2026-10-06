@@ -14,6 +14,10 @@ enum TerminalSettings {
     /// The Overseer (Jev reads each finished turn). On by default; off = no Jev calls at all.
     static var overseer: Bool { UserDefaults.standard.object(forKey: overseerKey) as? Bool ?? true }
 
+    static let jevRoutingKey = "commandbar.jevRouting"
+    /// The Command bar's Jev read. On by default; off = prefix rules + pane-aware defaults, no network.
+    static var jevRouting: Bool { UserDefaults.standard.object(forKey: jevRoutingKey) as? Bool ?? true }
+
     static let systemMono = "System Mono"
     /// Programs' own colours on by default: Claude Code's orange spinner is how you see it working.
     /// Off = the Run 8 black-and-white look (grey ANSI ladder + desaturation filter).
