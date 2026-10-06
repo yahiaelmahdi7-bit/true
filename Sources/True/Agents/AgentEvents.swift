@@ -30,6 +30,9 @@ struct PaneEvent: Equatable, Sendable {
     var detail: String? = nil
     /// The session's permission mode when the hook reported one (`permission_mode`).
     var mode: String? = nil
+    /// Stop only: the transcript file and session id the Overseer reads the finished turn from.
+    var transcript: String? = nil
+    var session: String? = nil
 
     /// Parse one wire line. Anything malformed returns nil — the socket is a doorbell, never a crash surface.
     static func parse(line: Data, at: Date = Date()) -> PaneEvent? {
@@ -40,12 +43,16 @@ struct PaneEvent: Equatable, Sendable {
             let tool: String?
             let input: [String: String]?
             let mode: String?
+            let transcript: String?
+            let session: String?
         }
         guard let w = try? JSONDecoder().decode(Wire.self, from: line),
               let pane = UUID(uuidString: w.pane), let kind = PaneEventKind(rawValue: w.event) else { return nil }
         let s = w.tool.map { ToolSummary.summarize(tool: $0, input: w.input ?? [:]) }
         return PaneEvent(pane: pane, kind: kind, message: w.message ?? "", at: at, tool: s?.tool, detail: s?.detail,
-                         mode: (w.mode?.isEmpty == false) ? w.mode : nil)
+                         mode: (w.mode?.isEmpty == false) ? w.mode : nil,
+                         transcript: (w.transcript?.isEmpty == false) ? w.transcript : nil,
+                         session: (w.session?.isEmpty == false) ? w.session : nil)
     }
 }
 

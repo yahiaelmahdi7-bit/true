@@ -125,6 +125,12 @@ enum AgentHooks {
             mode = payload.get("permission_mode")
             if isinstance(mode, str) and mode:
                 wire["mode"] = mode
+            if payload.get("hook_event_name") == "Stop":
+                # The Overseer reads the finished turn from the transcript; the session id matches Hub rows.
+                for key, field in (("transcript_path", "transcript"), ("session_id", "session")):
+                    v = payload.get(key)
+                    if isinstance(v, str) and v:
+                        wire[field] = v
             if payload.get("hook_event_name") == "PermissionRequest":
                 wire["tool"] = str(payload.get("tool_name") or "")
                 args = payload.get("tool_input")
