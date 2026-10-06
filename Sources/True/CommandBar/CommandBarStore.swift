@@ -37,7 +37,7 @@ final class CommandBarStore {
     @ObservationIgnored private var token = 0
     @ObservationIgnored private var historyIndex = -1
     @ObservationIgnored private var settingFromHistory = false
-    @ObservationIgnored private var context: CommandContext?
+    @ObservationIgnored private(set) var context: CommandContext?
     @ObservationIgnored private var readStarted: Date?
 
     init(jev: JevClient = .shared,
@@ -156,6 +156,12 @@ final class CommandBarStore {
     }
 
     // MARK: Run
+
+    /// What Return would do right now, for the view's "typed, not sent" note.
+    var plan: Plan? {
+        guard let r = route, let c = context else { return nil }
+        return CommandExecutor.plan(route: r, background: false, context: c)
+    }
 
     func run(background: Bool = false) {
         guard isOpen, let r = route, let ctx = context, !r.twoChoice else { return }

@@ -20,6 +20,7 @@ struct TrueApp: App {
             .preferredColorScheme(.dark)
             .frame(minWidth: 480, minHeight: 300)
             .overlay { ProjectPaletteHost() }
+            .overlay { CommandBarHost() }
             .sheet(item: Bindable(registry).builder) { AgentBuilderSheet(draft: $0, registry: registry) }
             .sheet(isPresented: Bindable(ContextCleaner.shared).isOpen) { CleanerSheet(cleaner: ContextCleaner.shared) }
             .sheet(isPresented: Bindable(ResultsStore.shared).isOpen) { ResultsSheet(store: ResultsStore.shared) }
@@ -31,6 +32,7 @@ struct TrueApp: App {
             CommandGroup(replacing: .newItem) {
                 Button("New Tab") { model.newTab() }.keyboardShortcut("t")
                 Button("Open Project…") { ProjectPalette.shared.toggle() }.keyboardShortcut("o")
+                Button("Command Bar…") { CommandBarStore.shared.toggle() }.keyboardShortcut("k")
                 Button("Close Pane") { model.closeFocusedPane() }.keyboardShortcut("w")
             }
             CommandGroup(after: .appInfo) {
