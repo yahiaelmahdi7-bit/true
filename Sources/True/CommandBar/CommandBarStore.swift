@@ -98,15 +98,15 @@ final class CommandBarStore {
         let env = environment()
         let ctx = CommandContext(focused: env.focused,
                                  projects: CommandRouter.candidates(text: t, projects: env.projects, recent: env.recent),
-                                 seats: env.seats)
+                                 seats: env.seats, all: env.projects)
         context = ctx
         let rule = CommandRules.match(t, projects: env.projects, seats: env.seats, recent: env.recent, isExecutable: isExecutable)
-        route = CommandRouter.route(text: t, reply: nil, context: ctx, rule: rule)
+        route = CommandRouter.route(text: t, reply: nil, context: ctx, rule: rule, isExecutable: isExecutable)
         // A pure action phrase has nothing to judge; everything else gets one read.
         guard enabled(), !(rule?.kind == .trueAction && rule?.authoritative == true) else { return }
         reading = true
         let mine = token
-        let jev = self.jev, delay = debounce, log = self.log
+        let jev = self.jev, delay = debounce, log = self.log, exec = self.isExecutable
         let started = Date()
         readStarted = started
         readTask = Task { @MainActor [weak self] in
@@ -115,7 +115,7 @@ final class CommandBarStore {
             let reply = await CommandRouter.ask(text: t, context: ctx, rule: rule, jev: jev)
             guard let self, !Task.isCancelled, self.token == mine, self.isOpen else { return }
             let ms = Int(Date().timeIntervalSince(started) * 1000)
-            let routed = CommandRouter.route(text: t, reply: reply, context: ctx, rule: rule)
+            let routed = CommandRouter.route(text: t, reply: reply, context: ctx, rule: rule, isExecutable: exec)
             self.route = routed
             self.reading = false
             self.readStarted = nil

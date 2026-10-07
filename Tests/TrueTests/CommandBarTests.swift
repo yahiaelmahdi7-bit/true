@@ -191,7 +191,7 @@ private func ctx(_ f: FocusedPane = shellPane) -> CommandContext {
         CommandBarStore(jev: JevClient(transport: t, keyProvider: { "k" }, env: [:]), enabled: { true },
                         log: CommandBarLog(dir: URL(fileURLWithPath: NSTemporaryDirectory() + "cbs-\(UUID().uuidString)")),
                         environment: { BarEnvironment(focused: focused, projects: [proj("alpha"), proj("beta")], recent: [], seats: []) },
-                        isExecutable: { _ in false }, execute: { p, _ in box.plans.append(p) }, debounce: .milliseconds(1))
+                        isExecutable: { $0 == "ls" }, execute: { p, _ in box.plans.append(p) }, debounce: .milliseconds(1))
     }
     private func settle(_ s: CommandBarStore) async {
         for _ in 0..<300 { if !s.reading { return }; try? await Task.sleep(for: .milliseconds(10)) }
