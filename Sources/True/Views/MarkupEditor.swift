@@ -74,7 +74,7 @@ enum MarkupDrawing {
 struct MarkupEditor: View {
     enum Tool: CaseIterable { case pen, arrow, rect, highlight, text }
 
-    let controller: TrayPanelController
+    let controller: any MarkupHosting
     let watcher: ScreenshotWatcher
     let entry: TrayEntry
     let image: CGImage
@@ -241,9 +241,7 @@ struct MarkupEditor: View {
         guard let png = MarkupDrawing.renderPNG(image: image, strokes: doc.strokes) else { saving = false; return }
         Task {
             if let e = await watcher.addMarkup(png: png, parent: entry) {
-                controller.markingUp = false
-                controller.markupDirty = false
-                controller.set(.zoom(e.id))
+                controller.markupSaved(id: e.id)
                 controller.showToast("Markup saved")
             } else { saving = false }
         }

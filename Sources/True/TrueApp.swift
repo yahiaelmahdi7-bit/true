@@ -54,6 +54,8 @@ struct TrueApp: App {
                 Divider()
                 Button("Screenshots…") { TrayPanelController.shared.toggleExpanded() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
+                Button("Show Shots") { ShotsOverlayController.shared.toggle() }
+                    .keyboardShortcut(ShotsHotKey.keyEquivalent, modifiers: ShotsHotKey.eventModifiers)
                 Button(TrayPanelController.shared.visible ? "Hide Screenshot Panel" : "Show Screenshot Panel") {
                     TrayPanelController.shared.setVisible(!TrayPanelController.shared.visible)
                 }
@@ -150,6 +152,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The always-on screenshot panel: one non-activating floating window, shown at launch (0% idle; it
         // redraws only when the tray changes). Hidden/shown by the Shell menu, remembered in UserDefaults.
         TrayPanelController.shared.start()
+        // The Shots overlay's global hotkey: one Carbon registration at launch, no Accessibility permission, 0% idle.
+        ShotsHotKeyRegistrar.shared.register()
         // One vnode watch on our own executable (+ one stat on activation): 0% idle. It only flips a flag that
         // shows the "Restart to update" pill; it never restarts anything by itself.
         BuildFreshnessWatcher.shared.start()

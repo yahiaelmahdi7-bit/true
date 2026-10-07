@@ -284,6 +284,15 @@ final class ScreenshotWatcher {
         }
     }
 
+    /// Drag-in: copy dropped image files into the tray through `TrayStore.ingest` (the 24-cap applies).
+    /// Returns how many were actually added (duplicates of an already-ingested file add nothing).
+    func ingestDropped(_ urls: [URL]) async -> Int {
+        let store = store
+        let added = await Task.detached { store.ingest(urls).count }.value
+        await reload()
+        return added
+    }
+
     func restoreLastRemoved() {
         guard let removed = lastRemoved else { return }
         lastRemoved = nil
