@@ -51,8 +51,8 @@ enum Investigation {
                                      "Read(\(homeDir)/.claude/sessions/**)", "Bash", "Edit", "Write", "WebFetch"]],
         ]
         if hookExists {
-            let cmd = "AGENT_BURN_MAIN=1 AGENT_BURN_SOFT=\(duty.budget.softContext) AGENT_BURN_HARD=\(duty.budget.hardContext) bun run \(hookPath)"
-            o["hooks"] = ["PreToolUse": [["matcher": "*", "hooks": [["type": "command", "command": cmd]]]]]
+            let cmd = "AGENT_BURN_MAIN=1 AGENT_BURN_SOFT=\(duty.budget.softContext) AGENT_BURN_HARD=\(duty.budget.hardContext) node \(hookPath)"
+            o["hooks"] = ["PreToolUse": [["matcher": "*", "hooks": [["type": "command", "command": cmd, "timeout": 2]]]]]
         }
         let d = (try? JSONSerialization.data(withJSONObject: o, options: [.prettyPrinted, .sortedKeys])) ?? Data("{}".utf8)
         return String(decoding: d, as: UTF8.self)

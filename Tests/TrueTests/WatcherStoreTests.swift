@@ -89,6 +89,9 @@ final class Box<T>: @unchecked Sendable {
         let d = Duty.watcherAgent().duty!
         #expect(!Investigation.settingsJSON(duty: d, hookExists: false).contains("AGENT_BURN_MAIN"))
         #expect(Investigation.settingsJSON(duty: d, hookExists: true).contains("AGENT_BURN_MAIN=1"))
+        // jev-tools burn/install.md: the hook runs under node (Node 24 strips the types), with a 2 s timeout
+        // (JSONSerialization escapes "/" as "\/")
+        #expect(Investigation.settingsJSON(duty: d, hookExists: true).replacingOccurrences(of: "\\/", with: "/").contains("node \(Investigation.hookPath)"))
         #expect(Investigation.mcpJSON(serverExecutable: false).contains("{}"))
     }
     @Test func parseReportAndStopped() {
