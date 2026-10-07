@@ -12,8 +12,18 @@ struct CommandBarFixture: Decodable {
     var seats: [S]
     var cases: [Case]
 
-    static func load() throws -> CommandBarFixture {
-        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/commandbar-labelled.json")
+    static var defaultURL: URL {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/commandbar-labelled.json")
+    }
+
+    /// The live suite's input: an absolute path in env COMMANDBAR_FIXTURE when set, else the default fixture.
+    static func liveURL(env: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        guard let p = env["COMMANDBAR_FIXTURE"], p.hasPrefix("/") else { return defaultURL }
+        return URL(fileURLWithPath: p)
+    }
+
+    static func load(from url: URL? = nil) throws -> CommandBarFixture {
+        let url = url ?? defaultURL
         return try JSONDecoder().decode(CommandBarFixture.self, from: Data(contentsOf: url))
     }
 

@@ -6,7 +6,8 @@ import Foundation
 /// Prints label vs route per slot + probabilities + ms and per-slot accuracy. No accuracy assertion: it is a calibration set.
 @Suite(.enabled(if: ProcessInfo.processInfo.environment["JEV_LIVE"] == "1")) struct CommandBarLiveTests {
     @Test func labelledRoutesVersusRouter() async throws {
-        let fx = try CommandBarFixture.load()
+        let url = CommandBarFixture.liveURL()
+        let fx = try CommandBarFixture.load(from: url)
         var hit: [String: Int] = [:], seen: [String: Int] = [:], rows: [String] = []
         func score(_ slot: String, _ ok: Bool?) -> String {
             guard let ok else { return "-" }
@@ -19,12 +20,13 @@ import Foundation
             let focused = fx.pane(c)
             let ctx = CommandContext(focused: focused,
                                      projects: CommandRouter.candidates(text: c.text, projects: fx.projectList, recent: []),
-                                     seats: fx.barSeats)
+                                     seats: fx.barSeats, all: fx.projectList)
             let rule = CommandRules.match(c.text, projects: fx.projectList, seats: fx.barSeats)
             let t0 = Date()
             let reply = await CommandRouter.ask(text: c.text, context: ctx, rule: rule, jev: JevClient())
             let ms = Int(Date().timeIntervalSince(t0) * 1000)
-            let r = CommandRouter.route(text: c.text, reply: reply, context: ctx, rule: rule)
+            let r = CommandRouter.route(text: c.text, reply: reply, context: ctx, rule: rule,
+                                       isExecutable: BarEnvironmentProvider.onPath)
             let e = c.expect
             let kindOK = e.kind.map { $0 == r.kind.rawValue || (c.ambiguous == true && r.twoChoice) }
             let gotProject = r.project?.name ?? focused.project
@@ -41,6 +43,6 @@ import Foundation
                 + " | model \(r.model?.rawValue ?? "-") effort \(r.effort?.rawValue ?? "-") twoChoice \(r.twoChoice) | \(ms)ms")
         }
         let acc = ["kind", "project", "target", "action", "destructive"].map { "\($0) \(hit[$0] ?? 0)/\(seen[$0] ?? 0)" }.joined(separator: "  ")
-        print("\n=== Command bar live: label vs route ===\n" + rows.joined(separator: "\n") + "\naccuracy: \(acc)\n")
+        print("\n=== Command bar live: label vs route (\(url.lastPathComponent), \(fx.cases.count) cases) ===\n" + rows.joined(separator: "\n") + "\naccuracy: \(acc)\n")
     }
 }
