@@ -89,6 +89,9 @@ private struct GridPanel: View {
                 IconButton(symbol: "folder", help: "Show \(watcher.folder.lastPathComponent) in Finder") {
                     NSWorkspace.shared.open(watcher.folder)
                 }
+                IconButton(symbol: "arrow.up.left.and.arrow.down.right", help: "Open full screen — ⌃⌥⌘S") {
+                    ShotsOverlayController.shared.show()
+                }
                 IconButton(symbol: "chevron.up", help: "Collapse (Esc)") { controller.set(.collapsed) }
             }
             Group {

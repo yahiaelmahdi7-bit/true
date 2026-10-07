@@ -23,8 +23,8 @@ enum ShotsHotKey {
             | (command ? UInt32(cmdKey) : 0) | (shift ? UInt32(shiftKey) : 0)
     }
     static var keyEquivalent: KeyEquivalent { KeyEquivalent(letter) }
-    static var eventModifiers: EventModifiers {
-        var m: EventModifiers = []
+    static var eventModifiers: SwiftUI.EventModifiers {
+        var m: SwiftUI.EventModifiers = []
         if control { m.insert(.control) }
         if option { m.insert(.option) }
         if command { m.insert(.command) }
