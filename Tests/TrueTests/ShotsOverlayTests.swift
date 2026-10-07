@@ -110,6 +110,25 @@ import Carbon.HIToolbox
         }
     }
 
+    @Test func markupImageNeverUnderBottomBar() {
+        let barTop = screen.height - ins.bottom - ShotsOverlayLogic.toolbarBand
+        let barCentre = ShotsOverlayLogic.bottomBarCenterY(containerHeight: screen.height, bottomInset: ins.bottom)
+        #expect(barCentre > barTop)
+        for container in [screen, CGSize(width: 800, height: 1200), CGSize(width: 1512, height: 400), CGSize(width: 100, height: 100)] {
+            let area = ShotsOverlayLogic.markupArea(container: container, insets: ins)
+            let top = container.height - ins.bottom - ShotsOverlayLogic.toolbarBand
+            #expect(area.maxY <= max(top, area.minY + 1) + 0.001)
+            for aspect: CGFloat in [0.2, 1, 1.6, 8] {
+                let r = ShotsOverlayLogic.fittedRect(in: area, aspect: aspect)
+                #expect(r.width > 0 && r.height > 0)
+                #expect(r.minX >= area.minX - 0.001 && r.maxX <= area.maxX + 0.001)
+                #expect(r.maxY <= area.maxY + 0.001)
+            }
+        }
+        #expect(ShotsOverlayLogic.markupArea(container: screen, insets: ins).maxY == screen.height - ins.bottom - ShotsOverlayLogic.toolbarBand)
+        #expect(ShotsOverlayLogic.markupArea(container: screen, insets: ins).minX >= ins.leading + ShotsOverlayLogic.markupSideReserve)
+    }
+
     @Test func fittedImageNeverUnderSideButtons() {
         let area = ShotsOverlayLogic.viewerArea(container: screen, insets: ins)
         let r = ShotsOverlayLogic.fittedRect(in: area, aspect: 5)

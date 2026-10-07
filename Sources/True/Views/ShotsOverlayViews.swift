@@ -41,6 +41,9 @@ struct ShotsOverlayRoot: View {
                 shots
                 DownloadsGlassStrip(controller: c)
             }
+            .opacity(c.markingUp ? 0 : 1)
+            .allowsHitTesting(!c.markingUp)
+            .animation(.easeOut(duration: 0.18), value: c.markingUp)
             .padding(.top, c.insets.top).padding(.leading, c.insets.leading)
             .padding(.bottom, c.insets.bottom).padding(.trailing, c.insets.trailing)
 
@@ -255,14 +258,15 @@ private struct ShotViewer: View {
             let size = geo.size
             let p = c.viewerProgress
             ZStack {
-                Color.black.opacity(0.6 * p).contentShape(.rect).onTapGesture { if !c.markingUp { c.closeViewer() } }
+                Color.black.opacity((c.markingUp ? 0.82 : 0.6) * p).contentShape(.rect).onTapGesture { if !c.markingUp { c.closeViewer() } }
                 if let entry {
                     if c.markingUp, let full {
-                        let area = ShotsOverlayLogic.viewerArea(container: size, insets: insets, sideReserve: 40, toolbarBand: 0)
-                        MarkupEditor(controller: c, watcher: c.watcher, entry: entry, image: full)
-                            .clipShape(.rect(cornerRadius: 16, style: .continuous))
-                            .frame(width: area.width, height: area.height)
-                            .position(x: area.midX, y: area.midY)
+                        MarkupEditor(style: .overlay(insets: insets), controller: c, watcher: c.watcher, entry: entry, image: full)
+                            .frame(width: size.width, height: size.height)
+                        RoundButton(symbol: "xmark", help: "Cancel markup (Esc)", dark: !reduceTransparency) {
+                            c.markingUp = false; c.markupDirty = false
+                        }
+                        .position(x: c.insets.leading + ShotsOverlayLogic.sideReserve / 2, y: c.insets.top + 22)
                     } else {
                         picture(entry, size: size, progress: p)
                         if !c.markingUp { chrome(entry, size: size).opacity(p) }

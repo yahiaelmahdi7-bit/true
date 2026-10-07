@@ -121,6 +121,20 @@ enum ShotsOverlayLogic {
         return CGRect(x: x, y: y, width: w, height: h)
     }
 
+    /// Markup keeps the viewer's bottom band for its tool bar (same slot as the viewer toolbar) but only needs
+    /// room for the Close button at the sides.
+    static let markupSideReserve: CGFloat = 40
+
+    static func markupArea(container: CGSize,
+                           insets: (top: CGFloat, leading: CGFloat, bottom: CGFloat, trailing: CGFloat)) -> CGRect {
+        viewerArea(container: container, insets: insets, sideReserve: markupSideReserve, toolbarBand: toolbarBand)
+    }
+
+    /// Centre of the floating bottom bar (viewer toolbar and markup bar share the slot).
+    static func bottomBarCenterY(containerHeight: CGFloat, bottomInset: CGFloat) -> CGFloat {
+        containerHeight - bottomInset - 32
+    }
+
     /// Aspect-fit `aspect` (width / height) inside `area`, centred; never upscaled past `maxScale`× `natural`
     /// (so a 16 pt icon is not blown up to a blurry slab). Falls back to 1.6 for a bad aspect.
     static func fittedRect(in area: CGRect, aspect: CGFloat, natural: CGSize? = nil, maxScale: CGFloat = 2) -> CGRect {
