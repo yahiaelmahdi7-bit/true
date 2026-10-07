@@ -46,7 +46,18 @@ final class OverseerStore {
         }
     }
 
+    /// The Watcher's hook: a failure verdict still standing when its pane closes (SPEC Run 15 §3 source 3).
+    @ObservationIgnored var onDropped: ((UUID, OverseerVerdict) -> Void)?
+
+    nonisolated static func isFailure(_ k: VerdictKind) -> Bool { k == .blocked || k == .unverified }
+
+    /// Failure verdicts still standing (quit snapshot).
+    var standingFailures: [(pane: UUID, verdict: OverseerVerdict)] {
+        verdicts.filter { Self.isFailure($0.value.kind) }.map { (pane: $0.key, verdict: $0.value) }
+    }
+
     func paneClosed(_ pane: UUID) {
+        if let v = verdicts[pane], Self.isFailure(v.kind) { onDropped?(pane, v) }
         clear(pane)
         token[pane] = nil
     }
@@ -90,7 +101,8 @@ final class OverseerStore {
                 }
                 if let self, self.token[pane] == mine, let kind = judgment.verdict {
                     self.verdicts[pane] = OverseerVerdict(kind: kind, reason: judgment.reason ?? "", at: Date(),
-                                                          sessionID: session, cwd: cwd)
+                                                          sessionID: session, cwd: cwd,
+                                                          evidence: "Asked: \(digest.asked)\n\nAnswer: \(digest.answer)")
                 }
             }
             self?.inFlight.remove(pane)

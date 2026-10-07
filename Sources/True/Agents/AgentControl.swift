@@ -9,6 +9,7 @@ enum ControlRequest: Equatable, Sendable {
     case status
     case summon(agent: String, message: String, from: String?)
     case spawn(SpawnRequest)
+    case inbox
 
     /// Anything malformed returns nil — the socket is a doorbell, never a crash surface.
     static func parse(_ line: Data) -> ControlRequest? {
@@ -21,6 +22,8 @@ enum ControlRequest: Equatable, Sendable {
         case "summon":
             guard let agent = w.agent, let message = w.message else { return nil }
             return .summon(agent: agent, message: message, from: w.from)
+        case "inbox":
+            return .inbox
         case "spawn":
             guard let name = w.name, let promptFile = w.promptFile else { return nil }
             return .spawn(SpawnRequest(name: name, promptFile: promptFile, repo: w.repo, worktree: w.worktree ?? false,
@@ -41,6 +44,11 @@ struct ControlResponse: Encodable, Equatable, Sendable {
     var agents: [Row]?
     /// The Hub snapshot (project → sessions) on `status`; every session on this Mac, not just seats.
     var hub: [HubRow]?
+    /// The Watcher's open items on `inbox`.
+    var inbox: [InboxRow]?
+    struct InboxRow: Encodable, Equatable, Sendable {
+        let id: String, title: String, repo: String, level: String, state: String, note: String
+    }
     /// The builder id on `spawn`.
     var builderID: String?
 
@@ -59,11 +67,12 @@ enum AgentControl {
     /// global reaches only the LEADS on its team, a lead only the HELPERS on its team, a helper no one.
     /// Enforced here, not in the role card: a card is advice, this is the door.
     static func mayReach(caller: String?, target: Agent, agents: [Agent]) -> Bool {
+        if target.role == .watcher { return false }
         guard let caller, let c = agents.first(where: { $0.name == caller }) else { return true }
         switch c.role {
         case .global: return target.role == .lead && c.team.contains(target.name)
         case .lead: return target.role == .helper && c.team.contains(target.name)
-        case .helper: return false
+        case .helper, .watcher: return false
         }
     }
 
@@ -75,7 +84,7 @@ enum AgentControl {
     }
 
     @MainActor private static func agentRows(_ registry: AgentRegistry) -> [ControlResponse.Row] {
-        registry.agents.map {
+        registry.crew.map {
             ControlResponse.Row(name: $0.name, role: $0.role.rawValue, repo: $0.repoName,
                                 status: registry.statusOf($0.name).rawValue, awake: registry.isAwake($0.name))
         }
@@ -100,13 +109,21 @@ enum AgentControl {
             // Fresh scan first: a lead asking "what is running?" must not get a 250 ms-old answer.
             Task { @MainActor in
                 await hub.reload()
-                let groups = HubModel.build(seats: registry.agents, seatStatus: { registry.statusOf($0) },
+                let groups = HubModel.build(seats: registry.crew, seatStatus: { registry.statusOf($0) },
                                             seatAwake: { registry.isAwake($0) }, peers: hub.peers,
                                             builders: hub.builders, now: Date().timeIntervalSince1970)
                 reply(ControlResponse(ok: true, agents: agentRows(registry),
                                       hub: HubModel.rows(groups, seatStatus: { registry.statusOf($0) },
                                                    seatVerdict: { OverseerStore.shared.verdict(forSession: $0.lastSessionID)?.kind.rawValue },
                                                    peerVerdict: { OverseerStore.shared.verdict(forSession: $0.sessionID)?.kind.rawValue })))
+            }
+        case .inbox:
+            Task { @MainActor in
+                let rows = WatcherStore.shared.needsYou.map {
+                    ControlResponse.InboxRow(id: $0.id, title: $0.title, repo: $0.repo, level: $0.level?.rawValue ?? "",
+                                             state: $0.state.rawValue, note: $0.note ?? "")
+                }
+                reply(ControlResponse(ok: true, inbox: rows))
             }
         case .spawn(let request):
             let caller = request.from.flatMap { registry.agent(named: $0) }
@@ -151,6 +168,7 @@ enum AgentControl {
         #!/usr/bin/env python3
         # truectl — the command-line door to the running True app (control socket).
         #   truectl status                        one line per agent: name  role  status  awake|asleep  repo
+        #   truectl inbox [--json]                the Watcher's open items: id  level  repo  title
         #   truectl status --json                 the raw reply (agents + the whole Hub: project → sessions)
         #   truectl summon <agent> <message...>   wake <agent> if asleep and deliver the brief ("-" = read stdin)
         #   truectl spawn --name N --prompt-file F [--repo R] [--worktree] [--model M]
@@ -161,7 +179,7 @@ enum AgentControl {
 
         DEFAULT_SOCK = __SOCKET__
         USAGE = ("usage: truectl status [--json] | truectl summon <agent> <message words... | -> | "
-                 "truectl spawn --name N --prompt-file F [--repo R] [--worktree] [--model M]")
+                 "truectl inbox [--json] | truectl spawn --name N --prompt-file F [--repo R] [--worktree] [--model M]")
 
         def die(msg, code=1):
             sys.stderr.write(msg + "\n")
@@ -208,6 +226,15 @@ enum AgentControl {
                 for h in r.get("hub") or []:
                     if h["kind"] != "seat":
                         print("hub  %s  %s  %s  %s" % (h["project"], h["kind"], h["name"], h["status"]))
+            elif argv[:1] == ["inbox"] and argv[1:] in ([], ["--json"]):
+                r = call({"op": "inbox"})
+                if not r.get("ok"):
+                    die(r.get("error") or "failed")
+                if argv[1:]:
+                    print(json.dumps(r, sort_keys=True))
+                    return
+                for i in r.get("inbox") or []:
+                    print("%s  %s  %s  %s" % (i["id"], i["level"] or "-", i["repo"], i["title"]))
             elif argv[:1] == ["spawn"]:
                 opts = {"name": None, "prompt-file": None, "repo": None, "model": None}
                 worktree = False

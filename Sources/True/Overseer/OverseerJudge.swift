@@ -35,6 +35,8 @@ struct OverseerVerdict: Equatable, Sendable {
     var at: Date
     var sessionID: String?
     var cwd: String?
+    /// Already-redacted digest text (asked + answer) for the Watcher's abandoned-failure source.
+    var evidence: String? = nil
 }
 
 /// Jev's answers to the four questions, plus what the mapping made of them.

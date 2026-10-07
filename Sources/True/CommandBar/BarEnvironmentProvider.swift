@@ -15,7 +15,7 @@ enum BarEnvironmentProvider {
         }
         let seat = registry.name(for: pane)
         let kind: PaneKind = seat != nil ? .seat : (registry.latest[pane] != nil ? .claude : .shell)
-        let seats = registry.agents.map { a in
+        let seats = registry.crew.map { a in
             BarSeat(name: a.name, project: (a.repo as NSString).lastPathComponent, awake: registry.panes[a.name] != nil)
         }
         return BarEnvironment(focused: FocusedPane(kind: kind, project: project?.name, seat: seat, cwd: cwd),

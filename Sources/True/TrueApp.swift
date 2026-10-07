@@ -104,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let main = MainWindow.current.map(ObjectIdentifier.init)
                 guard MainWindow.shouldSnapshot(closing: closing, main: main) else { return }
                 SessionSnapshot.atQuit()
+        if WatcherStore.active { WatcherStore.shared.snapshotPending(OverseerStore.shared.standingFailures.compactMap { AbandonedSignals.signal(pane: $0.pane, verdict: $0.verdict) }) }
             }
         }
         NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil,
@@ -129,6 +130,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The Hub's data: one directory scan plus a few kqueue watches on ~/.claude/sessions and
         // ~/.claude/builders — event-driven, 0% CPU when idle, no timer. Read-only; never opens *.key.
         HubStore.shared.start()
+        // The Watcher: events only (builder changes, the WorkAwake tick, dropped Overseer failures). Nothing runs while it is off.
+        if AgentRegistry.shared.agent(named: Duty.watcherName) == nil { AgentRegistry.shared.save(Duty.watcherAgent()) }
+        WatcherStore.active = true
+        OverseerStore.shared.onDropped = { pane, v in Task { @MainActor in WatcherStore.shared.abandoned(pane: pane, verdict: v) } }
+        Task { @MainActor in await WatcherStore.shared.replayPending(); WatcherStore.shared.digestIfDue() }
+        // Wake from sleep is a trigger too (events only, no timer).
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
+            Task { @MainActor in WatcherStore.shared.checkStuck() }
+        }
         // The screen stays on (so it never locks) only while agents work (IdleGate); 120 s after everything
         // is idle it is released and the Mac follows its normal sleep timers. Event-driven; the exit drops it.
         WorkAwake.shared.start()
@@ -141,6 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // Before any view is torn down: the shells are still alive, so their Claude children can be found.
         SessionSnapshot.atQuit()
+        if WatcherStore.active { WatcherStore.shared.snapshotPending(OverseerStore.shared.standingFailures.compactMap { AbandonedSignals.signal(pane: $0.pane, verdict: $0.verdict) }) }
         return .terminateNow
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

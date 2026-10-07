@@ -70,10 +70,10 @@ struct HubPanel: View {
         // the view hierarchy, so a hidden Hub costs no wakeups (idle-CPU rule). 30 s is plenty for "12m".
         TimelineView(.periodic(from: .now, by: 30)) { timeline in
             let now = timeline.date.timeIntervalSince1970
-            let groups = HubModel.build(seats: registry.agents, seatStatus: { registry.statusOf($0) },
+            let groups = HubModel.build(seats: registry.crew, seatStatus: { registry.statusOf($0) },
                                         seatAwake: { registry.isAwake($0) }, peers: hub.peers,
                                         builders: hub.builders, now: now, seatsOnly: hub.filter == .seats)
-            HubPanelContent(groups: groups, allSeats: registry.agents, filter: $hub.filter, now: now,
+            HubPanelContent(groups: groups, allSeats: registry.crew, filter: $hub.filter, now: now,
                             actions: seatActions,
                             onNew: { registry.builder = BuilderDraft() },
                             onClose: { registry.panelOpen = false },
@@ -83,6 +83,7 @@ struct HubPanel: View {
                             onCrewPick: { pickCrew($0) },
                             yourMove: YourMoveRow.build(overseer.verdicts, seatName: { registry.name(for: $0) },
                                                         tabTitle: { p in WorkspaceModel.shared.state.tabs.first { $0.tree.leafIDs.contains(p) }?.title }),
+                            showWatcher: true,
                             onFocusPane: { WorkspaceModel.shared.focus(pane: $0); registry.panelOpen = false },
                             peerVerdict: { overseer.verdict(forSession: $0.sessionID)?.kind })
         }
@@ -134,6 +135,7 @@ struct HubPanelContent: View {
     var onCrewPick: (CrewAgent) -> Void = { _ in }
     /// Overseer: panes whose last turn needs a look (All filter only) and the verdict of an Other-session row.
     var yourMove: [YourMoveRow] = []
+    var showWatcher = false
     var onFocusPane: (UUID) -> Void = { _ in }
     var peerVerdict: (PeerSession) -> VerdictKind? = { _ in nil }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -167,6 +169,7 @@ struct HubPanelContent: View {
                         if filter == .all && !yourMove.isEmpty {
                             YourMoveSection(rows: yourMove, now: now, onFocus: onFocusPane)
                         }
+                        if filter == .all && showWatcher { WatcherSection() }
                         ForEach(groups) { group in
                             groupView(group).transition(rowTransition)
                         }

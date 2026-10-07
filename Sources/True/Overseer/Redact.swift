@@ -6,7 +6,10 @@ enum Redact {
     static let mark = "[redacted]"
 
     private static let patterns: [NSRegularExpression] = [
-        #"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"#,
+        #"-----BEGIN\b[\s\S]*?(?:-----END[^\n]*-----|$)"#,
+        // Bare long hex (hashes/keys) and long mixed-case base64 tokens; bounded lookaheads keep paths and prose intact.
+        #"(?<![A-Za-z0-9])[0-9a-fA-F]{32,}(?![A-Za-z0-9])"#,
+        #"(?<![A-Za-z0-9+/_-])(?=[A-Za-z0-9+/_-]{0,64}\d)(?=[A-Za-z0-9+/_-]{0,64}[a-z])(?=[A-Za-z0-9+/_-]{0,64}[A-Z])[A-Za-z0-9+/_-]{40,}={0,2}"#,
         #"\bsk-(?:ant-)?[A-Za-z0-9_\-]{8,}"#,
         // Stripe secret / restricted keys and webhook signing secrets (underscores, not dashes).
         #"\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{8,}"#,
