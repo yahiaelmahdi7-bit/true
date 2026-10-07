@@ -303,6 +303,9 @@ final class WatcherStore {
 
     // MARK: memory.md (≤ 60 lines, newest first, hand-editable Preferences)
 
+    var hubChannel: HubChannel? { channel as? HubChannel }
+    var memoryLessonCount: Int { readLines("lessons.jsonl").count }
+
     func memory() -> String { (try? String(contentsOf: home.appendingPathComponent("memory.md"), encoding: .utf8)) ?? "" }
 
     func writeMemory() {

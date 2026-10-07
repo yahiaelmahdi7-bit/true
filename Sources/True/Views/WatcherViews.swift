@@ -5,16 +5,40 @@ struct WatcherSection: View {
     @State private var store = WatcherStore.shared
     @State private var open: InboxItem?
 
+    @State private var showAll = false
+
     var body: some View {
-        let rows = store.needsYou
-        if WatcherStore.active && store.enabled && !rows.isEmpty {
+        let needs = store.needsYou
+        let rows = showAll ? store.items.sorted { $0.at > $1.at } : needs
+        let t = store.today()
+        if WatcherStore.active {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Image(systemName: "eye").font(.body).foregroundStyle(Theme.verdictWarn).accessibilityHidden(true)
                     Text("Watcher").font(.body.weight(.semibold)).foregroundStyle(Theme.text)
-                    Text("\(rows.count) waiting").font(.callout).foregroundStyle(Theme.hubSecondary)
+                    Text(store.enabled ? "On duty" : "Paused").font(.callout).foregroundStyle(Theme.hubSecondary)
+                    Spacer()
+                    Button(showAll ? "Needs you" : "All") { showAll.toggle() }.buttonStyle(.plain)
+                        .font(.callout).foregroundStyle(Theme.hubSecondary)
+                    Text("\(needs.count) waiting").font(.callout).foregroundStyle(Theme.hubSecondary)
                 }
                 .padding(.horizontal, 4)
+                Text(String(format: "$%.2f of $%.2f today · Memory: %d lessons · peak context %dk", t.usd, store.duty.budget.dailyUSD,
+                            store.memoryLessonCount, t.peakContext / 1000))
+                    .font(.callout).foregroundStyle(Theme.hubSecondary).padding(.horizontal, 4)
+                if store.burnHookMissing {
+                    Text("Context guard missing: investigations run without it.").font(.callout).foregroundStyle(Theme.verdictWarn).padding(.horizontal, 4)
+                }
+                if let digest = store.hubChannel?.lastDigest {
+                    HubRowFrame {
+                        HStack { Text(digest).font(.body).foregroundStyle(Theme.text); Spacer(minLength: 4)
+                            Text("Digest").font(.callout).foregroundStyle(Theme.hubSecondary) }
+                    }
+                    .onTapGesture { store.hubChannel?.dismissDigest() }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityHint("Opens and clears the digest")
+                    .accessibilityAddTraits(.isButton)
+                }
                 ForEach(rows) { item in
                     HubRowFrame {
                         HStack(spacing: 10) {

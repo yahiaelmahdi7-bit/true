@@ -134,7 +134,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if AgentRegistry.shared.agent(named: Duty.watcherName) == nil { AgentRegistry.shared.save(Duty.watcherAgent()) }
         WatcherStore.active = true
         OverseerStore.shared.onDropped = { pane, v in Task { @MainActor in WatcherStore.shared.abandoned(pane: pane, verdict: v) } }
-        Task { @MainActor in await WatcherStore.shared.replayPending() }
+        Task { @MainActor in await WatcherStore.shared.replayPending(); WatcherStore.shared.digestIfDue() }
+        // Wake from sleep is a trigger too (events only, no timer).
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
+            Task { @MainActor in WatcherStore.shared.checkStuck() }
+        }
         // The screen stays on (so it never locks) only while agents work (IdleGate); 120 s after everything
         // is idle it is released and the Mac follows its normal sleep timers. Event-driven; the exit drops it.
         WorkAwake.shared.start()
