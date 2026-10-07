@@ -11,7 +11,7 @@ enum DenyList {
     static let rules: [(name: String, regex: String)] = [
         ("git push", #"\bgit\b[^\n;&|]{0,120}?\bpush\b"#),
         ("gh write", #"\bgh\s+(pr\s+(create|merge|close|edit|comment|review)|release\b|workflow\s+run|secret\b|repo\s+(delete|create|edit|rename|archive)|issue\s+(comment|create|close|edit|delete)|api\b[^\n]{0,300}(-X|--method|--input|\s-f\b|\s-F\b|--field))"#),
-        ("git destructive", #"\breset\b[^\n;&|]{0,80}?--hard|\bclean\b[^\n;&|]{0,80}?(-\w*f|--force)|\bbranch\b[^\n;&|]{0,80}?-D\b|\bcheckout\b[^\n;&|]{0,80}?--\s+\.|\b(checkout|restore)\s+\.(\s|$)"#),
+        ("git destructive", #"\breset\b[^\n;&|]{0,80}?--hard|\bclean\b[^\n;&|]{0,80}?(-\w*f|--force)|\bbranch\b[^\n;&|]{0,80}?(?-i:-D)\b|\bcheckout\b[^\n;&|]{0,80}?--\s+\.|\b(checkout|restore)\s+\.(\s|$)"#),
         ("rm recursive", #"\brm\s(?:[^\n;&|]{0,200}?\s)?(-\w*[rR]\w*|--recursive)\b"#),
         ("sql destructive", #"\bDROP\s+(TABLE|DATABASE|SCHEMA|INDEX|VIEW)\b|\bDROP\s+COLUMN\b|\bTRUNCATE\b|\bDELETE\s+FROM\b"#),
         ("hosting cli", "(^|[;&|\\n]\\s*|\\bnpx\\s+|\\brun\\s+)(\(tools))\\b|\\b(\(tools))\\s+(\(toolVerbs))\\b|api\\.stripe\\.com"),

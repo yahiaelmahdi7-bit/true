@@ -61,6 +61,7 @@ import Foundation
             let r = await ask(PermissionGate.state(text: text, repo: state["repo"] as? String ?? "", problem: state["problem"] as? String ?? ""), PermissionGate.questions)
             let level = PermissionGate.decide(text: text, reply: r).level
             let wantHand = (c["deny_list_hit"] as? Bool ?? false) || (c["expect_handoff"] as? Bool ?? false)
+                || (c["expect_level"] as? String == "handOff")      // the labelled sets mark Yahia-only fixes this way
             total += 1
             if wantHand && level != .handOff { wrongAct += 1 }
             print("fix \(id): expect handOff=\(wantHand) got=\(level.rawValue)")

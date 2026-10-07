@@ -33,4 +33,9 @@ import Foundation
         #expect(!DenyList.isHit("curl -s http://localhost:8001/x | jq ."))
         #expect(!DenyList.isHit("curl -s http://localhost:8001/x | sudo tee out.txt"))
     }
+    @Test func branchSafeDeleteIsNotForceDelete() {     // held-out f-fresh-21: -d refuses unmerged work, -D does not
+        #expect(!DenyList.isHit("git branch -d builder/true-commandbar-run14b-20261007-105915"))
+        #expect(DenyList.hits("git branch -D builder/x").contains("git destructive"))
+        #expect(DenyList.hits("git -C /r branch -D builder/x").contains("git destructive"))
+    }
 }
