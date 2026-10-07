@@ -21,9 +21,11 @@ import Foundation
             let ctx = CommandContext(focused: focused,
                                      projects: CommandRouter.candidates(text: c.text, projects: fx.projectList, recent: []),
                                      seats: fx.barSeats, all: fx.projectList)
-            let rule = CommandRules.match(c.text, projects: fx.projectList, seats: fx.barSeats)
+            // The same PATH check the app passes, so shell is offered exactly as it is in the bar.
+            let onPath: (String) -> Bool = { BarEnvironmentProvider.onPath($0) }
+            let rule = CommandRules.match(c.text, projects: fx.projectList, seats: fx.barSeats, isExecutable: onPath)
             let t0 = Date()
-            let reply = await CommandRouter.ask(text: c.text, context: ctx, rule: rule, jev: JevClient())
+            let reply = await CommandRouter.ask(text: c.text, context: ctx, rule: rule, jev: JevClient(), isExecutable: onPath)
             let ms = Int(Date().timeIntervalSince(t0) * 1000)
             let r = CommandRouter.route(text: c.text, reply: reply, context: ctx, rule: rule)
             let e = c.expect
