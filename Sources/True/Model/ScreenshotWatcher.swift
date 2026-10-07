@@ -27,16 +27,16 @@ final class ScreenshotWatcher {
     nonisolated static let limit = 9
     static let lastSeenKey = "screenshotTray.lastSeen"
 
-    private(set) var shots: [Shot] = []
+    /// The panel's data: True's own copies (TrayStore), newest first, at most 24.
+    private(set) var entries: [TrayEntry] = []
     private(set) var fresh = false
     private(set) var folder: URL
     private(set) var unreadable = false
-    private(set) var clipboardImage: NSImage?
     private(set) var thumbnails: [String: NSImage] = [:]
+    /// Set while a shot is being removed so the panel can offer undo.
+    private(set) var lastRemoved: TrayStore.Removed?
 
-    var trayOpen = false {
-        didSet { if trayOpen && !oldValue { trayOpened() } }
-    }
+    let store: TrayStore
 
     private var lastSeen: Date?
     private var source: DispatchSourceFileSystemObject?
@@ -44,7 +44,8 @@ final class ScreenshotWatcher {
     private var debounce: Task<Void, Never>?
     private var loading: Set<String> = []
 
-    private init() {
+    private init(store: TrayStore = TrayStore()) {
+        self.store = store
         folder = Self.currentFolder()
         let d = UserDefaults.standard
         if let seen = d.object(forKey: Self.lastSeenKey) as? Date {
@@ -120,12 +121,18 @@ final class ScreenshotWatcher {
         return folder(fromDefaultsValue: value, home: FileManager.default.homeDirectoryForCurrentUser)
     }
 
+    /// The folder to watch after re-reading the `location` default; nil when it has not changed.
+    nonisolated static func folderChange(from current: URL, defaultsValue: String?, home: URL) -> URL? {
+        let next = folder(fromDefaultsValue: defaultsValue, home: home)
+        return next == current ? nil : next
+    }
+
     nonisolated static func hasScreenCaptureFlag(_ url: URL) -> Bool {
         getxattr(url.path, "com.apple.metadata:kMDItemIsScreenCapture", nil, 0, 0, 0) >= 0
     }
 
     /// nil when the folder cannot be listed (privacy denied, or gone).
-    nonisolated static func scan(_ folder: URL) -> [Shot]? {
+    nonisolated static func scan(_ folder: URL, limit: Int = ScreenshotWatcher.limit) -> [Shot]? {
         let keys: [URLResourceKey] = [.creationDateKey, .contentModificationDateKey, .isRegularFileKey]
         guard let urls = try? FileManager.default.contentsOfDirectory(
             at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { return nil }
@@ -152,11 +159,42 @@ final class ScreenshotWatcher {
 
     // MARK: - Watching
 
-    /// Launch side effect: one kqueue watch on the screenshot folder. It costs 0% CPU when idle and is
-    /// what makes "fresh" possible. It does not scan; the first event or tray open does.
+    /// Launch side effects: one kqueue watch on the screenshot folder (0% CPU when idle), one catch-up
+    /// ingest of anything newer than the newest copy (first run: backfill the newest 24 from the folder and
+    /// ~/Desktop), and a re-read of the folder setting whenever True becomes active.
     func start() {
         folder = Self.currentFolder()
         startWatch()
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
+                                               queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.recheckFolder() }
+        }
+        let dir = folder, store = store
+        Task {
+            let result = await Task.detached { () -> [TrayEntry] in
+                if store.isFirstRun() {
+                    let desktop = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop", isDirectory: true)
+                    store.backfill(folders: [dir, desktop])
+                } else {
+                    store.ingestNewer(in: dir)
+                }
+                return store.load().shots
+            }.value
+            apply(result)
+        }
+    }
+
+    /// Follow the screenshot-location setting: called on activation and when the panel expands.
+    func recheckFolder() {
+        let value = UserDefaults(suiteName: "com.apple.screencapture")?.string(forKey: "location")
+        if let next = Self.folderChange(from: folder, defaultsValue: value,
+                                        home: FileManager.default.homeDirectoryForCurrentUser) {
+            folder = next
+            startWatch()
+            folderChanged()
+        } else if watchedFolder != folder || source == nil {
+            startWatch()
+        }
     }
 
     private func startWatch() {
@@ -165,6 +203,7 @@ final class ScreenshotWatcher {
         watchedFolder = nil
         let fd = open(folder.path, O_EVTONLY)
         guard fd >= 0 else { unreadable = true; return }
+        unreadable = false
         let src = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd, eventMask: [.write, .rename, .delete], queue: .main)
         src.setEventHandler { [weak self] in
@@ -181,46 +220,35 @@ final class ScreenshotWatcher {
         debounce = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
-            await self?.rescan()
+            await self?.ingestFolder()
         }
     }
 
-    private func trayOpened() {
-        let now = Self.currentFolder()
-        if now != folder { folder = now }
-        if watchedFolder != folder || source == nil { startWatch() }
-        clipboardImage = Self.readClipboardImage()
-        markSeen()
-        Task { await rescan() }
-    }
-
-    private static func readClipboardImage() -> NSImage? {
-        let pb = NSPasteboard.general
-        // A file copied in Finder carries its icon as TIFF; that is not a picture the user took.
-        guard let types = pb.types, types.contains(.png) || types.contains(.tiff),
-              !types.contains(.fileURL) else { return nil }
-        return NSImage(pasteboard: pb)
-    }
-
-    private func rescan() async {
-        let dir = folder
-        let result = await Task.detached { Self.scan(dir) }.value
+    /// Every new shot goes into the store (a copy), then the panel re-reads the index.
+    private func ingestFolder() async {
+        let dir = folder, store = store
+        let result = await Task.detached { () -> [TrayEntry] in
+            store.ingestNewer(in: dir)
+            return store.load().shots
+        }.value
         guard dir == folder else { return }
         apply(result)
     }
 
-    private func apply(_ result: [Shot]?) {
-        guard let result else { unreadable = true; shots = []; fresh = false; return }
-        unreadable = false
-        shots = result
-        let live = Set(result.map(thumbKey))
+    private func reload() async {
+        let store = store
+        apply(await Task.detached { store.load().shots }.value)
+    }
+
+    private func apply(_ result: [TrayEntry]) {
+        entries = result
+        let live = Set(result.map(\.id))
         thumbnails = thumbnails.filter { live.contains($0.key) }
-        fresh = trayOpen ? false : Self.isFresh(newest: result.first?.date, lastSeen: lastSeen)
-        if trayOpen { markSeen() }
+        fresh = Self.isFresh(newest: result.first?.created, lastSeen: lastSeen)
     }
 
     func markSeen() {
-        let seen = max(shots.first?.date ?? .distantPast, Date())
+        let seen = max(entries.first?.created ?? .distantPast, Date())
         lastSeen = seen
         UserDefaults.standard.set(seen, forKey: Self.lastSeenKey)
         fresh = false
@@ -228,14 +256,12 @@ final class ScreenshotWatcher {
 
     // MARK: - Thumbnails
 
-    func thumbKey(_ shot: Shot) -> String { "\(shot.url.path)|\(shot.date.timeIntervalSince1970)" }
+    func thumbnail(for entry: TrayEntry) -> NSImage? { thumbnails[entry.id] }
 
-    func thumbnail(for shot: Shot) -> NSImage? { thumbnails[thumbKey(shot)] }
-
-    func loadThumbnail(for shot: Shot) async {
-        let key = thumbKey(shot)
+    func loadThumbnail(for entry: TrayEntry) async {
+        let key = entry.id
         guard thumbnails[key] == nil, loading.insert(key).inserted else { return }
-        let url = shot.url
+        let url = store.url(for: entry)
         let image = await Task.detached { () -> NSImage? in
             guard let cg = Self.makeThumbnail(url) else { return nil }
             return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
@@ -244,25 +270,57 @@ final class ScreenshotWatcher {
         if let image { thumbnails[key] = image }
     }
 
-    // MARK: - Using a shot
+    // MARK: - Editing the tray
 
-    func paste(_ shot: Shot) { paste(path: TerminalDrop.pastePath(for: shot.url)) }
+    func fileURL(for entry: TrayEntry) -> URL { store.url(for: entry) }
 
-    func pasteClipboard() {
-        guard let image = clipboardImage, let url = TerminalDrop.writePNG(image) else { return }
-        paste(path: url.path)
+    /// Remove (to the Trash, with undo via `restoreLastRemoved`).
+    func remove(_ entry: TrayEntry) {
+        let store = store
+        Task {
+            let removed = await Task.detached { store.remove(id: entry.id) }.value
+            lastRemoved = removed
+            await reload()
+        }
     }
 
-    /// ⌥⌘V: the newest file screenshot, exactly like a tile click. No-op if there is none.
+    func restoreLastRemoved() {
+        guard let removed = lastRemoved else { return }
+        lastRemoved = nil
+        let store = store
+        Task {
+            _ = await Task.detached { store.restore(removed) }.value
+            await reload()
+        }
+    }
+
+    /// A saved markup becomes a new tray entry (kind markup, parent = the shot it was drawn on).
+    func addMarkup(png: Data, parent: TrayEntry) async -> TrayEntry? {
+        let store = store
+        let e = await Task.detached { store.addMarkup(png: png, parent: parent.id, width: parent.width, height: parent.height) }.value
+        await reload()
+        return e
+    }
+
+    // MARK: - Using a shot
+
+    /// Send to session: paste the copy's path into True's focused pane and log it in the outbox.
+    func send(_ entry: TrayEntry) {
+        let url = store.url(for: entry)
+        let store = store
+        Task.detached { store.appendOutbox(id: entry.id, path: url.path) }
+        paste(path: TerminalDrop.pastePath(for: url))
+    }
+
+    /// ⌥⌘V: the newest shot in the store, exactly like Send. No-op if there is none.
     func pasteLatest() {
-        if shots.isEmpty { apply(Self.scan(folder)) }   // nothing scanned yet: one small listing
-        guard let shot = shots.first else { return }
-        paste(shot)
+        if entries.isEmpty { entries = store.load().shots }   // not loaded yet: one small file read
+        guard let entry = entries.first else { return }
+        send(entry)
     }
 
     private func paste(path: String) {
         markSeen()
-        trayOpen = false
         let pane = WorkspaceModel.shared.selectedTab.focusedPane
         guard let view = TerminalRegistry.shared.view(for: pane) else { return }
         view.pasteText(TerminalDrop.pasteText(forPaths: [path]))

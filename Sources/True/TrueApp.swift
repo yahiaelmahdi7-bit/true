@@ -52,8 +52,11 @@ struct TrueApp: App {
                 Button("Focus Up") { model.moveFocus(.up) }.keyboardShortcut(.upArrow, modifiers: [.command, .option])
                 Button("Focus Down") { model.moveFocus(.down) }.keyboardShortcut(.downArrow, modifiers: [.command, .option])
                 Divider()
-                Button("Screenshots…") { ScreenshotWatcher.shared.trayOpen.toggle() }
+                Button("Screenshots…") { TrayPanelController.shared.toggleExpanded() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
+                Button(TrayPanelController.shared.visible ? "Hide Screenshot Panel" : "Show Screenshot Panel") {
+                    TrayPanelController.shared.setVisible(!TrayPanelController.shared.visible)
+                }
                 Button("Paste Latest Screenshot") { ScreenshotWatcher.shared.pasteLatest() }
                     .keyboardShortcut("v", modifiers: [.command, .option])
             }
@@ -144,6 +147,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         WorkAwake.shared.start()
         // One kqueue watch on the screenshot folder: 0% CPU when idle, and it is what makes "fresh" possible.
         ScreenshotWatcher.shared.start()
+        // The always-on screenshot panel: one non-activating floating window, shown at launch (0% idle; it
+        // redraws only when the tray changes). Hidden/shown by the Shell menu, remembered in UserDefaults.
+        TrayPanelController.shared.start()
         // One vnode watch on our own executable (+ one stat on activation): 0% idle. It only flips a flag that
         // shows the "Restart to update" pill; it never restarts anything by itself.
         BuildFreshnessWatcher.shared.start()

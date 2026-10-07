@@ -64,6 +64,17 @@ import Foundation
         #expect(W.folder(fromDefaultsValue: "/Volumes/X/Shots", home: home).path == "/Volumes/X/Shots")
     }
 
+    @Test func folderFollowsTheSetting() {
+        let home = URL(fileURLWithPath: "/Users/y")
+        let desktop = URL(fileURLWithPath: "/Users/y/Desktop")
+        #expect(W.folderChange(from: desktop, defaultsValue: "~/Pictures/Screenshots", home: home)?.path
+                == "/Users/y/Pictures/Screenshots")
+        #expect(W.folderChange(from: desktop, defaultsValue: nil, home: home) == nil)
+        #expect(W.folderChange(from: desktop, defaultsValue: "", home: home) == nil)
+        let shots = URL(fileURLWithPath: "/Users/y/Pictures/Screenshots")
+        #expect(W.folderChange(from: shots, defaultsValue: nil, home: home)?.path == "/Users/y/Desktop")
+    }
+
     @Test func relativeLabels() {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "UTC")!
