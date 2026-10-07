@@ -8,6 +8,7 @@ struct SettingsView: View {
     @AppStorage(TerminalSettings.scrollbackKey) private var scrollback = TerminalSettings.defaultScrollback
     @AppStorage(TerminalSettings.colorKey) private var color = TerminalSettings.defaultColor
     @AppStorage(TerminalSettings.overseerKey) private var overseer = true
+    @AppStorage(TerminalSettings.watcherKey) private var watcher = true
     @AppStorage(TerminalSettings.jevRoutingKey) private var jevRouting = true
 
     var body: some View {
@@ -28,6 +29,8 @@ struct SettingsView: View {
             Toggle("Overseer", isOn: $overseer)
                 .help("After each Claude turn in a True pane, Jev reads what was asked and answered and shows a verdict. Off: no calls.")
                 .onChange(of: overseer) { _, on in if !on { OverseerStore.shared.clearAll() } }
+            Toggle("Watcher", isOn: $watcher)
+                .help("Watches your builders, unpushed work and failed sessions, and proposes fixes in the Hub for you to approve. Off: no calls, no runs.")
             Toggle("Jev routing", isOn: $jevRouting)
                 .help("The Command bar (⌘K) asks Jev where each line should go. Off: prefix rules and defaults only, no calls.")
         }

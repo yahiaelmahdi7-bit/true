@@ -59,6 +59,7 @@ enum AgentControl {
     /// global reaches only the LEADS on its team, a lead only the HELPERS on its team, a helper no one.
     /// Enforced here, not in the role card: a card is advice, this is the door.
     static func mayReach(caller: String?, target: Agent, agents: [Agent]) -> Bool {
+        if target.role == .watcher { return false }
         guard let caller, let c = agents.first(where: { $0.name == caller }) else { return true }
         switch c.role {
         case .global: return target.role == .lead && c.team.contains(target.name)
@@ -75,7 +76,7 @@ enum AgentControl {
     }
 
     @MainActor private static func agentRows(_ registry: AgentRegistry) -> [ControlResponse.Row] {
-        registry.agents.map {
+        registry.crew.map {
             ControlResponse.Row(name: $0.name, role: $0.role.rawValue, repo: $0.repoName,
                                 status: registry.statusOf($0.name).rawValue, awake: registry.isAwake($0.name))
         }
@@ -100,7 +101,7 @@ enum AgentControl {
             // Fresh scan first: a lead asking "what is running?" must not get a 250 ms-old answer.
             Task { @MainActor in
                 await hub.reload()
-                let groups = HubModel.build(seats: registry.agents, seatStatus: { registry.statusOf($0) },
+                let groups = HubModel.build(seats: registry.crew, seatStatus: { registry.statusOf($0) },
                                             seatAwake: { registry.isAwake($0) }, peers: hub.peers,
                                             builders: hub.builders, now: Date().timeIntervalSince1970)
                 reply(ControlResponse(ok: true, agents: agentRows(registry),

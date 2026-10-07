@@ -103,6 +103,8 @@ final class AgentRegistry {
 
     // MARK: Queries
 
+    /// Everyone you can talk to: the Watcher lives in the Hub, never in a pane list.
+    var crew: [Agent] { agents.filter { $0.role != .watcher } }
     func agent(named name: String) -> Agent? { agents.first { $0.name == name } }
     func name(for pane: UUID) -> String? { panes.first { $0.value == pane }?.key }
     func isAwake(_ name: String) -> Bool { panes[name] != nil }
@@ -118,7 +120,7 @@ final class AgentRegistry {
     /// folder belongs to no repo. Then by repo (sorted by name), lead first, then helpers by slot number.
     static func grouped(_ agents: [Agent]) -> [(key: String, title: String, agents: [Agent])] {
         let globals = agents.filter { $0.role == .global }.sorted { $0.name < $1.name }
-        let repos = Dictionary(grouping: agents.filter { $0.role != .global }, by: \.repo)
+        let repos = Dictionary(grouping: agents.filter { $0.role != .global && $0.role != .watcher }, by: \.repo)
             .map { repo, members in
                 (key: repo, title: (repo as NSString).lastPathComponent, agents: members.sorted { a, b in
                     let ka = (a.role == .lead ? 0 : 1, AgentNaming.parse(a.name)?.helper ?? 0, a.name)

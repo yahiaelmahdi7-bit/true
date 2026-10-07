@@ -49,6 +49,7 @@ final class WorkAwake {
 
     /// One decision. Called on every observed change and on each tick.
     func evaluate() {
+        if WatcherStore.active { WatcherStore.shared.checkStuck() }
         let t = now()
         let v = verdict(t)
         if v.busy {

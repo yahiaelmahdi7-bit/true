@@ -70,10 +70,10 @@ struct HubPanel: View {
         // the view hierarchy, so a hidden Hub costs no wakeups (idle-CPU rule). 30 s is plenty for "12m".
         TimelineView(.periodic(from: .now, by: 30)) { timeline in
             let now = timeline.date.timeIntervalSince1970
-            let groups = HubModel.build(seats: registry.agents, seatStatus: { registry.statusOf($0) },
+            let groups = HubModel.build(seats: registry.crew, seatStatus: { registry.statusOf($0) },
                                         seatAwake: { registry.isAwake($0) }, peers: hub.peers,
                                         builders: hub.builders, now: now, seatsOnly: hub.filter == .seats)
-            HubPanelContent(groups: groups, allSeats: registry.agents, filter: $hub.filter, now: now,
+            HubPanelContent(groups: groups, allSeats: registry.crew, filter: $hub.filter, now: now,
                             actions: seatActions,
                             onNew: { registry.builder = BuilderDraft() },
                             onClose: { registry.panelOpen = false },

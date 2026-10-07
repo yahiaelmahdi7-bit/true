@@ -11,6 +11,7 @@ enum TerminalSettings {
     static let colorKey = "terminal.color"
 
     static let overseerKey = "overseer.enabled"
+    static let watcherKey = "watcher.enabled"
     /// The Overseer (Jev reads each finished turn). On by default; off = no Jev calls at all.
     static var overseer: Bool { UserDefaults.standard.object(forKey: overseerKey) as? Bool ?? true }
 
