@@ -651,3 +651,13 @@ rotations (structured file first), running gates itself (CPU heat).
 
 **Run 15 done =** same bar as Run 14 (build clean, tests green with output pasted, `scripts/package.sh` built True.app,
 commits on the branch; app NOT launched, JEV_LIVE NOT run), plus true-security reviewed the deny-list + injection screen.
+
+## Run 17 — Screenshot panel (always-on floating tray)
+**Behaviour.** A small pill (latest 3 thumbnails fanned + count, a dot for unseen) floats at the top-right of the screen under the mouse, above all apps and Spaces, shown at launch (non-activating panel, never steals focus). Click → expanded grid (4 columns, all 24). Click a tile → zoom view (~55% of the screen width) with toolbar: Mark up · Copy image (⌘C) · Send to session · Copy path · Reveal in Finder · Remove (Trash, with Undo toast). Tiles and the zoomed image drag out as file URLs. Click-away or Esc collapses (never hides). Menu: "Screenshots…" (⇧⌘S) toggles expanded/collapsed; "Show/Hide Screenshot Panel" persists in UserDefaults `screenshotTray.panelVisible` (default true). ⌥⌘V pastes the latest from the store. The watcher follows the macOS screenshot-folder setting (re-read at launch, on app activation, on expand) and ingests anything newer than the newest index entry at launch.
+**Markup.** Tools pen / arrow / rect / highlight / text, 3 colours, ⌘Z / ⇧⌘Z; Save renders at the image's pixel size to PNG and adds a `markup` entry (newest first); Cancel discards; the original is never modified.
+**Contract (a Claude Code mod reads these; names and fields are fixed).** Root `~/Library/Application Support/True/ScreenshotTray/`:
+- `shots/<id>.png|jpg|...` — copies. `id` = `yyyyMMdd-HHmmss-<4 hex>` (sortable, unique).
+- `index.json`, written atomically (temp file + rename), newest first, at most 24 entries:
+  `{"version":1,"updated":"<ISO8601>","shots":[{"id":"…","file":"shots/<id>.png","created":"<ISO8601>","kind":"original"|"markup","parent":"<id>"|null,"source":"<original path>"|null,"width":0,"height":0}]}`
+- `outbox.jsonl` — append-only, one line per "Send": `{"ts":"<ISO8601>","id":"…","path":"<absolute copy path>","action":"send"}`. Never rewritten; trimmed to the last 200 lines only when it passes 1000.
+Rules: ingest copies (originals untouched); dedupe by source path + size + mtime; prune beyond 24 by moving the oldest copies to the Trash; missing/corrupt index → rebuilt from `shots/` by file date; all IO off the main thread; never throws. First run backfills the newest 24 screenshot-named images from the current folder and `~/Desktop`.
