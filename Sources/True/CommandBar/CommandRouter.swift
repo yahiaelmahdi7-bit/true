@@ -71,13 +71,8 @@ enum CommandRouter {
     static let kindFloor = 0.5
     static let destructiveFloor = 0.5
     /// The five narrow danger questions, verbatim from SPEC Run 14c; `destructive` is the max of their answers.
-    static let dangerQuestions: [(id: String, text: String)] = [
-        ("danger_push", "Does `text` ask for git commits to be pushed to a remote repository?"),
-        ("danger_delete", "Does `text` ask to delete, wipe, purge or drop existing data, files or records?"),
-        ("danger_deploy", "Does `text` ask to deploy or publish something to production or a live site? Starting or spawning agents or helpers is not a deploy."),
-        ("danger_send", "Does `text` ask for messages or emails to be sent to people? Forbidding or delaying sending is not asking to send."),
-        ("danger_live", "Does `text` ask to change data, settings or secrets on a live hosted service, such as a production database or environment variables?"),
-    ]
+    /// The five narrow danger questions (one source: `DangerQuestions`, shared with the Watcher).
+    static let dangerQuestions = DangerQuestions.all
     static let timeout: TimeInterval = 3
     static let debounce: Duration = .milliseconds(300)
 

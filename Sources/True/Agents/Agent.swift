@@ -8,12 +8,15 @@ enum AgentRole: String, Codable, CaseIterable, Sendable {
     case lead, helper
     /// No repo: works across repos by summoning their leads (`truectl summon`). Named by the user.
     case global
+    /// An agent that is *on duty* (Run 15): never woken into a pane, summoned or a ⌘K `@` target.
+    case watcher
 
     var defaultSymbol: String {
         switch self {
         case .lead: return "crown"
         case .helper: return "hammer"
         case .global: return "globe"
+        case .watcher: return "eye"
         }
     }
 }
@@ -71,6 +74,8 @@ struct Agent: Codable, Equatable, Identifiable, Sendable {
     /// Avatar colour (an `AgentHue` raw value). Optional so agents.json from older builds still decodes;
     /// nil or unknown = derived from the name (`resolvedHue`).
     var hue: String?
+    /// On duty (Run 15): a job, triggers, budget and permission ceiling. nil = a plain seat.
+    var duty: Duty?
 
     var id: String { name }
     var repoName: String {
@@ -79,12 +84,13 @@ struct Agent: Codable, Equatable, Identifiable, Sendable {
 
     init(name: String, role: AgentRole, repo: String, model: AgentModel = .sonnet,
          effort: AgentEffort = .medium, permission: AgentPermission = .default,
-         charter: String = "", team: [String] = [], lastSessionID: String? = nil, symbol: String? = nil, hue: String? = nil) {
+         charter: String = "", team: [String] = [], lastSessionID: String? = nil, symbol: String? = nil, hue: String? = nil, duty: Duty? = nil) {
         self.name = name; self.role = role; self.repo = repo; self.model = model
         self.effort = effort; self.permission = permission; self.charter = charter
         self.team = team; self.lastSessionID = lastSessionID
         self.symbol = symbol ?? role.defaultSymbol
         self.hue = hue
+        self.duty = duty
     }
 
     /// Tolerant on purpose: a file written by an older build (missing fields) or hand-edited
@@ -102,6 +108,7 @@ struct Agent: Codable, Equatable, Identifiable, Sendable {
         lastSessionID = try? c.decodeIfPresent(String.self, forKey: .lastSessionID)
         symbol = (try? c.decode(String.self, forKey: .symbol)) ?? role.defaultSymbol
         hue = try? c.decodeIfPresent(String.self, forKey: .hue)
+        duty = try? c.decodeIfPresent(Duty.self, forKey: .duty)
     }
 }
 
@@ -161,7 +168,7 @@ enum AgentNaming {
             return existing.contains(n) ? nil : n
         case .helper:
             return helperSlots.map { helperName($0, slug: slug) }.first { !existing.contains($0) }
-        case .global:
+        case .global, .watcher:
             return nil
         }
     }

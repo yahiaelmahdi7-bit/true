@@ -121,6 +121,9 @@ enum AgentLaunch {
             3. If you are blocked or need a decision, message whoever summoned you (else `\(lead)`) with
                the exact question, then stop.
             """
+        case .watcher:
+            // Never woken into a pane; the Watcher's real role card is written by `Investigation.roleCard`.
+            out = "# Role: Watcher `\(a.name)`\n\nOn duty; investigates read-only."
         case .global:
             let leads = a.team.isEmpty
                 ? "You have no leads configured yet — do the work yourself."

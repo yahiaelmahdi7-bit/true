@@ -63,7 +63,7 @@ enum AgentControl {
         switch c.role {
         case .global: return target.role == .lead && c.team.contains(target.name)
         case .lead: return target.role == .helper && c.team.contains(target.name)
-        case .helper: return false
+        case .helper, .watcher: return false
         }
     }
 

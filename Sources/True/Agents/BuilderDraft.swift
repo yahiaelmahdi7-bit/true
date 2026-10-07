@@ -61,7 +61,7 @@ struct BuilderDraft: Identifiable, Equatable {
             return existing.filter { $0.role == .helper && AgentNaming.repoSlug($0.repo) == slug }
         case .global:
             return existing.filter { $0.role == .lead }.sorted { $0.name < $1.name }
-        case .helper:
+        case .helper, .watcher:
             return []
         }
     }
