@@ -19,19 +19,24 @@ extension DenyList {
     /// Words, with `; & | && || |& newline` as their own operator tokens.
     static func tokens(_ s: String) -> [String] {
         var out: [String] = []
-        var cur = ""
-        var op = ""
+        var word: [UInt8] = []
+        var op: [UInt8] = []
         func flushWord() {
-            let w = cur.trimmingCharacters(in: CharacterSet(charactersIn: "(){}"))
-            if !w.isEmpty { out.append(w) }
-            cur = ""
+            var lo = 0, hi = word.count
+            func paren(_ c: UInt8) -> Bool { c == 40 || c == 41 || c == 123 || c == 125 }
+            while lo < hi, paren(word[lo]) { lo += 1 }
+            while hi > lo, paren(word[hi - 1]) { hi -= 1 }
+            if lo < hi { out.append(String(decoding: word[lo..<hi], as: UTF8.self)) }
+            word.removeAll(keepingCapacity: true)
         }
-        func flushOp() { if !op.isEmpty { out.append(op); op = "" } }
-        for ch in s {
-            if ";&|".contains(ch) { flushWord(); op.append(ch) }
-            else if ch == "\n" { flushWord(); flushOp(); out.append("\n") }
-            else if ch == " " || ch == "\t" || ch == "\r" { flushWord(); flushOp() }
-            else { flushOp(); cur.append(ch) }
+        func flushOp() { if !op.isEmpty { out.append(String(decoding: op, as: UTF8.self)); op.removeAll(keepingCapacity: true) } }
+        for c in s.utf8 {
+            switch c {
+            case 59, 38, 124: flushWord(); op.append(c)  // ; & |
+            case 10: flushWord(); flushOp(); out.append("\n")
+            case 32, 9, 13: flushWord(); flushOp()
+            default: flushOp(); word.append(c)
+            }
         }
         flushWord(); flushOp()
         return out
@@ -52,18 +57,26 @@ extension DenyList {
             if w == "--" { return 16 }
             return 0
         }
+        // Prefix counts per kind bit and the next operator position make every "any word in this range?" question O(1).
+        var prefix = [[Int32]](repeating: [Int32](repeating: 0, count: toks.count + 1), count: 5)
+        var nextOp = [Int](repeating: toks.count, count: toks.count + 1)
+        for k in 0..<toks.count { for b in 0..<5 { prefix[b][k + 1] = prefix[b][k] + (kinds[k] >> UInt8(b) & 1 == 1 ? 1 : 0) } }
+        for k in stride(from: toks.count - 1, through: 0, by: -1) { nextOp[k] = isOp(toks[k]) ? k : nextOp[k + 1] }
+        let scan = Scan(kinds: kinds, prefix: prefix, nextOp: nextOp)
         var i = 0
         while i < toks.count {
             let t = toks[i]
-            if t.utf8.count < 200, base(t).lowercased() == "git" { gitAt(toks, kinds, i, &out) }
+            if t.utf8.count < 200, t.utf8.count >= 3, t.lowercased().hasSuffix("git"), base(t).lowercased() == "git" { gitAt(toks, scan, i, &out) }
             if hasDownload, t == "|" || t == "|&" { if pipeTarget(toks, i + 1) { out.insert("pipe to shell") } }
             i += 1
         }
         return Array(out)
     }
 
+    struct Scan { let kinds: [UInt8]; let prefix: [[Int32]]; let nextOp: [Int] }
+
     /// `git [global options] <subcommand> <rest…>` -> the existing git rules run on the normalised form.
-    private static func gitAt(_ toks: [String], _ kinds: [UInt8], _ at: Int, _ out: inout Set<String>) {
+    private static func gitAt(_ toks: [String], _ scan: Scan, _ at: Int, _ out: inout Set<String>) {
         var j = at + 1
         while j < toks.count, !isOp(toks[j]) {
             let w = toks[j]
@@ -81,17 +94,17 @@ extension DenyList {
         guard j < toks.count, !isOp(toks[j]) else { return }
         let sub = toks[j].lowercased()
         guard ["push", "reset", "clean", "branch", "checkout", "restore"].contains(sub) else { return }
-        var end = j + 1
-        while end < toks.count, !isOp(toks[end]), end - j <= 200 { end += 1 }
-        func has(_ m: UInt8) -> Bool { (j + 1..<end).contains { kinds[$0] & m != 0 } }
-        let first: UInt8 = j + 1 < end ? kinds[j + 1] : 0
+        let end = min(scan.nextOp[j + 1 <= toks.count ? j + 1 : toks.count], j + 201)
+        func count(_ b: Int, _ lo: Int, _ hi: Int) -> Int32 { lo < hi ? scan.prefix[b][hi] - scan.prefix[b][lo] : 0 }
+        func has(_ m: UInt8) -> Bool { (0..<5).contains { m >> UInt8($0) & 1 == 1 && count($0, j + 1, end) > 0 } }
+        let first: UInt8 = j + 1 < end ? scan.kinds[j + 1] : 0
         switch sub {
         case "push": out.insert("git push")
         case "reset": if has(1) { out.insert("git destructive") }
         case "clean": if has(2) { out.insert("git destructive") }
         case "branch": if has(4) { out.insert("git destructive") }
         case "checkout":
-            if first & 8 != 0 || (j + 1..<max(end - 1, j + 1)).contains(where: { kinds[$0] & 16 != 0 && kinds[$0 + 1] & 8 != 0 }) { out.insert("git destructive") }
+            if first & 8 != 0 || (j + 1..<max(end - 1, j + 1)).contains(where: { scan.kinds[$0] & 16 != 0 && scan.kinds[$0 + 1] & 8 != 0 }) { out.insert("git destructive") }
         case "restore": if first & 8 != 0 { out.insert("git destructive") }
         default: break
         }
