@@ -94,7 +94,8 @@ enum Inbox {
             case .created:
                 if var it = e.item, idx(it.id) == nil { it.state = .open; items.append(it) }
             case .merged:
-                if let i = idx(e.id) { items[i].seen += 1; if let ev = e.evidence { items[i].evidence = ev } }
+                if let i = idx(e.id) { items[i].seen += 1; if let ev = e.evidence { items[i].evidence = ev }
+                    if let n = e.note { items[i].note = n; items[i].canInvestigate = false } }
             case .reported:
                 if let i = idx(e.id) {
                     items[i].report = e.report; items[i].cost += e.cost ?? 0

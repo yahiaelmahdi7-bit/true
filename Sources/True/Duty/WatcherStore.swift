@@ -7,10 +7,13 @@ protocol InboxChannel: AnyObject {
     func deliver(digest: String)
 }
 
+/// The Hub's channel: the digest stays pinned (visible in the Watcher card) until Yahia opens it.
+@Observable @MainActor
 final class HubChannel: InboxChannel {
-    var lastDigest: String?
-    func deliver(item: InboxItem) {}
-    func deliver(digest: String) { lastDigest = digest }
+    private(set) var lastDigest: String?
+    nonisolated func deliver(item: InboxItem) {}
+    nonisolated func deliver(digest: String) { Task { @MainActor in self.lastDigest = digest } }
+    func dismissDigest() { lastDigest = nil }
 }
 
 /// The Watcher's engine: signal -> screen -> wake gate -> dedupe -> (investigate) -> level -> Inbox.
@@ -35,6 +38,7 @@ final class WatcherStore {
 
     private(set) var items: [InboxItem] = []
     private(set) var running: Set<String> = []
+    private(set) var burnHookMissing = false
     var duty: Duty = Duty.watcherAgent().duty ?? Duty(job: Duty.watcherJob, triggers: [])
     let channel: InboxChannel
     private let d: Deps
@@ -81,7 +85,7 @@ final class WatcherStore {
         return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
     }
 
-    struct Today: Equatable { var usd = 0.0; var runs = 0; var jev = 0; var perRepo: [String: Int] = [:] }
+    struct Today: Equatable { var usd = 0.0; var fix = 0.0; var runs = 0; var jev = 0; var tokens = 0; var peakContext = 0; var perRepo: [String: Int] = [:] }
 
     /// Today's spend, local day; a new day starts at zero by construction.
     func today() -> Today {
@@ -91,13 +95,17 @@ final class WatcherStore {
             t.usd += (l["usd"] as? Double) ?? 0
             t.runs += (l["runs"] as? Int) ?? 0
             t.jev += (l["jev"] as? Int) ?? 0
+            t.fix += (l["fix"] as? Double) ?? 0
+            t.tokens += (l["tokens"] as? Int) ?? 0
+            t.peakContext = max(t.peakContext, (l["tokens"] as? Int) ?? 0)
             if let r = l["repo"] as? String, ((l["runs"] as? Int) ?? 0) > 0 { t.perRepo[r, default: 0] += 1 }
         }
         return t
     }
 
-    private func ledger(usd: Double = 0, runs: Int = 0, jev: Int = 0, repo: String = "") {
-        appendLine("ledger.jsonl", ["day": Self.day(d.now()), "at": now, "usd": usd, "runs": runs, "jev": jev, "repo": repo])
+    /// `fix` (the approved builder's ceiling) is kept apart from `usd`, so it never eats the investigation budget.
+    private func ledger(usd: Double = 0, fix: Double = 0, runs: Int = 0, jev: Int = 0, tokens: Int = 0, repo: String = "") {
+        appendLine("ledger.jsonl", ["day": Self.day(d.now()), "at": now, "usd": usd, "fix": fix, "runs": runs, "jev": jev, "tokens": tokens, "repo": repo])
     }
 
     private func decision(_ what: String, _ detail: [String: Any] = [:]) {
@@ -120,7 +128,9 @@ final class WatcherStore {
         guard enabled else { return }
         let t0 = now
         if let hit = Inbox.openItem(items, fingerprint: s.fingerprint, now: t0) {
-            emit(InboxEvent(.merged, id: hit.id, at: t0, evidence: Redact.secrets(s.evidence)))
+            let sc = InjectionScreen.screen(s.evidence)
+            emit(InboxEvent(.merged, id: hit.id, at: t0, evidence: Redact.secrets(sc.text),
+                            note: sc.flagged ? "Contains instructions: not sent to the agent" : nil))
             decision("merged", ["item": hit.id]); return
         }
         if isMuted(s) { decision("muted", ["fp": s.fingerprint]); return }
@@ -137,7 +147,7 @@ final class WatcherStore {
 
         var item = makeItem(s, evidence: evidence)
         if wake.injection { item.note = "Contains instructions: not sent to the agent" }
-        item.canInvestigate = wake.route != .none && !wake.injection
+        item.canInvestigate = wake.route != .none && !wake.injection && reply != nil && wake.worth != nil
 
         // dedupe against the repo's open items (≤ 8)
         let open = items.filter { $0.repo == s.repo && ($0.state == .open || $0.state == .approved) }.prefix(8)
@@ -147,13 +157,14 @@ final class WatcherStore {
             let r = await jevAsk(st, WatcherQuestions.dedupeQuestions(count: open.count))
             if let i = WatcherQuestions.bestMatch(reply: r, count: open.count) {
                 let target = Array(open)[i]
-                emit(InboxEvent(.merged, id: target.id, at: t0, evidence: evidence))
+                emit(InboxEvent(.merged, id: target.id, at: t0, evidence: evidence,
+                                note: screen.flagged ? "Contains instructions: not sent to the agent" : nil))
                 decision("deduped", ["into": target.id]); return
             }
         }
         emit(InboxEvent(.created, id: item.id, at: t0, item: item))
         channel.deliver(item: item)
-        if wake.route == .investigate && !wake.injection { await investigate(item.id) }
+        if wake.route == .investigate && item.canInvestigate { await investigate(item.id) }
     }
 
     private func makeItem(_ s: WatcherSignal, evidence: String) -> InboxItem {
@@ -179,8 +190,22 @@ final class WatcherStore {
 
     // MARK: investigation
 
+    /// Everything in a report that could end up in an agent's brief, one string for the single deny-list entry point.
+    static func denyText(_ r: ItemReport) -> String {
+        ([r.title, r.what, r.cause] + r.evidence.flatMap { [$0.path, $0.quote] } + r.fix.commands + r.fix.steps + r.fix.files
+            + [r.fix.summary, r.fix.text]).joined(separator: "\n")
+    }
+
+    /// Code, not the model, gathers the git facts (spec §3 step 4).
+    private func gatherGitFacts(repo: String) -> String {
+        guard !repo.isEmpty else { return "" }
+        let log = d.git(["git", "-C", repo, "log", "--oneline", "-5"]) ?? ""
+        let st = d.git(["git", "-C", repo, "status", "--short", "-b"]) ?? ""
+        return [log.isEmpty ? "" : "log:\n" + log, st.isEmpty ? "" : "status:\n" + st].filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+
     func investigate(_ id: String) async {
-        guard enabled, let item = items.first(where: { $0.id == id }), !running.contains(id) else { return }
+        guard enabled, let item = items.first(where: { $0.id == id }), item.canInvestigate, !running.contains(id) else { return }
         let t = today()
         let hhmm = { () -> String in let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: self.d.now()) }
         let cap = min(duty.budget.perRunUSD, duty.budget.dailyUSD - t.usd)
@@ -195,19 +220,25 @@ final class WatcherStore {
         let argv = Investigation.argv(paths: d.paths, maxBudgetUSD: cap, maxTurns: duty.budget.maxTurns, addDir: builderDir)
         let sig = WatcherSignal(source: item.source, kind: item.kind, subject: item.subject, repo: item.repo, facts: [:],
                                 evidence: item.evidence, codeFact: false, title: item.title)
-        let prompt = Investigation.prompt(signal: sig, evidence: item.evidence, gitFacts: "")
+        let gitFacts = gatherGitFacts(repo: item.repo)
+        if !FileManager.default.fileExists(atPath: Investigation.hookPath) {
+            burnHookMissing = true; decision("burn-hook-missing", ["item": id])
+        } else { burnHookMissing = false }
+        let prompt = Investigation.prompt(signal: sig, evidence: item.evidence, gitFacts: gitFacts)
         let (status, out) = await d.runner(argv, item.repo, prompt, ["AGENT_BURN_MAIN": "1"])
         switch Investigation.parse(status: status, output: out) {
-        case let .report(rep, cost, _):
-            ledger(usd: cost, runs: 1, repo: item.repo)
-            let clean = rep.mapped(Redact.secrets)
+        case let .report(rep, cost, tokens):
+            ledger(usd: cost, runs: 1, tokens: tokens, repo: item.repo)
+            let clean = rep.mapped { Redact.secrets(InjectionScreen.strip($0)) }
             emit(InboxEvent(.reported, id: id, at: now, report: clean, cost: cost))
-            let denyText = (clean.fix.commands + clean.fix.steps + clean.fix.files).joined(separator: "\n") + "\n" + clean.fix.text
+            let denyText = Self.denyText(clean)
             let reply = await jevAsk(PermissionGate.state(text: clean.fix.text, repo: item.repo, problem: clean.what), PermissionGate.questions)
             let pre = duty.preapproved.contains { $0.actionKind == item.kind && $0.repo == item.repo }
             let dec = PermissionGate.decide(text: clean.fix.text, denyText: denyText, reply: reply, ceiling: duty.ceiling, preapproved: pre)
             emit(InboxEvent(.levelled, id: id, at: now, level: dec.level))
-            decision("level", ["item": id, "level": dec.level.rawValue, "why": dec.reasons])
+            var answers: [String: Double] = [:]
+            for (k, v) in reply?.answers ?? [:] { if let n = v.noul { answers[k] = n } }
+            decision("level", ["item": id, "level": dec.level.rawValue, "why": dec.reasons, "answers": answers])
         case let .stopped(why, cost):
             ledger(usd: cost, runs: 1, repo: item.repo)
             emit(InboxEvent(.reported, id: id, at: now, report: item.report, cost: cost, note: why))
@@ -222,11 +253,12 @@ final class WatcherStore {
     func approve(_ id: String) async -> ApproveResult {
         guard let item = items.first(where: { $0.id == id }), let rep = item.report else { return .refused("Nothing to approve yet") }
         guard item.level == .askFirst else { return .handOff }
-        let fixText = rep.fix.text
-        let brief = fixText + "\n\nEvidence:\n" + rep.evidence.map { "\($0.path) \($0.lines): \($0.quote)" }.joined(separator: "\n")
-            + "\n\nCommit on your branch only; do not push, deploy, send or delete; stop if the fix needs any of these.\n"
-        let hits = DenyList.hits(fixText + "\n" + (rep.fix.commands + rep.fix.steps).joined(separator: "\n")).filter { !$0.isEmpty }
-        if !hits.isEmpty { return .refused("Deny-list: \(hits.joined(separator: ", "))") }
+        // S1: the deny-list reads the EXACT brief that is written to fix.md (normalised), plus every report field.
+        let brief = DenyList.normalize(rep.fix.text + "\n\nEvidence:\n"
+            + rep.evidence.map { "\($0.path) \($0.lines): \($0.quote)" }.joined(separator: "\n")
+            + "\n\nCommit on your branch only; do not push, deploy, send or delete; stop if the fix needs any of these.\n")
+        let hits = (DenyList.hits(brief) + DenyList.hits(Self.denyText(rep))).filter { !$0.isEmpty }
+        if !hits.isEmpty { decision("approve-refused", ["item": id, "hits": hits]); return .refused("Deny-list: \(Set(hits).sorted().joined(separator: ", "))") }
         let dir = home.appendingPathComponent("runs/\(id)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let f = dir.appendingPathComponent("fix.md")
@@ -235,6 +267,7 @@ final class WatcherStore {
                     "--budget", String(format: "%.2f", duty.budget.fixUSD), "--worktree", "--prompt-file", f.path]
         let (code, out) = await d.spawn(argv)
         guard code == 0, let bid = BuilderSpawn.startedID(in: out) else { return .refused("Could not start the fix builder") }
+        ledger(fix: duty.budget.fixUSD, repo: item.repo)
         emit(InboxEvent(.approved, id: id, at: now, cost: 0, builder: bid))
         decision("approved", ["item": id, "builder": bid])
         return .started(bid)
@@ -247,12 +280,14 @@ final class WatcherStore {
         let t = now
         switch reason {
         case "Not now":
+            decision("rejected", ["item": id, "reason": reason])
             emit(InboxEvent(.snoozed, id: id, at: t, until: t + 24 * 3600)); return
         case "Already handled":
             emit(InboxEvent(.resolved, id: id, at: t, reason: reason))
         default:
             emit(InboxEvent(.rejected, id: id, at: t, reason: reason))
         }
+        decision("rejected", ["item": id, "reason": reason])
         var lesson: [String: Any] = ["at": t, "reason": reason, "source": item.source, "kind": item.kind, "repo": item.repo, "title": item.title]
         if reason == "Not a problem" { lesson["muteUntil"] = t + 30 * 86400 }
         appendLine("lessons.jsonl", lesson)
@@ -273,7 +308,7 @@ final class WatcherStore {
     func writeMemory() {
         let cur = memory()
         var prefs = "(Add things the Watcher should always know, one per line.)"
-        if let a = cur.range(of: "## Preferences\n"), let b = cur.range(of: "\n## Lessons") , a.upperBound <= b.lowerBound {
+        if let a = cur.range(of: "## Preferences\n"), let b = cur.range(of: "\n## Yahia told me") ?? cur.range(of: "\n## Lessons"), a.upperBound <= b.lowerBound {
             prefs = String(cur[a.upperBound..<b.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         let prefLines = prefs.split(separator: "\n", omittingEmptySubsequences: false).prefix(20)
@@ -282,7 +317,7 @@ final class WatcherStore {
             let r = (l["reason"] as? String) ?? "", t = (l["title"] as? String) ?? "", repo = ((l["repo"] as? String) ?? "") as NSString
             return "- \(r): \(t) (\(repo.lastPathComponent))"
         }
-        let text = "# Watcher memory\n## Preferences\n" + prefLines.joined(separator: "\n") + "\n## Lessons\n" + lessons.joined(separator: "\n") + "\n"
+        let text = "# Watcher memory\n## Preferences\n" + prefLines.joined(separator: "\n") + "\n## Yahia told me\n" + lessons.joined(separator: "\n") + "\n"
         try? text.write(to: home.appendingPathComponent("memory.md"), atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: home.appendingPathComponent("memory.md").path)
     }
@@ -303,12 +338,20 @@ final class WatcherStore {
         for s in sigs { await handle(s) }
     }
 
-    /// Unpushed-work check for the repos of known builders; at most hourly (events only, no timer).
-    private var lastGitSweep: Date = .distantPast
+    /// Unpushed-work check, per repo at most every 10 minutes (events only, no timer). Only repos of builders
+    /// started in the last 14 days and under the allowed roots.
+    private var lastSweep: [String: Date] = [:]
+    static let sweepGap: TimeInterval = 600
     func gitSweep(_ builders: [BuilderRecord]) async {
-        guard d.now().timeIntervalSince(lastGitSweep) >= 3600 else { return }
-        lastGitSweep = d.now()
-        for repo in Set(builders.map(\.originCwd).filter { !$0.isEmpty }) { await scanGit(repo: repo, builders: builders) }
+        let roots = SpawnRequest.allowedRoots()
+        let cutoff = now - 14 * 86400
+        let active = builders.filter { b in b.started >= cutoff && !b.originCwd.isEmpty
+            && roots.contains { r in b.originCwd == r || b.originCwd.hasPrefix(r + "/") } }
+        for repo in Set(active.map(\.originCwd)).sorted() {
+            if let last = lastSweep[repo], d.now().timeIntervalSince(last) < Self.sweepGap { continue }
+            lastSweep[repo] = d.now()
+            await scanGit(repo: repo, builders: builders)
+        }
     }
 
     func scanGit(repo: String, builders: [BuilderRecord]) async {
@@ -337,7 +380,7 @@ final class WatcherStore {
     // MARK: done check
 
     func checkDone(builders: [BuilderRecord]) async {
-        for item in items where item.state == .open && !item.lookedFixed {
+        for item in items where (item.state == .open || item.state == .approved) && !item.lookedFixed {
             if item.source == "git" {
                 let parts = item.subject.split(separator: "@", maxSplits: 1).map(String.init)
                 guard parts.count == 2, let up = GitSignals.parseBranches(d.git(GitSignals.branchesArgv(repo: item.repo)) ?? "")
@@ -345,10 +388,17 @@ final class WatcherStore {
                 if GitSignals.parseAhead(d.git(GitSignals.aheadArgv(repo: item.repo, upstream: up, branch: parts[1])) ?? "").isEmpty {
                     emit(InboxEvent(.resolved, id: item.id, at: now, reason: "Pushed")); decision("done-code", ["item": item.id])
                 }
+            } else if item.state == .approved, let bid = item.builderID, let fb = builders.first(where: { $0.id == bid }), fb.state == .done {
+                emit(InboxEvent(.lookedFixed, id: item.id, at: now)); decision("done-code", ["item": item.id, "fixBuilder": bid])
             } else if item.source == "builders", let b = builders.first(where: { $0.id == item.subject }) {
                 if b.acked { emit(InboxEvent(.resolved, id: item.id, at: now, reason: "Acknowledged")); continue }
-                let later = builders.filter { $0.name == b.name && $0.started > b.started && $0.state == .done }
-                guard let l = later.first else { continue }
+                // Code decides the clear case: a later run of the same name in the same repo finished.
+                if builders.contains(where: { $0.name == b.name && $0.originCwd == b.originCwd && $0.started > b.started && $0.state == .done }) {
+                    emit(InboxEvent(.resolved, id: item.id, at: now, reason: "A later run finished")); decision("done-code", ["item": item.id])
+                    continue
+                }
+                // Otherwise Jev looks at any later finished run in the same repo.
+                guard let l = builders.first(where: { $0.originCwd == b.originCwd && $0.started > b.started && $0.state == .done }) else { continue }
                 let st: [String: Any] = ["item": ["title": item.title, "evidence": String(item.evidence.prefix(600))],
                                          "later": ["name": l.name, "state": "done", "repo": l.originCwd]]
                 let r = await jevAsk(st, WatcherQuestions.doneQuestions)
@@ -365,10 +415,12 @@ final class WatcherStore {
         guard cal.component(.hour, from: d.now()) >= duty.digest.notBefore else { return }
         let last = (readLines("state.jsonl").last?["lastDigest"] as? Double) ?? 0
         guard now - last >= Double(duty.digest.everyHours) * 3600 else { return }
-        let open = needsYou
-        guard !open.isEmpty else { return }
+        let open = needsYou.count
+        let fixed = items.filter { $0.state == .resolved || $0.lookedFixed }.count
+        let t = today()
+        guard open > 0 || fixed > 0 || t.usd > 0 else { return }
         appendLine("state.jsonl", ["lastDigest": now])
-        channel.deliver(digest: "\(open.count) thing\(open.count == 1 ? "" : "s") waiting: " + open.prefix(3).map(\.title).joined(separator: "; "))
+        channel.deliver(digest: String(format: "%d open · %d fixed · $%.2f today", open, fixed, t.usd + t.fix))
     }
 }
 
