@@ -73,7 +73,14 @@ enum MarkupDrawing {
 /// The editor inside the zoom view: tools over the image, ⌘Z / ⇧⌘Z, Save writes a new markup entry.
 struct MarkupEditor: View {
     enum Tool: CaseIterable { case pen, arrow, rect, highlight, text }
+    /// `.compact` = the floating panel's zoom view (bar on top). `.overlay` = the full-screen overlay: the image is
+    /// fitted above the viewer's bottom band and the tools float there in the viewer toolbar's style.
+    enum Style {
+        case compact
+        case overlay(insets: (top: CGFloat, leading: CGFloat, bottom: CGFloat, trailing: CGFloat))
+    }
 
+    var style: Style = .compact
     let controller: any MarkupHosting
     let watcher: ScreenshotWatcher
     let entry: TrayEntry
@@ -89,43 +96,65 @@ struct MarkupEditor: View {
     @State private var textValue = ""
     @State private var saving = false
     @FocusState private var textFocused: Bool
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     private var imageSize: CGSize { CGSize(width: image.width, height: image.height) }
     private var width: CGFloat { MarkupDoc.defaultWidth(forImage: imageSize) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            bar
-            GeometryReader { geo in
-                let fit = fitted(in: geo.size)
-                let scale = fit.width / max(imageSize.width, 1)
-                ZStack(alignment: .topLeading) {
-                    Image(decorative: image, scale: 1).resizable()
-                    Canvas { ctx, _ in
-                        var c = ctx
-                        MarkupDrawing.draw(doc.strokes + liveStroke(), in: &c, scale: scale)
-                    }
-                    .gesture(drag(viewSize: fit))
-                    if let at = textAt {
-                        TextField("Text", text: $textValue)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: width * 5 * scale, weight: .semibold))
-                            .foregroundStyle(MarkupDrawing.color(color))
-                            .focused($textFocused)
-                            .onSubmit(commitText)
-                            .frame(width: max(120, fit.width - at.x * scale - 8), alignment: .leading)
-                            .offset(x: at.x * scale, y: at.y * scale)
+        Group {
+            switch style {
+            case .compact:
+                VStack(spacing: 0) {
+                    bar
+                    GeometryReader { geo in canvas(in: geo.size) }
+                        .padding([.horizontal, .bottom], 8)
+                }
+            case .overlay(let insets):
+                GeometryReader { geo in
+                    let area = ShotsOverlayLogic.markupArea(container: geo.size, insets: insets)
+                    ZStack {
+                        canvas(in: area.size)
+                            .frame(width: area.width, height: area.height)
+                            .position(x: area.midX, y: area.midY)
+                        overlayBar
+                            .position(x: geo.size.width / 2,
+                                      y: ShotsOverlayLogic.bottomBarCenterY(containerHeight: geo.size.height, bottomInset: insets.bottom))
                     }
                 }
-                .frame(width: fit.width, height: fit.height)
-                .clipShape(.rect(cornerRadius: 3))
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding([.horizontal, .bottom], 8)
         }
         .onChange(of: doc) { controller.markupDirty = !doc.isEmpty }
         .onChange(of: tool) { commitText() }
     }
+
+    private func canvas(in box: CGSize) -> some View {
+        let fit = fitted(in: box)
+        let scale = fit.width / max(imageSize.width, 1)
+        return ZStack(alignment: .topLeading) {
+            Image(decorative: image, scale: 1).resizable()
+            Canvas { ctx, _ in
+                var c = ctx
+                MarkupDrawing.draw(doc.strokes + liveStroke(), in: &c, scale: scale)
+            }
+            .gesture(drag(viewSize: fit))
+            if let at = textAt {
+                TextField("Text", text: $textValue)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: width * 5 * scale, weight: .semibold))
+                    .foregroundStyle(MarkupDrawing.color(color))
+                    .focused($textFocused)
+                    .onSubmit(commitText)
+                    .frame(width: max(120, fit.width - at.x * scale - 8), alignment: .leading)
+                    .offset(x: at.x * scale, y: at.y * scale)
+            }
+        }
+        .frame(width: fit.width, height: fit.height)
+        .clipShape(.rect(cornerRadius: overlayStyle ? 10 : 3))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var overlayStyle: Bool { if case .overlay = style { true } else { false } }
 
     // MARK: Toolbar
 
@@ -160,6 +189,67 @@ struct MarkupEditor: View {
         .padding(.horizontal, 8)
         .frame(height: TrayPanelController.zoomChrome)
     }
+
+    /// The viewer-toolbar twin: dark glass capsule, labelled 44 pt targets, Save as the one filled action.
+    private var overlayBar: some View {
+        HStack(spacing: 2) {
+            ForEach(Tool.allCases, id: \.self) { t in
+                MarkupToolButton(symbol: symbol(t), label: shortLabel(t), help: label(t), selected: tool == t) { tool = t }
+            }
+            barDivider
+            ForEach(MarkupColor.allCases, id: \.self) { c in
+                Button { color = c } label: {
+                    Circle().fill(MarkupDrawing.color(c)).frame(width: 22, height: 22)
+                        .overlay(Circle().strokeBorder(.white.opacity(color == c ? 1 : 0.25), lineWidth: color == c ? 2.5 : 1).padding(-4))
+                        .frame(width: 36, height: 44).contentShape(.rect)
+                }
+                .buttonStyle(.plain).help(c.rawValue.capitalized).accessibilityLabel(c.rawValue.capitalized)
+            }
+            barDivider
+            undoRedoButton("arrow.uturn.backward", help: "Undo (⌘Z)", enabled: doc.canUndo) { doc.undo() }
+                .keyboardShortcut("z")
+            undoRedoButton("arrow.uturn.forward", help: "Redo (⇧⌘Z)", enabled: doc.canRedo) { doc.redo() }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+            barDivider
+            Button("Cancel") { controller.markingUp = false; controller.markupDirty = false }
+                .buttonStyle(.plain).font(.system(size: 14, weight: .medium)).foregroundStyle(.white.opacity(0.9))
+                .padding(.horizontal, 14).frame(height: 44).contentShape(.rect)
+            let canSave = !(doc.isEmpty || saving)
+            Button(saving ? "Saving…" : "Save") { save() }
+                .buttonStyle(.plain).font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(canSave ? Color.black : .white.opacity(0.55))
+                .padding(.horizontal, 20).frame(height: 40)
+                .background(canSave ? Color.white : Color.white.opacity(0.16), in: .capsule)
+                .contentShape(.capsule)
+                .disabled(!canSave)
+                .padding(.leading, 2)
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background {
+            if reduceTransparency {
+                Capsule().fill(Color(white: 0.12))
+            } else {
+                Capsule().fill(.clear).glassEffect(.regular.tint(Color.black.opacity(0.55)), in: .capsule)
+            }
+        }
+        .overlay(Capsule().strokeBorder(.white.opacity(0.2), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.45), radius: 22, y: 8)
+    }
+
+    private var barDivider: some View {
+        Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 26).padding(.horizontal, 6)
+    }
+
+    private func undoRedoButton(_ symbol: String, help: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 16, weight: .medium))
+                .foregroundStyle(.white.opacity(enabled ? 1 : 0.35))
+                .frame(width: 44, height: 44).contentShape(.rect)
+        }
+        .buttonStyle(.plain).disabled(!enabled).help(help).accessibilityLabel(help)
+    }
+
+    private func shortLabel(_ t: Tool) -> String { t == .rect ? "Box" : label(t) }
 
     private func symbol(_ t: Tool) -> String {
         switch t {
@@ -245,5 +335,32 @@ struct MarkupEditor: View {
                 controller.showToast("Markup saved")
             } else { saving = false }
         }
+    }
+}
+
+/// Labelled tool button for the overlay bar; the selected tool sits in a filled white-ish pill.
+private struct MarkupToolButton: View {
+    let symbol: String
+    let label: String
+    let help: String
+    let selected: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: symbol).font(.system(size: 17, weight: .medium)).frame(height: 20)
+                Text(label).font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(.white)
+            .frame(minWidth: 62, minHeight: 48)
+            .background(.white.opacity(selected ? 0.28 : (hovering ? 0.14 : 0)), in: .rect(cornerRadius: 14, style: .continuous))
+            .contentShape(.rect(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(help).accessibilityLabel(help)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
