@@ -14,12 +14,21 @@ private struct BackdropBlur: NSViewRepresentable {
     func updateNSView(_ v: NSVisualEffectView, context: Context) {}
 }
 
+private extension View {
+    /// Dark-tinted glass with a hairline edge: legible over a bright wallpaper as well as a dark one.
+    func chromeGlass<S: InsettableShape>(_ shape: S, tint: Double = 0.4) -> some View {
+        glassEffect(.regular.tint(Color.black.opacity(tint)), in: shape)
+            .overlay(shape.strokeBorder(.white.opacity(0.14), lineWidth: 0.5))
+    }
+}
+
 struct ShotsOverlayRoot: View {
     let controller: ShotsOverlayController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Namespace private var ns
     @State private var pinchBase: Int?
+    static let space = "shotsOverlay"
 
     private var c: ShotsOverlayController { controller }
     private var open: Bool { c.presented }
@@ -36,11 +45,12 @@ struct ShotsOverlayRoot: View {
             .padding(.bottom, c.insets.bottom).padding(.trailing, c.insets.trailing)
 
             if c.viewerID != nil {
-                ShotViewer(controller: c, ns: ns, reduceMotion: reduceMotion)
+                ShotViewer(controller: c, reduceMotion: reduceMotion, reduceTransparency: reduceTransparency)
             }
             if c.dropTargeted { dropHighlight }
             toast
         }
+        .coordinateSpace(name: ShotsOverlayRoot.space)
         .ignoresSafeArea()
         .opacity(open ? 1 : 0)
         .animation(open ? .easeOut(duration: 0.22) : .easeIn(duration: 0.18), value: open)
@@ -53,7 +63,7 @@ struct ShotsOverlayRoot: View {
     private var backdrop: some View {
         Group {
             if reduceTransparency { Color(white: 0.06) } else {
-                ZStack { BackdropBlur(); Color.black.opacity(0.28) }
+                ZStack { BackdropBlur(); Color.black.opacity(0.36) }
             }
         }
         .contentShape(.rect)
@@ -64,15 +74,16 @@ struct ShotsOverlayRoot: View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 10) {
                 Text("Shots").font(.title3.weight(.semibold))
-                Text("\(c.entries.count)").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                Text("\(c.entries.count)").font(.callout.monospacedDigit()).foregroundStyle(.white.opacity(0.72))
                 Spacer()
                 ActionButton(symbol: "folder", help: "Show \(c.watcher.folder.lastPathComponent) in Finder", bounceOnHover: true) {
                     NSWorkspace.shared.open(c.watcher.folder)
                 }
                 ActionButton(symbol: "xmark", help: "Close (Esc)") { c.dismiss() }
             }
+            .foregroundStyle(.white)
             .padding(.horizontal, 18).padding(.vertical, 8)
-            .glassEffect(.regular, in: .capsule)
+            .chromeGlass(.capsule)
         }
     }
 
@@ -95,19 +106,20 @@ struct ShotsOverlayRoot: View {
         let groups = ShotsOverlayLogic.group(c.entries, now: Date(), calendar: .current)
         let order = Dictionary(uniqueKeysWithValues: c.entries.enumerated().map { ($1.id, $0) })
         let cols = Array(repeating: GridItem(.flexible(), spacing: 18, alignment: .top), count: c.columns)
-        return ScrollView {
+        return ScrollViewReader { proxy in
+        ScrollView {
             LazyVStack(alignment: .leading, spacing: 22, pinnedViews: [.sectionHeaders]) {
                 ForEach(groups, id: \.title) { g in
                     Section {
                         LazyVGrid(columns: cols, spacing: 18) {
                             ForEach(g.entries) { e in
-                                ShotTile(controller: c, entry: e, ns: ns, index: order[e.id] ?? 0, reduceMotion: reduceMotion)
+                                ShotTile(controller: c, entry: e, index: order[e.id] ?? 0, reduceMotion: reduceMotion)
                             }
                         }
                     } header: {
-                        Text(g.title).font(.callout.weight(.semibold))
+                        Text(g.title).font(.callout.weight(.semibold)).foregroundStyle(.white)
                             .padding(.horizontal, 14).padding(.vertical, 5)
-                            .glassEffect(.regular, in: .capsule)
+                            .chromeGlass(.capsule)
                     }
                 }
             }
@@ -123,6 +135,12 @@ struct ShotsOverlayRoot: View {
             pinchBase = nil
             UserDefaults.standard.set(c.columns, forKey: ShotsOverlayLogic.columnsKey)
         })
+        // Arrowing through the viewer keeps its tile on screen, so the close always has somewhere to land.
+        .onChange(of: c.viewerID) { _, id in
+            guard let id else { return }
+            withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(id) }
+        }
+        }
     }
 
     private var dropHighlight: some View {
@@ -145,8 +163,9 @@ struct ShotsOverlayRoot: View {
                     Button("Undo") { c.undoRemove() }.buttonStyle(.glass).controlSize(.small)
                 }
             }
+            .foregroundStyle(.white)
             .padding(.horizontal, 16).padding(.vertical, 8)
-            .glassEffect(.regular, in: .capsule)
+            .chromeGlass(.capsule)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(.bottom, c.insets.bottom + 120)
             .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -160,7 +179,6 @@ struct ShotsOverlayRoot: View {
 private struct ShotTile: View {
     let controller: ShotsOverlayController
     let entry: TrayEntry
-    let ns: Namespace.ID
     let index: Int
     let reduceMotion: Bool
     @State private var hover: CGPoint?
@@ -180,7 +198,6 @@ private struct ShotTile: View {
                     Color.clear
                 } else {
                     ThumbImage(entry: entry, fill: true)
-                        .matchedGeometryEffect(id: entry.id, in: ns)
                 }
             }
             .frame(width: w, height: h)
@@ -209,6 +226,7 @@ private struct ShotTile: View {
             .onDrag { fileProvider(c.watcher.fileURL(for: entry)) }
         }
         .aspectRatio(1.6, contentMode: .fit)
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(ShotsOverlayRoot.space)) } action: { c.tileFrames[entry.id] = $0 }
         .scaleEffect(c.presented || reduceMotion ? 1 : 0.9)
         .opacity(c.presented ? 1 : 0)
         .animation(c.presented
@@ -222,89 +240,189 @@ private struct ShotTile: View {
 
 private struct ShotViewer: View {
     let controller: ShotsOverlayController
-    let ns: Namespace.ID
     let reduceMotion: Bool
+    let reduceTransparency: Bool
     @State private var full: CGImage?
     private var c: ShotsOverlayController { controller }
 
     private var entry: TrayEntry? { c.viewerID.flatMap { id in c.entries.first { $0.id == id } } }
+    private var insets: (top: CGFloat, leading: CGFloat, bottom: CGFloat, trailing: CGFloat) {
+        (c.insets.top, c.insets.leading, c.insets.bottom, c.insets.trailing)
+    }
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.55).contentShape(.rect).onTapGesture { if !c.markingUp { c.closeViewer() } }
-            if let entry {
-                VStack(spacing: 16) {
-                    Group {
-                        if c.markingUp, let full {
-                            MarkupEditor(controller: c, watcher: c.watcher, entry: entry, image: full)
-                                .clipShape(.rect(cornerRadius: 16, style: .continuous))
-                        } else {
-                            picture(entry)
-                        }
+        GeometryReader { geo in
+            let size = geo.size
+            let p = c.viewerProgress
+            ZStack {
+                Color.black.opacity(0.6 * p).contentShape(.rect).onTapGesture { if !c.markingUp { c.closeViewer() } }
+                if let entry {
+                    if c.markingUp, let full {
+                        let area = ShotsOverlayLogic.viewerArea(container: size, insets: insets, sideReserve: 40, toolbarBand: 0)
+                        MarkupEditor(controller: c, watcher: c.watcher, entry: entry, image: full)
+                            .clipShape(.rect(cornerRadius: 16, style: .continuous))
+                            .frame(width: area.width, height: area.height)
+                            .position(x: area.midX, y: area.midY)
+                    } else {
+                        picture(entry, size: size, progress: p)
+                        if !c.markingUp { chrome(entry, size: size).opacity(p) }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if !c.markingUp { toolbar(entry) }
                 }
-                .padding(.top, c.insets.top).padding(.horizontal, c.insets.leading + 40)
-                .padding(.bottom, c.insets.bottom)
-                .task(id: entry.id) {
-                    let u = c.watcher.fileURL(for: entry)
-                    full = await Task.detached { () -> CGImage? in
-                        guard let src = CGImageSourceCreateWithURL(u as CFURL, nil) else { return nil }
-                        return CGImageSourceCreateImageAtIndex(src, 0, nil)
-                    }.value
-                }
+            }
+            .task(id: entry?.id) {
+                guard let entry else { return }
+                let u = c.watcher.fileURL(for: entry)
+                full = await Task.detached { () -> CGImage? in
+                    guard let src = CGImageSourceCreateWithURL(u as CFURL, nil) else { return nil }
+                    return CGImageSourceCreateImageAtIndex(src, 0, nil)
+                }.value
             }
         }
         .transition(.opacity)
     }
 
-    @ViewBuilder private func picture(_ entry: TrayEntry) -> some View {
-        let slideEdge: Edge = c.slide >= 0 ? .trailing : .leading
-        let content = ZStack {
+    // MARK: Picture (explicit frame, tile → fitted)
+
+    @ViewBuilder private func picture(_ entry: TrayEntry, size: CGSize, progress p: CGFloat) -> some View {
+        let area = ShotsOverlayLogic.viewerArea(container: size, insets: insets)
+        let aspect = entry.height > 0 ? CGFloat(entry.width) / CGFloat(entry.height) : 1.6
+        let fitted = ShotsOverlayLogic.fittedRect(in: area, aspect: aspect,
+                                                  natural: CGSize(width: CGFloat(entry.width) / 2, height: CGFloat(entry.height) / 2))
+        let tile = ShotsOverlayLogic.zoomSource(tile: c.tileFrames[entry.id], overlay: size)
+        // Crossfade (Reduce Motion) or the off-screen fallback: no travel, just a shrink-and-fade toward the centre.
+        let from = reduceMotion ? fitted : (tile ?? ShotsOverlayLogic.centreShrink(of: fitted))
+        let r = ShotsOverlayLogic.interpolate(from: from, to: fitted, t: p)
+        let fades = reduceMotion || tile == nil
+        let edge: Edge = c.slide >= 0 ? .trailing : .leading
+        Group {
             if let full {
-                Image(decorative: full, scale: 1).resizable().aspectRatio(contentMode: .fit)
+                Image(decorative: full, scale: 1).resizable().aspectRatio(contentMode: .fill)
             } else {
-                ThumbImage(entry: entry, fill: false)
+                ThumbImage(entry: entry, fill: true)
             }
         }
-        .clipShape(.rect(cornerRadius: 14, style: .continuous))
-        .shadow(color: .black.opacity(0.5), radius: 30, y: 14)
+        .frame(width: r.width, height: r.height)
+        .clipShape(.rect(cornerRadius: 12, style: .continuous))
+        .shadow(color: .black.opacity(0.5 * p), radius: 30, y: 14)
+        .opacity(fades ? p : 1)
         .onDrag { fileProvider(c.watcher.fileURL(for: entry)) }
+        .position(x: r.midX, y: r.midY)
         .id(entry.id)
-        if c.detached {
-            content.transition(reduceMotion ? .opacity : .asymmetric(
-                insertion: .move(edge: slideEdge).combined(with: .opacity),
-                removal: .move(edge: slideEdge == .trailing ? .leading : .trailing).combined(with: .opacity)))
-        } else {
-            content.matchedGeometryEffect(id: entry.id, in: ns)
+        .transition(c.slide == 0 || reduceMotion ? .opacity : .asymmetric(
+            insertion: .move(edge: edge).combined(with: .opacity),
+            removal: .move(edge: edge == .trailing ? .leading : .trailing).combined(with: .opacity)))
+    }
+
+    // MARK: Chrome (never over the picture: the picture is fitted into the area that excludes all of it)
+
+    private func chrome(_ entry: TrayEntry, size: CGSize) -> some View {
+        let area = ShotsOverlayLogic.viewerArea(container: size, insets: insets)
+        let sideX = c.insets.leading + ShotsOverlayLogic.sideReserve / 2
+        let sideXR = size.width - c.insets.trailing - ShotsOverlayLogic.sideReserve / 2
+        return ZStack {
+            RoundButton(symbol: "xmark", help: "Close (Esc)", dark: !reduceTransparency) { c.closeViewer() }
+                .position(x: sideX, y: c.insets.top + 22)
+            RoundButton(symbol: "chevron.left", help: "Previous (←)", dark: !reduceTransparency) { c.step(-1) }
+                .disabled(c.viewerIndex == 0).opacity(c.viewerIndex == 0 ? 0.35 : 1)
+                .position(x: sideX, y: area.midY)
+            RoundButton(symbol: "chevron.right", help: "Next (→)", dark: !reduceTransparency) { c.step(1) }
+                .disabled(c.viewerIndex == c.entries.count - 1).opacity(c.viewerIndex == c.entries.count - 1 ? 0.35 : 1)
+                .position(x: sideXR, y: area.midY)
+            toolbar(entry)
+                .position(x: size.width / 2, y: size.height - c.insets.bottom - 32)
         }
     }
 
     private func toolbar(_ entry: TrayEntry) -> some View {
         let url = c.watcher.fileURL(for: entry)
-        return GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 6) {
-                ActionButton(symbol: "chevron.left", help: "Previous (←)") { c.step(-1) }
-                    .disabled(c.viewerIndex == 0)
-                ActionButton(symbol: "chevron.right", help: "Next (→)") { c.step(1) }
-                    .disabled(c.viewerIndex == c.entries.count - 1)
-                Divider().frame(height: 18).padding(.horizontal, 4)
-                ActionButton(symbol: "paperplane", help: "Send to session", flies: true) { c.send(entry) }
-                ActionButton(symbol: "doc.on.doc", doneSymbol: "checkmark", help: "Copy image") {
-                    guard let image = NSImage(contentsOf: url) else { return }
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.writeObjects([image])
-                }
-                ActionButton(symbol: "pencil.tip.crop.circle", help: "Mark up") { c.markingUp = true; c.makeKey() }
-                ActionButton(symbol: "folder", help: "Show in Finder", bounceOnHover: true) {
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                }
-                ActionButton(symbol: "trash", help: "Remove from tray (the original file stays)") { c.delete(entry) }
+        return HStack(spacing: 2) {
+            ToolbarButton(symbol: "paperplane", label: "Send", help: "Send to session") { c.send(entry) }
+            ToolbarButton(symbol: "doc.on.doc", doneSymbol: "checkmark", label: "Copy", help: "Copy image") {
+                guard let image = NSImage(contentsOf: url) else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.writeObjects([image])
             }
-            .padding(.horizontal, 12).padding(.vertical, 7)
-            .glassEffect(.regular, in: .capsule)
+            ToolbarButton(symbol: "pencil.tip.crop.circle", label: "Markup", help: "Mark up") { c.markingUp = true; c.makeKey() }
+            ToolbarButton(symbol: "folder", label: "Finder", help: "Show in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+            ToolbarButton(symbol: "trash", label: "Remove", help: "Remove from tray (the original file stays)") { c.delete(entry) }
         }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background {
+            if reduceTransparency {
+                Capsule().fill(Color(white: 0.12))
+            } else {
+                Capsule().fill(.clear).glassEffect(.regular.tint(Color.black.opacity(0.55)), in: .capsule)
+            }
+        }
+        .overlay(Capsule().strokeBorder(.white.opacity(0.2), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.45), radius: 22, y: 8)
+    }
+}
+
+/// 44 pt round glass button for the viewer's corners and sides.
+private struct RoundButton: View {
+    let symbol: String
+    let help: String
+    let dark: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: 44, height: 44).contentShape(.circle)
+        }
+        .buttonStyle(.plain)
+        .background {
+            if dark { Circle().fill(.clear).glassEffect(.regular.tint(Color.black.opacity(0.5)), in: .circle) }
+            else { Circle().fill(Color(white: 0.12)) }
+        }
+        .overlay(Circle().strokeBorder(.white.opacity(0.2), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
+/// Icon over a label, white on dark glass, 44 pt tall hit area.
+private struct ToolbarButton: View {
+    let symbol: String
+    var doneSymbol: String?
+    let label: String
+    let help: String
+    let action: () -> Void
+    @State private var done = false
+    @State private var bounce = 0
+    @State private var hovering = false
+
+    var body: some View {
+        Button {
+            action()
+            bounce += 1
+            if doneSymbol != nil {
+                done = true
+                Task { try? await Task.sleep(for: .milliseconds(1200)); done = false }
+            }
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: done ? (doneSymbol ?? symbol) : symbol)
+                    .font(.system(size: 17, weight: .medium))
+                    .contentTransition(.symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: bounce)
+                    .frame(height: 20)
+                Text(done ? "Copied" : label).font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(.white)
+            .frame(minWidth: 62, minHeight: 48)
+            .background(.white.opacity(hovering ? 0.14 : 0), in: .rect(cornerRadius: 14, style: .continuous))
+            .contentShape(.rect(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .help(help)
+        .accessibilityLabel(help)
     }
 }
 
@@ -319,13 +437,13 @@ private struct DownloadsGlassStrip: View {
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Downloads").font(.callout.weight(.semibold))
-                    Text("\(d.items.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Text("\(d.items.count)").font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.72))
                 }
                 if d.unreadable {
-                    Text("True can't read Downloads.").font(.callout).foregroundStyle(.secondary)
+                    Text("True can't read Downloads.").font(.callout).foregroundStyle(.white.opacity(0.72))
                     Spacer()
                 } else if d.items.isEmpty {
-                    Text("No recent downloads").font(.callout).foregroundStyle(.secondary)
+                    Text("No recent downloads").font(.callout).foregroundStyle(.white.opacity(0.72))
                     Spacer()
                 } else {
                     ScrollView(.horizontal) {
@@ -337,9 +455,10 @@ private struct DownloadsGlassStrip: View {
                     NSWorkspace.shared.open(d.directory)
                 }
             }
+            .foregroundStyle(.white)
             .padding(.horizontal, 18).padding(.vertical, 10)
             .frame(height: 64)
-            .glassEffect(.regular, in: .rect(cornerRadius: 22, style: .continuous))
+            .chromeGlass(.rect(cornerRadius: 22, style: .continuous))
         }
         .opacity(controller.presented ? 1 : 0)
         .offset(y: controller.presented ? 0 : 14)

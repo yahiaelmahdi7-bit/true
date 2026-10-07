@@ -102,4 +102,57 @@ enum ShotsOverlayLogic {
         let next = index + step
         return (0..<count).contains(next) ? next : nil
     }
+
+    // MARK: Viewer layout & zoom
+
+    /// Height reserved at the bottom of the viewer for the floating toolbar (capsule + gap), above the bottom inset.
+    static let toolbarBand: CGFloat = 92
+    /// Width reserved on each side for the ‹ › chevrons and the Close button.
+    static let sideReserve: CGFloat = 76
+
+    /// The box the viewer image may occupy: the container minus the content insets, the side reserve and the
+    /// toolbar band. The toolbar lives in the band, so the image can never be under it.
+    static func viewerArea(container: CGSize,
+                           insets: (top: CGFloat, leading: CGFloat, bottom: CGFloat, trailing: CGFloat),
+                           sideReserve: CGFloat = sideReserve, toolbarBand: CGFloat = toolbarBand) -> CGRect {
+        let x = insets.leading + sideReserve, y = insets.top
+        let w = max(1, container.width - x - insets.trailing - sideReserve)
+        let h = max(1, container.height - y - insets.bottom - toolbarBand)
+        return CGRect(x: x, y: y, width: w, height: h)
+    }
+
+    /// Aspect-fit `aspect` (width / height) inside `area`, centred; never upscaled past `maxScale`× `natural`
+    /// (so a 16 pt icon is not blown up to a blurry slab). Falls back to 1.6 for a bad aspect.
+    static func fittedRect(in area: CGRect, aspect: CGFloat, natural: CGSize? = nil, maxScale: CGFloat = 2) -> CGRect {
+        let a = (aspect.isFinite && aspect > 0) ? aspect : 1.6
+        var w = area.width, h = w / a
+        if h > area.height { h = area.height; w = h * a }
+        if let n = natural, n.width > 0, n.height > 0 {
+            w = min(w, n.width * maxScale); h = min(h, n.height * maxScale)
+            if w / h > a { w = h * a } else { h = w / a }
+        }
+        return CGRect(x: area.midX - w / 2, y: area.midY - h / 2, width: w, height: h)
+    }
+
+    /// Linear blend of two rects; t = 0 is `from`, t = 1 is `to`. Drives the zoom open/close.
+    static func interpolate(from: CGRect, to: CGRect, t: CGFloat) -> CGRect {
+        func l(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a + (b - a) * t }
+        return CGRect(x: l(from.minX, to.minX), y: l(from.minY, to.minY),
+                      width: l(from.width, to.width), height: l(from.height, to.height))
+    }
+
+    /// Where the viewer image zooms from/to: the tile's rect when at least part of it is on screen, otherwise nil
+    /// (the caller shrinks + fades toward the centre instead).
+    static func zoomSource(tile: CGRect?, overlay: CGSize) -> CGRect? {
+        guard let tile, tile.width > 1, tile.height > 1 else { return nil }
+        let visible = tile.intersection(CGRect(origin: .zero, size: overlay))
+        guard !visible.isNull, visible.width * visible.height >= tile.width * tile.height * 0.5 else { return nil }
+        return tile
+    }
+
+    /// Off-screen fallback: a small rect at the centre of `target`.
+    static func centreShrink(of target: CGRect, scale: CGFloat = 0.6) -> CGRect {
+        CGRect(x: target.midX - target.width * scale / 2, y: target.midY - target.height * scale / 2,
+               width: target.width * scale, height: target.height * scale)
+    }
 }

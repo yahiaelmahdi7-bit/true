@@ -91,4 +91,73 @@ import Carbon.HIToolbox
         #expect(ShotsOverlayLogic.neighbor(of: 1, count: 3, step: -1) == 0)
         #expect(ShotsOverlayLogic.neighbor(of: 0, count: 0, step: 1) == nil)
     }
+
+    // MARK: Viewer layout
+
+    private let ins: (top: CGFloat, leading: CGFloat, bottom: CGFloat, trailing: CGFloat) = (60, 28, 28, 28)
+    private let screen = CGSize(width: 1512, height: 982)
+
+    @Test func fittedImageStaysInsideAreaAboveToolbarBand() {
+        let area = ShotsOverlayLogic.viewerArea(container: screen, insets: ins)
+        let toolbarTop = screen.height - ins.bottom - ShotsOverlayLogic.toolbarBand
+        for aspect: CGFloat in [0.2, 0.56, 1, 1.6, 3, 8, 21] {
+            let r = ShotsOverlayLogic.fittedRect(in: area, aspect: aspect)
+            #expect(r.minX >= area.minX - 0.001 && r.maxX <= area.maxX + 0.001)
+            #expect(r.minY >= area.minY - 0.001 && r.maxY <= area.maxY + 0.001)
+            #expect(r.maxY <= toolbarTop + 0.001, "toolbar overlap at aspect \(aspect)")
+            #expect(abs(r.width / r.height - aspect) < 0.001)
+            #expect(abs(r.midX - area.midX) < 0.001 && abs(r.midY - area.midY) < 0.001)
+        }
+    }
+
+    @Test func fittedImageNeverUnderSideButtons() {
+        let area = ShotsOverlayLogic.viewerArea(container: screen, insets: ins)
+        let r = ShotsOverlayLogic.fittedRect(in: area, aspect: 5)
+        #expect(r.minX >= ins.leading + ShotsOverlayLogic.sideReserve - 0.001)
+        #expect(r.maxX <= screen.width - ins.trailing - ShotsOverlayLogic.sideReserve + 0.001)
+    }
+
+    @Test func tinyContainerStillYieldsAPositiveRect() {
+        let area = ShotsOverlayLogic.viewerArea(container: CGSize(width: 100, height: 100), insets: ins)
+        let r = ShotsOverlayLogic.fittedRect(in: area, aspect: 1.6)
+        #expect(r.width > 0 && r.height > 0 && r.width.isFinite)
+    }
+
+    @Test func tinyImageIsNotBlownUpPastTwiceItsSize() {
+        let area = ShotsOverlayLogic.viewerArea(container: screen, insets: ins)
+        let r = ShotsOverlayLogic.fittedRect(in: area, aspect: 1, natural: CGSize(width: 16, height: 16))
+        #expect(r.width == 32 && r.height == 32)
+        let huge = ShotsOverlayLogic.fittedRect(in: area, aspect: 2, natural: CGSize(width: 12000, height: 6000))
+        #expect(huge.maxY <= area.maxY + 0.001 && huge.width <= area.width + 0.001)
+    }
+
+    @Test func badAspectFallsBack() {
+        let area = CGRect(x: 0, y: 0, width: 800, height: 600)
+        for a: CGFloat in [0, -1, .nan, .infinity] {
+            let r = ShotsOverlayLogic.fittedRect(in: area, aspect: a)
+            #expect(abs(r.width / r.height - 1.6) < 0.001)
+        }
+    }
+
+    @Test func interpolationEndpointsAndMidpoint() {
+        let a = CGRect(x: 10, y: 20, width: 100, height: 60), b = CGRect(x: 200, y: 100, width: 800, height: 500)
+        #expect(ShotsOverlayLogic.interpolate(from: a, to: b, t: 0) == a)
+        #expect(ShotsOverlayLogic.interpolate(from: a, to: b, t: 1) == b)
+        #expect(ShotsOverlayLogic.interpolate(from: a, to: b, t: 0.5) == CGRect(x: 105, y: 60, width: 450, height: 280))
+    }
+
+    @Test func zoomSourceNeedsTheTileOnScreen() {
+        let screen = CGSize(width: 1000, height: 800)
+        let on = CGRect(x: 100, y: 100, width: 200, height: 120)
+        #expect(ShotsOverlayLogic.zoomSource(tile: on, overlay: screen) == on)
+        #expect(ShotsOverlayLogic.zoomSource(tile: CGRect(x: 100, y: 2000, width: 200, height: 120), overlay: screen) == nil)
+        #expect(ShotsOverlayLogic.zoomSource(tile: CGRect(x: 100, y: 770, width: 200, height: 120), overlay: screen) == nil)  // <50% visible
+        #expect(ShotsOverlayLogic.zoomSource(tile: nil, overlay: screen) == nil)
+    }
+
+    @Test func centreShrinkIsCentredAndSmaller() {
+        let t = CGRect(x: 100, y: 100, width: 400, height: 200)
+        let s = ShotsOverlayLogic.centreShrink(of: t)
+        #expect(s.midX == t.midX && s.midY == t.midY && s.width < t.width)
+    }
 }

@@ -62,7 +62,7 @@ final class ShotsOverlayController: MarkupHosting {
         let p = ShotsOverlayPanel(screen: screen)
         p.contentView = NSHostingView(rootView: ShotsOverlayRoot(controller: self))
         panel = p
-        viewerID = nil; markingUp = false; markupDirty = false; sending = false; toast = nil
+        viewerID = nil; viewerProgress = 0; closing = false; markingUp = false; markupDirty = false; sending = false; toast = nil
         isOpen = true
         p.makeKeyAndOrderFront(nil)
         installMonitors(for: p)
@@ -97,26 +97,42 @@ final class ShotsOverlayController: MarkupHosting {
     var viewerIndex: Int? { viewerID.flatMap { id in entries.firstIndex { $0.id == id } } }
     /// -1 / +1 for the slide direction of the last arrow; 0 for a zoom-open or -close.
     var slide = 0
-    /// While arrowing, the viewer image detaches from the grid slot (it slides instead of morphing).
-    var detached = false
+    /// 0 = the viewer image sits on its grid tile, 1 = fitted in the viewer. Animated; the close sets
+    /// `viewerID = nil` only once it has landed back on the tile, so the tile never doubles up with the viewer copy.
+    private(set) var viewerProgress: CGFloat = 0
+    private var closing = false
+    /// Each tile's frame in overlay coordinates, kept fresh by the tiles. Read on demand, never observed
+    /// (scrolling would otherwise re-render the viewer every frame).
+    @ObservationIgnored var tileFrames: [String: CGRect] = [:]
+
+    private var zoomAnimation: Animation {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? .easeInOut(duration: 0.2) : .spring(duration: 0.42, bounce: 0.1)
+    }
 
     func openViewer(_ id: String) {
-        slide = 0; detached = false
-        withAnimation(.spring(duration: 0.42, bounce: 0.12)) { viewerID = id }
+        guard !closing else { return }
+        slide = 0; viewerProgress = 0
+        viewerID = id
+        // Next turn, so the viewer mounts on the tile first and then springs out to its fitted rect.
+        DispatchQueue.main.async { [weak self] in
+            withAnimation(self?.zoomAnimation) { self?.viewerProgress = 1 }
+        }
     }
 
     func closeViewer() {
         markingUp = false; markupDirty = false
-        detached = false; slide = 0
-        // One turn later so the viewer image re-attaches to its slot before it shrinks back.
-        DispatchQueue.main.async { [weak self] in
-            withAnimation(.spring(duration: 0.4, bounce: 0.1)) { self?.viewerID = nil }
+        guard viewerID != nil, !closing else { return }
+        closing = true; slide = 0
+        withAnimation(zoomAnimation, completionCriteria: .logicallyComplete) {
+            viewerProgress = 0
+        } completion: { [weak self] in
+            self?.viewerID = nil; self?.closing = false
         }
     }
 
     func step(_ delta: Int) {
-        guard let i = viewerIndex, !markingUp, let j = ShotsOverlayLogic.neighbor(of: i, count: entries.count, step: delta) else { return }
-        slide = delta; detached = true
+        guard !closing, let i = viewerIndex, !markingUp, let j = ShotsOverlayLogic.neighbor(of: i, count: entries.count, step: delta) else { return }
+        slide = delta
         withAnimation(.spring(duration: 0.35, bounce: 0.05)) { viewerID = entries[j].id }
     }
 
