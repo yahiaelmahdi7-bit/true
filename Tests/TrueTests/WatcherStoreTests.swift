@@ -112,12 +112,12 @@ final class Box<T>: @unchecked Sendable {
         let clock: Box<Date>, root: URL
     }
 
-    static func rig(cost: Double = 0.2, fixSteps: [String] = ["Edit Package.swift"], danger: Double = 0.02, worth: Double = 0.95, quote: String = "boom", lines: String = "1-2", jevKey: String? = "k") -> Rig {
+    static func rig(cost: Double = 0.2, fixSteps: [String] = ["Edit Package.swift"], danger: Double = 0.02, worth: Double = 0.95, quote: String = "boom", lines: String = "1-2", files: [String] = ["Package.swift"], dedupe: Double = 0.0, jevKey: String? = "k") -> Rig {
         let root = tmp()
         let jev = NoulJev { id in
             if id.hasPrefix("wg_") { return id == "wg_injection" ? 0.02 : worth }
             if ["p_local", "p_undo", "p_scope"].contains(id) { return 0.95 }
-            if id.hasPrefix("d") && id.contains("_") && !id.hasPrefix("done") { return 0.0 }
+            if id.hasPrefix("d") && id.contains("_") && !id.hasPrefix("done") { return dedupe }
             return danger
         }
         let runs = Box<[(argv: [String], env: [String: String])]>([])
@@ -125,7 +125,7 @@ final class Box<T>: @unchecked Sendable {
         let clock = Box(Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 7, hour: 12))!)
         let rep = ItemReport(title: "Gate skipped", what: "The build failed", cause: "Missing flag", sure: "high",
                              evidence: [.init(path: "a.swift", lines: lines, quote: quote)],
-                             fix: .init(summary: "Add the flag", steps: fixSteps, commands: [], files: ["Package.swift"]), checked: [], unknowns: [])
+                             fix: .init(summary: "Add the flag", steps: fixSteps, commands: [], files: files), checked: [], unknowns: [])
         let out = "{\"total_cost_usd\":\(cost),\"usage\":{\"input_tokens\":2000},\"structured_output\":\(String(decoding: try! JSONEncoder().encode(rep), as: UTF8.self))}"
         var d = WatcherStore.Deps()
         d.jev = JevClient(transport: jev, keyProvider: { jevKey }, env: [:])
