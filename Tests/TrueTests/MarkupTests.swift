@@ -1,5 +1,6 @@
 import Testing
 import CoreGraphics
+import Foundation
 @testable import True
 
 @Suite struct MarkupTests {
@@ -99,5 +100,67 @@ import CoreGraphics
         let t = F.zoomSize(visible: v, imageSize: CGSize(width: 500, height: 2000), chrome: 44, inset: 12)
         #expect(t.height <= 976)
         #expect(t.width < 880)
+    }
+
+    // MARK: Corner snapping (Run 19)
+
+    private let vis = CGRect(x: 100, y: 50, width: 1000, height: 800)   // midX 600, midY 450
+
+    @Test func nearestCornerPerQuadrant() {
+        #expect(F.nearestCorner(to: CGPoint(x: 700, y: 700), in: vis) == .topRight)
+        #expect(F.nearestCorner(to: CGPoint(x: 200, y: 700), in: vis) == .topLeft)
+        #expect(F.nearestCorner(to: CGPoint(x: 700, y: 100), in: vis) == .bottomRight)
+        #expect(F.nearestCorner(to: CGPoint(x: 200, y: 100), in: vis) == .bottomLeft)
+    }
+
+    @Test func nearestCornerTiesGoTopRight() {
+        #expect(F.nearestCorner(to: CGPoint(x: 600, y: 450), in: vis) == .topRight)
+        #expect(F.nearestCorner(to: CGPoint(x: 600, y: 100), in: vis) == .bottomRight)   // x tie → right
+        #expect(F.nearestCorner(to: CGPoint(x: 200, y: 450), in: vis) == .topLeft)       // y tie → top
+    }
+
+    @Test func frameForEachCorner() {
+        let s = CGSize(width: 200, height: 60)
+        #expect(F.frame(corner: .topRight, visible: vis, size: s, inset: 12) == CGRect(x: 888, y: 778, width: 200, height: 60))
+        #expect(F.frame(corner: .topLeft, visible: vis, size: s, inset: 12) == CGRect(x: 112, y: 778, width: 200, height: 60))
+        #expect(F.frame(corner: .bottomRight, visible: vis, size: s, inset: 12) == CGRect(x: 888, y: 62, width: 200, height: 60))
+        #expect(F.frame(corner: .bottomLeft, visible: vis, size: s, inset: 12) == CGRect(x: 112, y: 62, width: 200, height: 60))
+        #expect(F.topRight(visible: vis, size: s, inset: 12) == F.frame(corner: .topRight, visible: vis, size: s, inset: 12))
+    }
+
+    @Test func everyCornerClampsInsideWhenOversize() {
+        let v = CGRect(x: 0, y: 0, width: 800, height: 600)
+        for c in PanelCorner.allCases {
+            #expect(F.frame(corner: c, visible: v, size: CGSize(width: 5000, height: 5000), inset: 12)
+                    == CGRect(x: 12, y: 12, width: 776, height: 576))
+        }
+    }
+
+    @Test func expandedFrameKeepsItsCornerAndGrowsInward() {
+        let small = CGSize(width: 156, height: 48), big = CGSize(width: 444, height: 500)
+        for c in PanelCorner.allCases {
+            let a = F.frame(corner: c, visible: vis, size: small, inset: 12)
+            let b = F.frame(corner: c, visible: vis, size: big, inset: 12)
+            #expect(vis.contains(b))
+            #expect(c.isRight ? a.maxX == b.maxX : a.minX == b.minX)
+            #expect(c.isTop ? a.maxY == b.maxY : a.minY == b.minY)
+            #expect(b.width > a.width && b.height > a.height)
+        }
+    }
+
+    @Test func cornerPersistenceRoundTrip() {
+        let d = UserDefaults(suiteName: "PanelCornerTests-\(UUID().uuidString)")!
+        #expect(PanelCorner.load(d) == .topRight)             // first run
+        for c in PanelCorner.allCases { c.save(d); #expect(PanelCorner.load(d) == c) }
+        d.set("garbage", forKey: PanelCorner.defaultsKey)
+        #expect(PanelCorner.load(d) == .topRight)
+    }
+
+    @Test func clickVersusDragThreshold() {
+        let o = CGPoint(x: 100, y: 100)
+        #expect(!F.isDrag(from: o, to: o))
+        #expect(!F.isDrag(from: o, to: CGPoint(x: 102, y: 102)))      // 2.83 pt
+        #expect(F.isDrag(from: o, to: CGPoint(x: 104, y: 100)))       // exactly 4 pt
+        #expect(F.isDrag(from: o, to: CGPoint(x: 100, y: 90)))
     }
 }

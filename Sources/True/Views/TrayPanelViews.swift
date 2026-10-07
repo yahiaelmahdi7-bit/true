@@ -12,7 +12,7 @@ struct TrayPanelRoot: View {
         Group {
             switch controller.mode {
             case .collapsed:
-                Pill(watcher: watcher) { controller.set(.grid) }
+                Pill(watcher: watcher, controller: controller)
             case .grid:
                 GridPanel(controller: controller, watcher: watcher, ns: ns)
             case .zoom(let id):
@@ -36,10 +36,11 @@ struct TrayPanelRoot: View {
 
 private struct Pill: View {
     let watcher: ScreenshotWatcher
-    let action: () -> Void
+    let controller: TrayPanelController
 
     var body: some View {
-        Button(action: action) {
+        // Not a Button: one gesture tells a click (< 4 pt of travel) from a drag-to-corner.
+        Group {
             HStack(spacing: 10) {
                 ZStack {
                     ForEach(Array(watcher.entries.prefix(3).enumerated().reversed()), id: \.element.id) { i, e in
@@ -65,8 +66,12 @@ private struct Pill: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(.rect)
         }
-        .buttonStyle(.plain)
-        .help("Screenshots — ⇧⌘S")
+        .gesture(DragGesture(minimumDistance: 0)
+            .onChanged { _ in controller.dragChanged() }
+            .onEnded { _ in if controller.dragEnded() { controller.set(.grid) } })
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { controller.set(.grid) }
+        .help("Screenshots — ⇧⌘S; drag to move to a corner")
         .animation(.easeOut(duration: 0.2), value: watcher.fresh)
     }
 }
