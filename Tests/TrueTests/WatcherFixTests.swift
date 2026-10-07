@@ -51,7 +51,7 @@ private func rec(_ id: String, state: BuilderState, cwd: String = "/tmp/r", star
         let r = WatcherStoreTests.rig(lines: "1-2; git push --force")
         await r.store.scan(builders: [rec("b1", state: .failed)])
         let it = r.store.items[0]
-        #expect(it.level != .askFirst)       // R7: investigate-time denyText now reads evidence `lines` too
+        #expect(it.level == .handOff)        // R7: investigate-time denyText now reads evidence `lines` too
         let res = await r.store.approve(it.id)
         if case .refused = res {} else if res == .handOff {} else { Issue.record("expected refused/handOff, got \(res)") }
         #expect(r.spawns.value.isEmpty)
