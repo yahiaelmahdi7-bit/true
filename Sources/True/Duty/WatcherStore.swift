@@ -8,7 +8,7 @@ protocol InboxChannel: AnyObject {
 }
 
 final class HubChannel: InboxChannel {
-    private(set) var lastDigest: String?
+    var lastDigest: String?
     func deliver(item: InboxItem) {}
     func deliver(digest: String) { lastDigest = digest }
 }
@@ -297,7 +297,7 @@ final class WatcherStore {
     }
 
     func scan(builders: [BuilderRecord]) async {
-        let handled = Set(items.map(\.subject))
+        let handled = Set(items.map(\.fingerprint))
         let sigs = BuilderSignals.scan(builders, now: now, handled: handled, resultText: { b in
             b.dir.flatMap { try? String(contentsOfFile: $0 + "/result.md", encoding: .utf8) } })
         for s in sigs { await handle(s) }
