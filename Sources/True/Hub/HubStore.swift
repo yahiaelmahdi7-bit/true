@@ -18,8 +18,13 @@ enum HubScanner {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
         return names.compactMap { n in
             let d = dir.appendingPathComponent(n)
-            return (try? Data(contentsOf: d.appendingPathComponent("meta.json")))
-                .flatMap { BuilderRecord.parse($0, dir: d.path, alive: alive) }
+            guard var r = (try? Data(contentsOf: d.appendingPathComponent("meta.json")))
+                .flatMap({ BuilderRecord.parse($0, dir: d.path, alive: alive) }) else { return nil }
+            if r.state == .running {
+                r.lastWrite = (try? FileManager.default.attributesOfItem(atPath: d.appendingPathComponent("stream.jsonl").path)[.modificationDate] as? Date)?
+                    .timeIntervalSince1970
+            }
+            return r
         }.sorted { ($0.started, $0.id) > ($1.started, $1.id) }
     }
 

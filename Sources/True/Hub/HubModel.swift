@@ -93,6 +93,8 @@ struct BuilderRecord: Equatable, Sendable, Identifiable {
     var budget: Double?
     /// Where the files live (result.md, stream.jsonl); nil for a record built in a test.
     var dir: String?
+    /// mtime of stream.jsonl, stat'ed for running builders only (the Watcher's stuck rule).
+    var lastWrite: Double? = nil
 
     /// `alive` is the builder's own `is_running`: a `running` record whose pids are gone is `died`.
     static func parse(_ data: Data, dir: String? = nil, alive: (Int32) -> Bool = { PeerSession.isAlive($0) }) -> BuilderRecord? {
