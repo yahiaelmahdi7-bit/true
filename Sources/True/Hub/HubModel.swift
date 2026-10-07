@@ -70,7 +70,8 @@ struct PeerSession: Equatable, Sendable, Identifiable {
 }
 
 enum BuilderState: String, Sendable {
-    case running, done, failed, killed, died
+    /// `paused`: the builder hit its absolute ceiling (or made no progress twice) and waits for `builder resume <id>`.
+    case running, done, failed, killed, died, paused
 }
 
 /// One `~/.claude/builders/<id>/meta.json`.
@@ -125,7 +126,7 @@ struct BuilderRecord: Equatable, Sendable, Identifiable {
         switch state {
         case .running: return true
         case .died: return !acked && now - started < 86_400
-        case .done, .failed, .killed: return !acked || now - (ended ?? started) < 86_400
+        case .done, .failed, .killed, .paused: return !acked || now - (ended ?? started) < 86_400
         }
     }
 
@@ -133,9 +134,13 @@ struct BuilderRecord: Equatable, Sendable, Identifiable {
         switch state {
         case .running: return .working
         case .done: return .done
+        case .paused: return .needsYou
         case .failed, .killed, .died: return .failed
         }
     }
+
+    /// The Hub's word for the row: a paused builder is not "Needs you" in general, it is waiting for a go-ahead.
+    var statusLabel: String { state == .paused ? "Paused" : status.label }
 
     /// Seconds since the start (running) or the whole run (finished).
     func elapsed(now: Double) -> Double { max(0, (state == .running ? now : (ended ?? now)) - started) }
@@ -204,7 +209,7 @@ enum HubModel {
             for b in shown {
                 var g = slot(HubProject.key(forCwd: b.originCwd.isEmpty ? b.cwd : b.originCwd, hasGit: hasGit))
                 g.background.append(b)
-                if b.state == .running { g.working += 1 } else if b.status == .failed { g.failed += 1 }
+                if b.state == .running { g.working += 1 } else if b.state == .paused { g.needsYou += 1 } else if b.status == .failed { g.failed += 1 }
                 g.latest = max(g.latest, b.state == .running ? now : (b.ended ?? b.started))
                 groups[g.key] = g
             }

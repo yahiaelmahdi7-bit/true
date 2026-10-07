@@ -209,40 +209,74 @@ final class WatcherStore {
         guard enabled, let item = items.first(where: { $0.id == id }), item.canInvestigate, !running.contains(id) else { return }
         let t = today()
         let hhmm = { () -> String in let f = DateFormatter(); f.dateFormat = "HH:mm"; return f.string(from: self.d.now()) }
+        let resumeFrom = item.resumeSession
         let cap = min(duty.budget.perRunUSD, duty.budget.dailyUSD - t.usd)
-        if cap < 0.05 || t.runs >= duty.budget.runsPerDay || (t.perRepo[item.repo] ?? 0) >= 3 || !running.isEmpty {
-            emit(InboxEvent(.reported, id: id, at: now, report: item.report, note: "Budget reached at \(hhmm())"))
+        // A parked session is a continuation: dollars only, so the run and per-repo counts do not apply again.
+        let overCount = resumeFrom == nil && (t.runs >= duty.budget.runsPerDay || (t.perRepo[item.repo] ?? 0) >= 3)
+        if cap < 0.05 || overCount || !running.isEmpty {
+            emit(InboxEvent(.reported, id: id, at: now, report: item.report, note: "Budget reached at \(hhmm())", resumeSession: resumeFrom))
             decision("budget-stop", ["item": id]); return
         }
         running.insert(id); defer { running.remove(id) }
         Investigation.prepare(paths: d.paths, duty: duty, memory: memory())
         let builderDir = items.first { $0.id == id }?.builderID.flatMap { bid in
             HubStoreBuilders.dir(bid) }
-        let argv = Investigation.argv(paths: d.paths, maxBudgetUSD: cap, maxTurns: duty.budget.maxTurns, addDir: builderDir)
         let sig = WatcherSignal(source: item.source, kind: item.kind, subject: item.subject, repo: item.repo, facts: [:],
                                 evidence: item.evidence, codeFact: false, title: item.title)
         let gitFacts = gatherGitFacts(repo: item.repo)
         if !FileManager.default.fileExists(atPath: Investigation.hookPath) {
             burnHookMissing = true; decision("burn-hook-missing", ["item": id])
         } else { burnHookMissing = false }
-        let prompt = Investigation.prompt(signal: sig, evidence: item.evidence, gitFacts: gitFacts)
-        let (status, out) = await d.runner(argv, item.repo, prompt, ["AGENT_BURN_MAIN": "1"])
-        switch Investigation.parse(status: status, output: out) {
-        case let .report(rep, cost, tokens):
-            ledger(usd: cost, runs: 1, tokens: tokens, repo: item.repo)
-            let clean = rep.mapped { Redact.secrets(InjectionScreen.strip($0)) }
-            emit(InboxEvent(.reported, id: id, at: now, report: clean, cost: cost))
-            let denyText = Self.denyText(clean)
-            let reply = await jevAsk(PermissionGate.state(text: clean.fix.text, repo: item.repo, problem: clean.what), PermissionGate.questions)
-            let pre = duty.preapproved.contains { $0.actionKind == item.kind && $0.repo == item.repo }
-            let dec = PermissionGate.decide(text: clean.fix.text, denyText: denyText, reply: reply, ceiling: duty.ceiling, preapproved: pre)
-            emit(InboxEvent(.levelled, id: id, at: now, level: dec.level))
-            var answers: [String: Double] = [:]
-            for (k, v) in reply?.answers ?? [:] { if let n = v.noul { answers[k] = n } }
-            decision("level", ["item": id, "level": dec.level.rawValue, "why": dec.reasons, "answers": answers])
-        case let .stopped(why, cost):
-            ledger(usd: cost, runs: 1, repo: item.repo)
-            emit(InboxEvent(.reported, id: id, at: now, report: item.report, cost: cost, note: why))
+        let firstPrompt = Investigation.prompt(signal: sig, evidence: item.evidence, gitFacts: gitFacts)
+
+        // A cap is a checkpoint: resume the same session while there is daily budget and fewer than 4 continuations.
+        var session = resumeFrom
+        var continuations = 0
+        var countRun = resumeFrom == nil     // the run is counted once, whichever way the chain ends
+        var chainCost = 0.0
+        func runsNow() -> Int { defer { countRun = false }; return countRun ? 1 : 0 }
+        while true {
+            let left = duty.budget.dailyUSD - today().usd
+            let argv = Investigation.argv(paths: d.paths, maxBudgetUSD: min(duty.budget.perRunUSD, left), maxTurns: duty.budget.maxTurns,
+                                          addDir: builderDir, resume: session)
+            let (status, out) = await d.runner(argv, item.repo, session == nil ? firstPrompt : Investigation.continuePrompt, ["AGENT_BURN_MAIN": "1"])
+            switch Investigation.parse(status: status, output: out) {
+            case let .report(rep, cost, tokens):
+                chainCost += cost
+                ledger(usd: cost, runs: runsNow(), tokens: tokens, repo: item.repo)
+                let clean = rep.mapped { Redact.secrets(InjectionScreen.strip($0)) }
+                emit(InboxEvent(.reported, id: id, at: now, report: clean, cost: chainCost))
+                let denyText = Self.denyText(clean)
+                let reply = await jevAsk(PermissionGate.state(text: clean.fix.text, repo: item.repo, problem: clean.what), PermissionGate.questions)
+                let pre = duty.preapproved.contains { $0.actionKind == item.kind && $0.repo == item.repo }
+                let dec = PermissionGate.decide(text: clean.fix.text, denyText: denyText, reply: reply, ceiling: duty.ceiling, preapproved: pre)
+                emit(InboxEvent(.levelled, id: id, at: now, level: dec.level))
+                var answers: [String: Double] = [:]
+                for (k, v) in reply?.answers ?? [:] { if let n = v.noul { answers[k] = n } }
+                decision("level", ["item": id, "level": dec.level.rawValue, "why": dec.reasons, "answers": answers])
+            case let .stopped(why, cost):
+                // A context-size stop is not resumed: the same session would be just as full.
+                ledger(usd: cost, runs: runsNow(), repo: item.repo)
+                emit(InboxEvent(.reported, id: id, at: now, report: item.report, cost: chainCost + cost, note: why))
+            case let .capped(reason, sid, cost, tokens):
+                chainCost += cost
+                ledger(usd: cost, runs: 0, tokens: tokens, repo: item.repo)
+                session = sid
+                let leftNow = duty.budget.dailyUSD - today().usd
+                if leftNow >= 0.05 && continuations < 4 { continuations += 1; decision("continue", ["item": id, "why": reason, "n": continuations]); continue }
+                if leftNow < 0.05 {
+                    ledger(runs: runsNow(), repo: item.repo)
+                    emit(InboxEvent(.reported, id: id, at: now, report: item.report, cost: chainCost,
+                                    note: "Paused at the daily budget (\(hhmm())): Investigate continues where it stopped", resumeSession: sid))
+                    decision("paused-budget", ["item": id])
+                } else {
+                    ledger(runs: runsNow(), repo: item.repo)
+                    emit(InboxEvent(.reported, id: id, at: now, report: item.report, cost: chainCost,
+                                    note: "\(reason); stopped after 4 continuations: Investigate continues where it stopped", resumeSession: sid))
+                    decision("paused-continuations", ["item": id])
+                }
+            }
+            break
         }
         if let it = items.first(where: { $0.id == id }) { channel.deliver(item: it) }
     }
@@ -268,7 +302,8 @@ final class WatcherStore {
         let f = dir.appendingPathComponent("fix.md")
         try? brief.write(to: f, atomically: true, encoding: .utf8)
         let argv = [d.builderBin, "start", "--name", "fix-\(id)", "--cwd", item.repo, "--model", "sonnet",
-                    "--budget", String(format: "%.2f", duty.budget.fixUSD), "--worktree", "--prompt-file", f.path]
+                    "--budget", String(format: "%.2f", duty.budget.fixUSD),
+                    "--max-total", String(format: "%.2f", duty.budget.fixMaxUSD), "--worktree", "--prompt-file", f.path]
         let (code, out) = await d.spawn(argv)
         guard code == 0, let bid = BuilderSpawn.startedID(in: out) else { return .refused("Could not start the fix builder") }
         ledger(fix: duty.budget.fixUSD, repo: item.repo)

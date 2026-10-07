@@ -33,6 +33,8 @@ struct DutyBudget: Codable, Equatable, Sendable {
     var runsPerDay = 8
     var jevCallsPerDay = 300
     var fixUSD = 1.0
+    /// Absolute ceiling for a fix builder across checkpoints (`builder start --max-total`).
+    var fixMaxUSD = 10.0
     var softContext = 60_000
     var hardContext = 90_000
     var maxTurns = 30
@@ -45,6 +47,7 @@ struct DutyBudget: Codable, Equatable, Sendable {
         runsPerDay = (try? c.decodeIfPresent(Int.self, forKey: .runsPerDay)) ?? z.runsPerDay
         jevCallsPerDay = (try? c.decodeIfPresent(Int.self, forKey: .jevCallsPerDay)) ?? z.jevCallsPerDay
         fixUSD = (try? c.decodeIfPresent(Double.self, forKey: .fixUSD)) ?? z.fixUSD
+        fixMaxUSD = (try? c.decodeIfPresent(Double.self, forKey: .fixMaxUSD)) ?? z.fixMaxUSD
         softContext = (try? c.decodeIfPresent(Int.self, forKey: .softContext)) ?? z.softContext
         hardContext = (try? c.decodeIfPresent(Int.self, forKey: .hardContext)) ?? z.hardContext
         maxTurns = (try? c.decodeIfPresent(Int.self, forKey: .maxTurns)) ?? z.maxTurns

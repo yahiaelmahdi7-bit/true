@@ -55,6 +55,8 @@ struct InboxItem: Codable, Equatable, Identifiable, Sendable {
     var lookedFixed: Bool
     var snoozeUntil: Double?
     var canInvestigate: Bool
+    /// A claude session parked at a cap or the daily budget; the next investigation resumes it. Absent in old logs.
+    var resumeSession: String? = nil
 
     static func fingerprint(source: String, kind: String, subject: String) -> String { "\(source)|\(kind)|\(subject)" }
 }
@@ -75,12 +77,14 @@ struct InboxEvent: Codable, Equatable, Sendable {
     var until: Double?          // snoozed
     var builder: String?        // approved
     var note: String?
+    var resumeSession: String?  // reported: the session to continue next time (nil clears it)
 
     init(_ kind: Kind, id: String, at: Double, item: InboxItem? = nil, report: ItemReport? = nil, level: PermissionLevel? = nil,
          cost: Double? = nil, evidence: String? = nil, reason: String? = nil, until: Double? = nil, builder: String? = nil,
-         note: String? = nil) {
+         note: String? = nil, resumeSession: String? = nil) {
         self.kind = kind; self.id = id; self.at = at; self.item = item; self.report = report; self.level = level
         self.cost = cost; self.evidence = evidence; self.reason = reason; self.until = until; self.builder = builder; self.note = note
+        self.resumeSession = resumeSession
     }
 }
 
@@ -101,6 +105,7 @@ enum Inbox {
                     items[i].report = e.report; items[i].cost += e.cost ?? 0
                     if let t = e.report?.title, !t.isEmpty { items[i].title = t }
                     if let n = e.note { items[i].note = n } else { items[i].note = nil }
+                    items[i].resumeSession = e.resumeSession
                 }
             case .levelled:
                 if let i = idx(e.id) { items[i].level = e.level }
