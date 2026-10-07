@@ -125,7 +125,7 @@ final class ScreenshotWatcher {
     }
 
     /// nil when the folder cannot be listed (privacy denied, or gone).
-    nonisolated static func scan(_ folder: URL) -> [Shot]? {
+    nonisolated static func scan(_ folder: URL, limit: Int = ScreenshotWatcher.limit) -> [Shot]? {
         let keys: [URLResourceKey] = [.creationDateKey, .contentModificationDateKey, .isRegularFileKey]
         guard let urls = try? FileManager.default.contentsOfDirectory(
             at: folder, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { return nil }
