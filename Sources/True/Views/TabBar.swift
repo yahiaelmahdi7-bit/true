@@ -19,7 +19,6 @@ struct TabBar: View {
             }
             Spacer(minLength: 0)
             RestartPill(watcher: .shared)
-            ScreenshotTray()
             NeedsYouTray()
         }
         // Numbers start where the terminal's text does, so "1" sits over the prompt's first column.
