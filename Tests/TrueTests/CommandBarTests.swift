@@ -57,8 +57,9 @@ private func ctx(_ f: FocusedPane = shellPane) -> CommandContext {
 
     @Test func questionShape() {
         let q = CommandRouter.questions(text: "hi", context: ctx(), onlyDanger: false)
-        #expect(Set(q.keys).isSuperset(of: ["kind", "project", "target", "action", "destructive", "model", "effort"]))
-        #expect(CommandRouter.questions(text: "hi", context: ctx(), onlyDanger: true).keys.sorted() == ["destructive"])
+        #expect(Set(q.keys).isSuperset(of: ["kind", "project", "target", "action", "model", "effort"] + CommandRouter.dangerQuestions.map(\.id)))
+        #expect(!q.keys.contains("destructive"))
+        #expect(CommandRouter.questions(text: "hi", context: ctx(), onlyDanger: true).keys.sorted() == ["danger_delete", "danger_deploy", "danger_live", "danger_push", "danger_send"])
     }
     @Test func belowFloorKeepsDefaultsAndMarksUncertain() {
         let r = CommandRouter.route(text: "tidy it", reply: reply(["kind": ans("choice", choice: "agent_task", 0.55)]), context: ctx(shellPane))
@@ -88,7 +89,7 @@ private func ctx(_ f: FocusedPane = shellPane) -> CommandContext {
     }
     @Test func ruleKeepsDestructiveFromJev() {
         let rule = RuleMatch(kind: .shellCommand, payload: "supabase db push")
-        let r = CommandRouter.route(text: "!supabase db push", reply: reply(["destructive": ans("noul", 0.9, noul: 0.8)]), context: ctx(), rule: rule)
+        let r = CommandRouter.route(text: "!supabase db push", reply: reply(["danger_push": ans("noul", 0.9, noul: 0.2), "danger_live": ans("noul", 0.9, noul: 0.8)]), context: ctx(), rule: rule)
         #expect(r.kind == .shellCommand && r.viaRule && r.isDestructive && r.text == "supabase db push")
     }
 }
@@ -183,7 +184,7 @@ private func ctx(_ f: FocusedPane = shellPane) -> CommandContext {
     private func body(kind: String = "shell_command", conf: Double = 0.9, destructive: Double = 0.1) -> Data {
         Data("""
         {"model":"jev","answers":{"kind":{"type":"choice","choice":"\(kind)","confidence":\(conf)},
-         "destructive":{"type":"noul","noul":\(destructive)}}}
+         "danger_push":{"type":"noul","noul":\(destructive)}}}
         """.utf8)
     }
     private final class Box { var plans: [Plan] = [] }

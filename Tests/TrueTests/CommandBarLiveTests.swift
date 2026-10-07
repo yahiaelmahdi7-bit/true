@@ -25,8 +25,7 @@ import Foundation
             let t0 = Date()
             let reply = await CommandRouter.ask(text: c.text, context: ctx, rule: rule, jev: JevClient())
             let ms = Int(Date().timeIntervalSince(t0) * 1000)
-            let r = CommandRouter.route(text: c.text, reply: reply, context: ctx, rule: rule,
-                                       isExecutable: BarEnvironmentProvider.onPath)
+            let r = CommandRouter.route(text: c.text, reply: reply, context: ctx, rule: rule)
             let e = c.expect
             let kindOK = e.kind.map { $0 == r.kind.rawValue || (c.ambiguous == true && r.twoChoice) }
             let gotProject = r.project?.name ?? focused.project
@@ -39,7 +38,7 @@ import Foundation
                 + " | project \(e.project ?? "-")→\(gotProject ?? "none") \(score("project", projOK))"
                 + " | target \(e.target ?? "-")→\(r.target.id) \(score("target", targetOK))"
                 + " | action \(e.action ?? "-")→\(r.action.rawValue) \(score("action", actionOK))"
-                + " | destructive \(e.destructive.map(String.init) ?? "-")→\(p(r.destructive)) \(score("destructive", destOK))"
+                + " | destructive \(e.destructive.map(String.init) ?? "-")→\(p(r.destructive))\(r.dangerTop.map { " (\($0))" } ?? "") \(score("destructive", destOK))"
                 + " | model \(r.model?.rawValue ?? "-") effort \(r.effort?.rawValue ?? "-") twoChoice \(r.twoChoice) | \(ms)ms")
         }
         let acc = ["kind", "project", "target", "action", "destructive"].map { "\($0) \(hit[$0] ?? 0)/\(seen[$0] ?? 0)" }.joined(separator: "  ")

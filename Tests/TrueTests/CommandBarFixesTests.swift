@@ -27,10 +27,42 @@ private func kindTarget(_ kind: String, _ target: String?, project: String? = ni
 }
 
 @Suite struct DangerFixTests {
-    @Test func destructiveQuestionIsTheSpecString() {
-        let q = CommandRouter.questions(text: "x", context: ctx(.shell), onlyDanger: true)["destructive"]
-        let want = "Does `text` push commits to a remote, delete or wipe data, force-push, deploy, publish, send messages or write to a live third-party service?"
-        #expect(String(describing: q).contains(want))
+    @Test func fiveDangerQuestionsAreTheSpecStrings() {
+        let q = CommandRouter.questions(text: "x", context: ctx(.shell), onlyDanger: true)
+        let want = [
+            "danger_push": "Does `text` ask for git commits to be pushed to a remote repository?",
+            "danger_delete": "Does `text` ask to delete, wipe, purge or drop existing data, files or records?",
+            "danger_deploy": "Does `text` ask to deploy or publish something to production or a live site? Starting or spawning agents or helpers is not a deploy.",
+            "danger_send": "Does `text` ask for messages or emails to be sent to people? Forbidding or delaying sending is not asking to send.",
+            "danger_live": "Does `text` ask to change data, settings or secrets on a live hosted service, such as a production database or environment variables?",
+        ]
+        #expect(Set(q.keys) == Set(want.keys))
+        for (id, s) in want { #expect(String(describing: q[id]).contains(s), "\(id)") }
+    }
+    @Test func destructiveIsTheMaxOfAnsweredDangers() {
+        let none = CommandRouter.route(text: "x", reply: reply([:]), context: ctx(.shell))
+        #expect(none.destructive == nil && none.dangerTop == nil)
+        let r = CommandRouter.route(text: "purge them", reply: reply([
+            "danger_push": ans("noul", noul: 0.1), "danger_delete": ans("noul", noul: 0.9), "danger_send": ans("noul", noul: 0.3)]), context: ctx(.shell))
+        #expect(r.destructive == 0.9 && r.dangerTop == "danger_delete" && r.isDestructive)
+    }
+    @Test func stateCarriesFocusedMeaning() {
+        func m(_ k: PaneKind) -> String? { (CommandRouter.state(text: "x", context: ctx(k))["focused"] as? [String: Any])?["meaning"] as? String }
+        #expect(m(.claude) == "a Claude Code agent working in the project's git repository")
+        #expect(m(.seat) == "a Claude Code agent working in the project's git repository (a named crew seat)")
+        #expect(m(.shell) == "a terminal shell in the project folder")
+        #expect(m(.empty) == "no pane is focused")
+    }
+    @Test func shellLeftOutOfKindOptionsUnlessRunnable() {
+        let exe: (String) -> Bool = { $0 == "ls" }
+        func offers(_ t: String) -> Bool { CommandRouter.offersShell(rawText: t, payload: t, isExecutable: exe) }
+        #expect(offers("ls -la") && offers("cd ..") && offers("./x") && !offers("yes do that"))
+        #expect(CommandRouter.offersShell(rawText: "!frobnicate", payload: "frobnicate", isExecutable: exe))
+        #expect(CommandRouter.offersShell(rawText: "$ frobnicate", payload: "$ frobnicate", isExecutable: exe))
+        let with = CommandRouter.questions(text: "ls", context: ctx(.shell), onlyDanger: false, offerShell: true)
+        let without = CommandRouter.questions(text: "yes", context: ctx(.shell), onlyDanger: false, offerShell: false)
+        #expect(String(describing: with["kind"]).contains("shell_command"))
+        #expect(!String(describing: without["kind"]).contains("shell_command") && String(describing: without["kind"]).contains("agent_task"))
     }
     @Test func plainGitPushIsDangerous() {
         for t in ["git push", "git push origin main", "git  push -u origin x", "cd x && git push"] { #expect(CommandRules.isDangerous(t), "\(t)") }
@@ -117,7 +149,7 @@ private func kindTarget(_ kind: String, _ target: String?, project: String? = ni
         #expect(CommandExecutor.plan(route: r, background: false, context: ctx(.claude)).door == .seat("prism-qa"))
     }
     @Test func shellAndActionKindsAreLeftAlone() {
-        let r = CommandRouter.route(text: "ls true-cto", reply: kindTarget("shell_command", nil), context: ctx(.shell), isExecutable: { $0 == "ls" })
+        let r = CommandRouter.route(text: "ls true-cto", reply: kindTarget("shell_command", nil), context: ctx(.shell))
         #expect(r.kind == .shellCommand && r.target == .newClaudePane || r.target == .focusedPane)
         #expect(r.seat == nil)
     }
@@ -157,16 +189,19 @@ private func kindTarget(_ kind: String, _ target: String?, project: String? = ni
 @Suite struct ShellGateTests {
     private let exe: (String) -> Bool = { ["ls", "git", "npm"].contains($0) }
     private func route(_ text: String, rule: RuleMatch? = nil, focused: PaneKind = .shell) -> Route {
-        CommandRouter.route(text: text, reply: kindTarget("shell_command", nil), context: ctx(focused), rule: rule, isExecutable: exe)
+        CommandRouter.route(text: text, reply: kindTarget("shell_command", nil), context: ctx(focused), rule: rule)
     }
-    @Test func sentenceIsNotShell() {
-        let r = route("commit and push")
-        #expect(r.twoChoice && r.uncertain.contains(.kind) && r.kind == .shellCommand)   // shell-pane default, but nothing auto-sent
-        let c = route("commit and push", focused: .claude)
-        #expect(c.twoChoice && c.kind == .agentTask)
+    @Test func sentenceLeavesShellOutOfTheOptions() {
+        #expect(!CommandRouter.offersShell(rawText: "yes do that", payload: "yes do that", isExecutable: exe))
+        #expect(!CommandRouter.offersShell(rawText: "commit and push", payload: "commit and push", isExecutable: exe))
+    }
+    @Test func genuinelyLowKindConfidenceIsStillTwoChoice() {
+        let r = CommandRouter.route(text: "yes do that", reply: kindTarget("agent_task", nil).withKindConfidence(0.4), context: ctx(.claude))
+        #expect(r.twoChoice && r.uncertain.contains(.kind) && r.kind == .agentTask)
     }
     @Test func executableBuiltinAndPathPass() {
         for t in ["ls -la", "git status", "cd ..", "echo hi", "./run.sh", "~/bin/x", "/usr/bin/env"] {
+            #expect(CommandRouter.offersShell(rawText: t, payload: t, isExecutable: exe), "\(t)")
             let r = route(t)
             #expect(!r.twoChoice && r.kind == .shellCommand, "\(t)")
         }
@@ -177,12 +212,8 @@ private func kindTarget(_ kind: String, _ target: String?, project: String? = ni
         #expect(!r.twoChoice && r.kind == .shellCommand && r.viaRule)
     }
     @Test func gateOnlyJudgesTheShellKind() {
-        let r = CommandRouter.route(text: "commit and push", reply: kindTarget("agent_task", nil), context: ctx(.claude), isExecutable: exe)
+        let r = CommandRouter.route(text: "commit and push", reply: kindTarget("agent_task", nil), context: ctx(.claude))
         #expect(!r.twoChoice && r.kind == .agentTask)
-    }
-    @Test func twoChoiceIsNeverAutoRun() async {
-        // the store refuses Return while twoChoice; the route itself must carry the flag
-        #expect(route("please tidy up").twoChoice)
     }
 }
 
@@ -195,5 +226,13 @@ private func kindTarget(_ kind: String, _ target: String?, project: String? = ni
     @Test func loadsFromAGivenFile() throws {
         let fx = try CommandBarFixture.load(from: CommandBarFixture.defaultURL)
         #expect(fx.cases.count == 39)
+    }
+}
+
+private extension JevReply {
+    func withKindConfidence(_ c: Double) -> JevReply {
+        var a = answers
+        if let k = a["kind"] { a["kind"] = JevAnswer(type: k.type, choice: k.choice, confidence: c, probabilities: k.probabilities, noul: k.noul, score: k.score) }
+        return JevReply(answers: a)
     }
 }

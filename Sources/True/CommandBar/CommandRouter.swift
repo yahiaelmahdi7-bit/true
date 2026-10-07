@@ -52,7 +52,8 @@ struct Route: Equatable, Sendable {
     var target: CommandTarget
     var action: CommandAction
     var seat: String?                // wake_seat / sleep_seat subject
-    var destructive: Double?         // nil = Jev did not answer
+    var destructive: Double?         // max of the answered danger nouls; nil = Jev answered none
+    var dangerTop: String?           // id of the highest danger noul (danger_push, ...)
     var model: AgentModel?
     var effort: AgentEffort?
     var uncertain: Set<RouteSlot> = []
@@ -69,6 +70,14 @@ enum CommandRouter {
     static let floor = 0.6
     static let kindFloor = 0.5
     static let destructiveFloor = 0.5
+    /// The five narrow danger questions, verbatim from SPEC Run 14c; `destructive` is the max of their answers.
+    static let dangerQuestions: [(id: String, text: String)] = [
+        ("danger_push", "Does `text` ask for git commits to be pushed to a remote repository?"),
+        ("danger_delete", "Does `text` ask to delete, wipe, purge or drop existing data, files or records?"),
+        ("danger_deploy", "Does `text` ask to deploy or publish something to production or a live site? Starting or spawning agents or helpers is not a deploy."),
+        ("danger_send", "Does `text` ask for messages or emails to be sent to people? Forbidding or delaying sending is not asking to send."),
+        ("danger_live", "Does `text` ask to change data, settings or secrets on a live hosted service, such as a production database or environment variables?"),
+    ]
     static let timeout: TimeInterval = 3
     static let debounce: Duration = .milliseconds(300)
 
@@ -82,24 +91,43 @@ enum CommandRouter {
         if projects.isEmpty { projects = [] }
         return [
             "text": text,
-            "focused": ["kind": c.focused.kind.rawValue, "project": opt(c.focused.project), "seat": opt(c.focused.seat)],
+            "focused": ["kind": c.focused.kind.rawValue, "project": opt(c.focused.project), "seat": opt(c.focused.seat),
+                        "meaning": meaning(c.focused.kind)],
             "projects": projects,
             "seats": c.seats.map { ["name": $0.name, "project": $0.project, "awake": $0.awake] },
         ]
     }
 
-    static func questions(text: String, context c: CommandContext, onlyDanger: Bool) -> [String: JevQuestion] {
-        let destructive = JevQuestion.noul(
-            "Does `text` push commits to a remote, delete or wipe data, force-push, deploy, publish, send messages or write to a live third-party service?")
-        if onlyDanger { return ["destructive": destructive] }
-        var q: [String: JevQuestion] = ["destructive": destructive]
-        q["kind"] = .choice("What does `text` ask for, given the `focused` pane?", [
-            (id: "shell_command", what: "a command for the terminal shell, run as typed"),
+    /// What the focused pane is, in one fixed sentence the model can read.
+    static func meaning(_ k: PaneKind) -> String {
+        switch k {
+        case .claude: "a Claude Code agent working in the project's git repository"
+        case .seat: "a Claude Code agent working in the project's git repository (a named crew seat)"
+        case .shell: "a terminal shell in the project folder"
+        case .empty: "no pane is focused"
+        }
+    }
+
+    /// `shell_command` is offered only for a `!`/`$` line or when the first word can run.
+    static func offersShell(rawText: String, payload: String, isExecutable: (String) -> Bool) -> Bool {
+        let t = rawText.trimmingCharacters(in: .whitespaces)
+        if t.hasPrefix("!") || t.hasPrefix("$") { return true }
+        return CommandRules.looksRunnable(payload, isExecutable: isExecutable)
+    }
+
+    static func questions(text: String, context c: CommandContext, onlyDanger: Bool, offerShell: Bool = true) -> [String: JevQuestion] {
+        var q: [String: JevQuestion] = [:]
+        for d in dangerQuestions { q[d.id] = .noul(d.text) }
+        if onlyDanger { return q }
+        var kinds: [(id: String, what: String)] = []
+        if offerShell { kinds.append((id: "shell_command", what: "a command for the terminal shell, run as typed")) }
+        kinds += [
             (id: "agent_task", what: "an instruction for a Claude agent to do work"),
             (id: "question_for_claude", what: "a question for Claude to answer, changing nothing"),
             (id: "true_action", what: "a verb for the True app itself: open a project, new tab, split, show the hub"),
             (id: "none", what: "none of these"),
-        ])
+        ]
+        q["kind"] = .choice("What does `text` ask for, given the `focused` pane?", kinds)
         var proj: [(id: String, what: String)] = c.projects.enumerated().map { (id: projectID($0.offset), what: $0.element.name) }
         if c.focused.project != nil { proj.append((id: "current", what: "the project of the `focused` pane")) }
         proj.append((id: "none", what: "no particular project"))
@@ -137,8 +165,7 @@ enum CommandRouter {
         (f.kind == .claude || f.kind == .seat) ? .focusedPane : .newClaudePane
     }
 
-    static func route(text: String, reply: JevReply?, context c: CommandContext, rule: RuleMatch? = nil,
-                      isExecutable: (String) -> Bool = { _ in false }) -> Route {
+    static func route(text: String, reply: JevReply?, context c: CommandContext, rule: RuleMatch? = nil) -> Route {
         let payload = rule?.payload ?? text
         var r = Route(text: payload, kind: defaultKind(c.focused), kindConfidence: nil, project: nil,
                       target: .focusedPane, action: .none, seat: nil, destructive: nil, model: nil, effort: nil)
@@ -149,12 +176,12 @@ enum CommandRouter {
             return a
         }
 
-        var jevPickedKind = false
         if let reply {
-            r.destructive = reply.answers["destructive"]?.noul
+            let dangers = dangerQuestions.compactMap { d in reply.answers[d.id]?.noul.map { (d.id, $0) } }
+            if let top = dangers.max(by: { $0.1 < $1.1 }) { r.destructive = top.1; r.dangerTop = top.0 }
             if let a = reply.answers["kind"], let conf = a.confidence {
                 r.kindConfidence = conf
-                if let k = a.choice.flatMap(CommandKind.init(rawValue:)), k != .none, conf >= floor { r.kind = k; jevPickedKind = true }
+                if let k = a.choice.flatMap(CommandKind.init(rawValue:)), k != .none, conf >= floor { r.kind = k }
                 else {
                     r.uncertain.insert(.kind)
                     if conf < kindFloor { r.twoChoice = true }
@@ -184,13 +211,6 @@ enum CommandRouter {
             }
             if let m = sure("model")?.choice.flatMap(AgentModel.init(rawValue:)) { r.model = m }
             if let s = sure("effort")?.score { r.effort = JevFill.effort(fromScore: s) }
-        }
-        // A sentence must never be typed into a shell and sent: a shell kind needs a first word that can run.
-        if jevPickedKind, r.kind == .shellCommand,
-           !CommandRules.looksRunnable(payload, isExecutable: isExecutable) {
-            r.kind = defaultKind(c.focused)
-            r.uncertain.insert(.kind)
-            r.twoChoice = true
         }
         // open_project takes the matcher's top hit for the text minus the verb words; Jev's slot is the fallback.
         if r.action == .openProject {
@@ -290,9 +310,12 @@ enum CommandRouter {
 
     // MARK: The wire
 
-    static func ask(text: String, context c: CommandContext, rule: RuleMatch?, jev: JevClient) async -> JevReply? {
-        await jev.ask(state: state(text: rule?.payload ?? text, context: c),
-                      questions: questions(text: rule?.payload ?? text, context: c, onlyDanger: rule?.onlyDanger ?? false),
+    static func ask(text: String, context c: CommandContext, rule: RuleMatch?, jev: JevClient,
+                    isExecutable: (String) -> Bool = { _ in false }) async -> JevReply? {
+        let payload = rule?.payload ?? text
+        let shell = offersShell(rawText: text, payload: payload, isExecutable: isExecutable)
+        return await jev.ask(state: state(text: payload, context: c),
+                      questions: questions(text: payload, context: c, onlyDanger: rule?.onlyDanger ?? false, offerShell: shell),
                       timeout: timeout)
     }
 
