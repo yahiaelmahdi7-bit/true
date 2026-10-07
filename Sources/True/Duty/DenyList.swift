@@ -4,25 +4,25 @@ import Foundation
 /// rule, pre-approval and Jev answer: the item is `handOff`. One pure entry point (`hits`) used by investigate AND approve.
 /// Text is normalised first (backslash-newline joined, invisible characters stripped, NFKC) and matched case-insensitively.
 enum DenyList {
-    private static let tools = "vercel|wrangler|stripe|supabase"
+    private static let tools = "vercel|wrangler|stripe|supabase|netlify|firebase"
     private static let toolVerbs = "deploy|publish|login|link|db|secrets|functions|projects|env|dev|pull|push|promote|rollback|migration|branches|storage|charge|customers|payments|webhooks|trigger|listen|--\\w+|-\\w"
     private static let pm = "npm|pnpm|yarn|bun"
 
     static let rules: [(name: String, regex: String)] = [
-        ("git push", #"\bgit\s+(\S+\s+)*push\b"#),
-        ("gh write", #"\bgh\s+(pr\s+(create|merge|close|edit|comment)|release\b|repo\s+(delete|create|edit|rename|archive)|issue\s+(comment|create|close|edit|delete)|api\b[^\n]*(-X|--method|--input|\s-f\b|\s-F\b|--field))"#),
-        ("git destructive", #"\bgit\s+(\S+\s+)*(reset\s+(\S+\s+)*--hard|clean\s+(\S+\s+)*(-\w*f|--force)|branch\s+(\S+\s+)*-D\b|checkout\s+(\S+\s+)*--\s+\.)"#),
-        ("rm recursive", #"\brm\s+(\S+\s+)*(-\w*[rR]\w*|--recursive)\b"#),
-        ("sql destructive", #"\bDROP\s+(TABLE|DATABASE|SCHEMA|INDEX)\b|\bTRUNCATE\b|\bDELETE\s+FROM\b"#),
+        ("git push", #"\bgit\b[^\n;&|]*?\bpush\b"#),
+        ("gh write", #"\bgh\s+(pr\s+(create|merge|close|edit|comment|review)|release\b|workflow\s+run|secret\b|repo\s+(delete|create|edit|rename|archive)|issue\s+(comment|create|close|edit|delete)|api\b[^\n]*(-X|--method|--input|\s-f\b|\s-F\b|--field))"#),
+        ("git destructive", #"\bgit\b[^\n;&|]*?(\breset\b[^\n;&|]*?--hard|\bclean\b[^\n;&|]*?(-\w*f|--force)|\bbranch\b[^\n;&|]*?-D\b|\bcheckout\b[^\n;&|]*?--\s+\.|\b(checkout|restore)\s+\.(\s|$))"#),
+        ("rm recursive", #"\brm\s(?:[^\n;&|]*?\s)?(-\w*[rR]\w*|--recursive)\b"#),
+        ("sql destructive", #"\bDROP\s+(TABLE|DATABASE|SCHEMA|INDEX|VIEW)\b|\bDROP\s+COLUMN\b|\bTRUNCATE\b|\bDELETE\s+FROM\b"#),
         ("hosting cli", "(^|[;&|\\n]\\s*|\\bnpx\\s+|\\brun\\s+)(\(tools))\\b|\\b(\(tools))\\s+(\(toolVerbs))\\b|api\\.stripe\\.com"),
-        ("package publish", "\\b(\(pm))\\s+(\\S+\\s+)*publish\\b"),
+        ("package publish", "\\b(\(pm))\\b[^\n;&|]*?\\bpublish\\b|\\bcargo\\s+publish\\b|\\btwine\\s+upload\\b|\\bfly(ctl)?\\s+(deploy|launch|secrets|apps)\\b"),
         ("messaging", #"\bsendmail\b|\bmailx?\s+(-|\S+@)|api\.resend\.com|\bresend\s+api\b|api\.telegram\.org|hooks\.slack\.com|\btelegram\b|\bslack\s+(message|webhook|post)\b"#),
-        ("keychain", #"\bsecurity\s+(\S+\s+)*\S*(password|keychain)\b"#),
+        ("keychain", #"\bsecurity\b[^\n;&|]*?(password|keychain)\b"#),
         ("secret files", #"(?<![\w])\.env(\.[\w-]+)?(?![\w-])|\.(key|pem)(?!\w)|(?<![\w])id_(rsa|ed25519|ecdsa|dsa)\b|\.ssh/|\.aws/credentials|(?<![\w])credentials(\.\w+)?(?!\w)"#),
         ("protected config", #"\.claude/settings(\.local)?\.json|(~|\$HOME|/Users/\w+)/\.axon\b|(^|[\s'"])\.axon/"#),
         ("kill", #"\b(killall|pkill|kill)\b|quit\s+app\s+"True"|osascript[^\n]*quit"#),
         ("builder kill", #"\bbuilder\s+kill\b"#),
-        ("pipe to shell", #"\b(curl|wget)\b[^\n|]*\|\s*(sudo\s+)?(ba|z|da)?sh\b"#),
+        ("pipe to shell", #"\b(curl|wget)\b[^\n]*\|\s*(?:(?:sudo|env)\s+)*(?:[\w./-]*/)?(?:ba|z|da)?sh\b|\b(?:ba|z|da)?sh\s+(?:-\w+\s+)*(?:<\(|\$\()\s*(?:curl|wget)|\b(?:curl|wget)\b[^\n]*\|\s*(?:sudo\s+)?(?:python3?|perl|ruby|node)\b"#),
     ]
 
     /// Needs two patterns in the same text (settings.json after `cd ~/.claude`).
@@ -56,7 +56,8 @@ enum DenyList {
     }
 
     private static func matches(_ text: String, _ re: String, caseInsensitive: Bool = true) -> Bool {
-        text.range(of: re, options: caseInsensitive ? [.regularExpression, .caseInsensitive] : .regularExpression) != nil
+        guard let rx = try? NSRegularExpression(pattern: re, options: caseInsensitive ? [.caseInsensitive] : []) else { return true }
+        return rx.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil
     }
 
     private static func all(_ text: String, _ re: String, caseInsensitive: Bool = true) -> [String] {
@@ -96,16 +97,24 @@ enum DenyList {
         return !hosts.isEmpty && hosts.allSatisfy { local.contains($0) }
     }
 
+    /// Quotes and backslashes removed, so `git 'push'`, `git pu""sh`, `rm -r"f"` read as plain commands.
+    static func dequoted(_ s: String) -> String { s.filter { !"'\"\\".contains($0) } }
+
     /// Names of every rule the text trips (empty = clear). THE entry point: investigate and approve both call this.
+    /// Fails closed: oversize text is a hit; a regex that cannot run is a hit. Both the raw and the dequoted view are checked.
     static func hits(_ raw: String) -> [String] {
+        if raw.utf8.count > 65_536 { return ["oversize"] }
         let text = normalize(raw)
         var out: [String] = []
-        for r in rules where matches(text, r.regex) { out.append(r.name) }
-        for c in combos where matches(text, c.a) && matches(text, c.b) { out.append(c.name) }
-        for seg in text.split(whereSeparator: { ";\n|&".contains($0) }) {
-            let s = String(seg)
-            guard matches(s, #"\b(curl|wget)\b"#) else { continue }
-            if curlWrites(s) { out.append("curl write"); break }
+        for view in [text, dequoted(text)] {
+            for r in rules where matches(view, r.regex) { out.append(r.name) }
+            for c in combos where matches(view, c.a) && matches(view, c.b) { out.append(c.name) }
+            // Whole line, not split on ; | & (those can sit inside quotes): any curl/wget line that writes remotely.
+            for line in view.split(separator: "\n") {
+                let s = String(line)
+                guard matches(s, #"\b(curl|wget)\b"#) else { continue }
+                if curlWrites(s) { out.append("curl write"); break }
+            }
         }
         return Array(Set(out)).sorted()
     }

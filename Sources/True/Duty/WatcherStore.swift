@@ -38,6 +38,7 @@ final class WatcherStore {
 
     private(set) var items: [InboxItem] = []
     private(set) var running: Set<String> = []
+    private var approving: Set<String> = []
     private(set) var burnHookMissing = false
     var duty: Duty = Duty.watcherAgent().duty ?? Duty(job: Duty.watcherJob, triggers: [])
     let channel: InboxChannel
@@ -192,7 +193,7 @@ final class WatcherStore {
 
     /// Everything in a report that could end up in an agent's brief, one string for the single deny-list entry point.
     static func denyText(_ r: ItemReport) -> String {
-        ([r.title, r.what, r.cause] + r.evidence.flatMap { [$0.path, $0.quote] } + r.fix.commands + r.fix.steps + r.fix.files
+        ([r.title, r.what, r.cause] + r.evidence.flatMap { [$0.path, $0.lines, $0.quote] } + r.fix.commands + r.fix.steps + r.fix.files
             + [r.fix.summary, r.fix.text]).joined(separator: "\n")
     }
 
@@ -253,6 +254,9 @@ final class WatcherStore {
     func approve(_ id: String) async -> ApproveResult {
         guard let item = items.first(where: { $0.id == id }), let rep = item.report else { return .refused("Nothing to approve yet") }
         guard item.level == .askFirst else { return .handOff }
+        guard item.state == .open else { return .refused("Already started") }
+        guard approving.insert(id).inserted else { return .refused("Already starting") }
+        defer { approving.remove(id) }
         // S1: the deny-list reads the EXACT brief that is written to fix.md (normalised), plus every report field.
         let brief = DenyList.normalize(rep.fix.text + "\n\nEvidence:\n"
             + rep.evidence.map { "\($0.path) \($0.lines): \($0.quote)" }.joined(separator: "\n")
