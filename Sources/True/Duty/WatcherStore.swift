@@ -293,7 +293,7 @@ final class WatcherStore {
     func checkStuck() {
         guard enabled else { return }
         let builders = HubStore.shared.builders
-        Task { @MainActor in await self.scan(builders: builders); await self.checkDone(builders: builders); self.digestIfDue() }
+        Task { @MainActor in await self.scan(builders: builders); await self.checkDone(builders: builders); await self.gitSweep(builders); self.digestIfDue() }
     }
 
     func scan(builders: [BuilderRecord]) async {
@@ -301,6 +301,14 @@ final class WatcherStore {
         let sigs = BuilderSignals.scan(builders, now: now, handled: handled, resultText: { b in
             b.dir.flatMap { try? String(contentsOfFile: $0 + "/result.md", encoding: .utf8) } })
         for s in sigs { await handle(s) }
+    }
+
+    /// Unpushed-work check for the repos of known builders; at most hourly (events only, no timer).
+    private var lastGitSweep: Date = .distantPast
+    func gitSweep(_ builders: [BuilderRecord]) async {
+        guard d.now().timeIntervalSince(lastGitSweep) >= 3600 else { return }
+        lastGitSweep = d.now()
+        for repo in Set(builders.map(\.originCwd).filter { !$0.isEmpty }) { await scanGit(repo: repo, builders: builders) }
     }
 
     func scanGit(repo: String, builders: [BuilderRecord]) async {

@@ -24,6 +24,9 @@ Swift, swift-tools-version 6.0, macOS 26.0 minimum, SwiftTerm ≥ 1.2.0 (only de
 ## Constraints & invariants
 Idle ≈ 0% CPU; no Axon coupling; layout always computed from live window size; empty session id never resumed; Jev failure never breaks a path. [source: SPEC.md Hard rules, Run 1 §4, §6, Run 6]
 
+## Watcher (Run 15)
+A Duty (event-driven standing job) run by the `watcher` agent role, home `~/.true/agents/watcher/`. Code: `Sources/True/Duty/*` (Inbox + pure `Inbox.fold`, signals for builders/unpushed/abandoned, InjectionScreen, DenyList, PermissionGate, Investigation, `WatcherStore` pipeline), `Agents/DangerQuestions.swift` (shared with the Command bar), `Views/WatcherViews.swift` (Hub card + item sheet). Jev nouls gate wake/dedupe/done/permission; the deny-list in code beats every answer. Investigations are read-only `claude -p`; Approve on askFirst starts a worktree builder. No timers: runs on WorkAwake's tick. CLI: `truectl inbox`. [source: SPEC.md Run 15]
+
 ## Known debt
 - `-disable-dynamic-actor-isolation` workaround for a macOS 26 runtime trap (swift#88993/#89214); drop when fixed. [source: Package.swift]
 - HubPanel and real `systemRunner` builder launch untested end to end. [source: SPEC.md Run 7 notes]

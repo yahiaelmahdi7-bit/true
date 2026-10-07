@@ -19,3 +19,5 @@ Owner: knowledge-keeper · Last verified: 2026-09-30
 | Command bar | ⌘K line that routes one typed sentence to a shell, a Claude pane, a seat or a True action (SPEC Run 14) | command-bar |
 | Route | What the Command bar decided for a line: kind, project, target, destructive flag; Jev picks among code-built candidates, code owns the floors | command-bar |
 | Verdict | The Overseer's one-word read of a turn: verified, unverified, partial, asksToContinue, asksYou, blocked | status |
+| Watcher | Standing agent (eye avatar) that turns builder/git/Overseer signals into Inbox items you approve, reject or hand off (SPEC Run 15) | architecture |
+| Inbox | Append-only event log of Watcher items; state is `Inbox.fold` over it | architecture |

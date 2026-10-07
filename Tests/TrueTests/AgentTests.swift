@@ -401,6 +401,6 @@ private func tempDir() -> URL {
 
     @Test func symbolListIsCurated() {
         #expect(BuilderDraft.symbols.count == 25 && Set(BuilderDraft.symbols).count == 25)
-        #expect(Array(BuilderDraft.symbols.prefix(3)) == AgentRole.allCases.map(\.defaultSymbol))
+        #expect(Array(BuilderDraft.symbols.prefix(3)) == AgentRole.allCases.filter { $0 != .watcher }.map(\.defaultSymbol))
     }
 }
