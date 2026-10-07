@@ -36,6 +36,10 @@ enum BuilderSignals {
                 guard !b.acked else { continue }
                 out.append(make(b.state.rawValue, true, "Builder \(b.name) \(b.state == .died ? "died" : "failed")",
                                 result.isEmpty ? "The builder \(b.state.rawValue) and left no result.md." : result))
+            case .paused:
+                guard !b.acked else { continue }
+                out.append(make("paused", true, "Builder \(b.name) paused: needs a go-ahead",
+                                result.isEmpty ? "The builder paused and left no result.md." : result))
             case .done:
                 guard !b.acked, !result.isEmpty else { continue }
                 out.append(make("doneUnchecked", false, "Builder \(b.name) finished: check its gates", result))

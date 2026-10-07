@@ -34,7 +34,7 @@ enum Investigation {
 
     /// Exactly the spec's argv. `maxBudgetUSD` is already min(perRun, daily left).
     /// `--max-turns` is not in `claude --help` but is accepted: this exact argv was run live on 2026-10-07 (success, $0.03).
-    static func argv(paths: Paths, maxBudgetUSD: Double, maxTurns: Int, addDir: String?) -> [String] {
+    static func argv(paths: Paths, maxBudgetUSD: Double, maxTurns: Int, addDir: String?, resume: String? = nil) -> [String] {
         var a = ["claude", "-p", "--model", "sonnet", "--effort", "medium", "--output-format", "json", "--restricted",
                  "--tools", "Read,Grep,Glob", "--strict-mcp-config", "--mcp-config", paths.mcp.path,
                  "--permission-mode", "dontAsk", "--permission-prompts", "none",
@@ -43,6 +43,7 @@ enum Investigation {
                  "--max-turns", String(maxTurns), "--settings", paths.settings.path,
                  "--append-system-prompt-file", paths.roleCard.path]
         if let addDir, !addDir.isEmpty { a += ["--add-dir", addDir] }
+        if let resume, !resume.isEmpty { a += ["--resume", resume] }
         return a
     }
 
@@ -95,6 +96,9 @@ enum Investigation {
         put(roleCard(duty: duty, memory: memory), paths.roleCard)
     }
 
+    /// Sent on a resumed session: the limit was a checkpoint, the work is not finished.
+    static let continuePrompt = "Checkpoint, not a stop: you hit a limit before returning the report. Continue the investigation from where you stopped and return the report in the required schema."
+
     /// The prompt on stdin: the item facts inside an <untrusted> block, never the other way round.
     static func prompt(signal: WatcherSignal, evidence: String, gitFacts: String) -> String {
         let facts = safe(signal.facts.sorted { $0.key < $1.key }.map { "- \($0.key): \($0.value)" }.joined(separator: "\n"))
@@ -121,9 +125,11 @@ enum Investigation {
     enum Outcome: Equatable, Sendable {
         case report(ItemReport, cost: Double, contextTokens: Int)
         case stopped(String, cost: Double)
+        /// A turn or money cap with the work unfinished and a session to continue: a checkpoint, not a stop.
+        case capped(reason: String, sessionID: String, cost: Double, contextTokens: Int)
     }
 
-    /// Parses `claude -p --output-format json`. No parsable report → "Stopped at its size limit (N k)".
+    /// Parses `claude -p --output-format json`. No parsable report → the cap's own reason when known (and resumable), else "Stopped at its size limit (N k)".
     static func parse(status: Int32, output: String) -> Outcome {
         let obj = (try? JSONSerialization.jsonObject(with: Data(output.utf8))) as? [String: Any]
         let cost = (obj?["total_cost_usd"] as? Double) ?? 0
@@ -137,6 +143,13 @@ enum Investigation {
         if let reportObj, let data = try? JSONSerialization.data(withJSONObject: reportObj),
            let rep = try? JSONDecoder().decode(ItemReport.self, from: data) {
             return .report(rep, cost: cost, contextTokens: tokens)
+        }
+        let reason = ["error_max_turns": "Hit its turn limit", "error_max_budget_usd": "Hit its money limit"][(obj?["subtype"] as? String) ?? ""]
+        if let reason {
+            if let sid = obj?["session_id"] as? String, !sid.isEmpty {
+                return .capped(reason: reason, sessionID: sid, cost: cost, contextTokens: tokens)
+            }
+            return .stopped("\(reason) (\(tokens / 1000)k)", cost: cost)
         }
         return .stopped("Stopped at its size limit (\(tokens / 1000)k)", cost: cost)
     }
