@@ -9,6 +9,7 @@ enum ControlRequest: Equatable, Sendable {
     case status
     case summon(agent: String, message: String, from: String?)
     case spawn(SpawnRequest)
+    case inbox
 
     /// Anything malformed returns nil — the socket is a doorbell, never a crash surface.
     static func parse(_ line: Data) -> ControlRequest? {
@@ -21,6 +22,8 @@ enum ControlRequest: Equatable, Sendable {
         case "summon":
             guard let agent = w.agent, let message = w.message else { return nil }
             return .summon(agent: agent, message: message, from: w.from)
+        case "inbox":
+            return .inbox
         case "spawn":
             guard let name = w.name, let promptFile = w.promptFile else { return nil }
             return .spawn(SpawnRequest(name: name, promptFile: promptFile, repo: w.repo, worktree: w.worktree ?? false,
@@ -41,6 +44,11 @@ struct ControlResponse: Encodable, Equatable, Sendable {
     var agents: [Row]?
     /// The Hub snapshot (project → sessions) on `status`; every session on this Mac, not just seats.
     var hub: [HubRow]?
+    /// The Watcher's open items on `inbox`.
+    var inbox: [InboxRow]?
+    struct InboxRow: Encodable, Equatable, Sendable {
+        let id: String, title: String, repo: String, level: String, state: String, note: String
+    }
     /// The builder id on `spawn`.
     var builderID: String?
 
@@ -109,6 +117,14 @@ enum AgentControl {
                                                    seatVerdict: { OverseerStore.shared.verdict(forSession: $0.lastSessionID)?.kind.rawValue },
                                                    peerVerdict: { OverseerStore.shared.verdict(forSession: $0.sessionID)?.kind.rawValue })))
             }
+        case .inbox:
+            Task { @MainActor in
+                let rows = WatcherStore.shared.needsYou.map {
+                    ControlResponse.InboxRow(id: $0.id, title: $0.title, repo: $0.repo, level: $0.level?.rawValue ?? "",
+                                             state: $0.state.rawValue, note: $0.note ?? "")
+                }
+                reply(ControlResponse(ok: true, inbox: rows))
+            }
         case .spawn(let request):
             let caller = request.from.flatMap { registry.agent(named: $0) }
             // A helper works inside its lead's brief; only a lead or global starts background work.
@@ -152,6 +168,7 @@ enum AgentControl {
         #!/usr/bin/env python3
         # truectl — the command-line door to the running True app (control socket).
         #   truectl status                        one line per agent: name  role  status  awake|asleep  repo
+        #   truectl inbox [--json]                the Watcher's open items: id  level  repo  title
         #   truectl status --json                 the raw reply (agents + the whole Hub: project → sessions)
         #   truectl summon <agent> <message...>   wake <agent> if asleep and deliver the brief ("-" = read stdin)
         #   truectl spawn --name N --prompt-file F [--repo R] [--worktree] [--model M]
@@ -162,7 +179,7 @@ enum AgentControl {
 
         DEFAULT_SOCK = __SOCKET__
         USAGE = ("usage: truectl status [--json] | truectl summon <agent> <message words... | -> | "
-                 "truectl spawn --name N --prompt-file F [--repo R] [--worktree] [--model M]")
+                 "truectl inbox [--json] | truectl spawn --name N --prompt-file F [--repo R] [--worktree] [--model M]")
 
         def die(msg, code=1):
             sys.stderr.write(msg + "\n")
@@ -209,6 +226,15 @@ enum AgentControl {
                 for h in r.get("hub") or []:
                     if h["kind"] != "seat":
                         print("hub  %s  %s  %s  %s" % (h["project"], h["kind"], h["name"], h["status"]))
+            elif argv[:1] == ["inbox"] and argv[1:] in ([], ["--json"]):
+                r = call({"op": "inbox"})
+                if not r.get("ok"):
+                    die(r.get("error") or "failed")
+                if argv[1:]:
+                    print(json.dumps(r, sort_keys=True))
+                    return
+                for i in r.get("inbox") or []:
+                    print("%s  %s  %s  %s" % (i["id"], i["level"] or "-", i["repo"], i["title"]))
             elif argv[:1] == ["spawn"]:
                 opts = {"name": None, "prompt-file": None, "repo": None, "model": None}
                 worktree = False
