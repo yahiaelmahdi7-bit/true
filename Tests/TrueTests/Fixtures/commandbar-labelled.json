@@ -5,7 +5,8 @@
   "Candidates are fixed (projects, seats below) so results do not depend on what is on disk; the suite still passes them through ProjectMatcher.rank like the app.",
   "Scoring: compare each non-null expect slot. project 'current' resolves to focused.project before comparing; 'none' = no project. target null = not scored. action 'none' = no True verb. destructive null = not scored.",
   "ambiguous=true: kind passes if it matches OR the bar shows the two-choice state (kind confidence < 0.5).",
-  "model/effort are not labelled (subjective): print them only."
+  "model/effort are not labelled (subjective): print them only.",
+  "Label changes are made only by the orchestrator after a decision by Yahia, each noted in the case's note: c29 (2026-10-07, seat policy)."
  ],
  "projects": [
   {
@@ -614,12 +615,12 @@
    "expect": {
     "kind": "question_for_claude",
     "project": "Prism",
-    "target": "new_claude_pane",
+    "target": "seat_ben",
     "action": "none",
     "destructive": false
    },
    "ambiguous": false,
-   "note": "names another project"
+   "note": "names another project. RELABELLED 2026-10-07 new_claude_pane → seat_ben by Yahia's seat policy (questions go to an awake seat in the named project). Jev already chose seat_ben on 2026-10-06, so this case is weak evidence now."
   },
   {
    "id": "c30",

@@ -411,19 +411,29 @@ Idle ≈ 0%: no work at all while the bar is closed.
    - `kind` choice: shell_command / agent_task / question_for_claude / true_action / none.
    - `project` choice: each candidate id + `current` + `none` (criteria = name + path; code maps the id back).
    - `target` choice: focused_pane / new_claude_pane / seat_<name> (only seats in the picked or current project) /
-     background_builder.
+     background_builder. **Seat policy (Yahia, 2026-10-07)** — code applies it after Jev answers, in this order:
+     (1) a seat NAMED in the text (whole-word, case-insensitive lookup over ALL seats, awake or not) → that seat, and
+     its project becomes the project, whatever project was focused; (2) `agent_task` never goes to an unnamed seat — a
+     Jev seat pick becomes focused_pane when a Claude pane in that project is focused, else new_claude_pane;
+     (3) `question_for_claude` in a project other than the focused Claude pane's → an awake seat there (Jev's pick
+     among them, else the first) or new_claude_pane when none is awake. Seats keep their work; questions are cheap.
    - `action` choice over a fixed verb list (open_project, new_tab, split_right, split_down, show_hub, show_results,
      wake_seat, sleep_seat, fill_displays, none). Verbs needing an argument get it lifted by code (seat via name
-     lookup, project via ProjectMatcher), never written by Jev.
+     lookup, project via ProjectMatcher), never written by Jev: `open_project` takes
+     `ProjectMatcher.rank(query: text minus the verb words)` top hit, not Jev's `project` slot (that slot is the
+     fallback only when the matcher finds nothing). A shell `kind` without a `!`/`$` prefix needs the first word to be
+     an executable on `$PATH`, a shell builtin or a path (`./`, `~/`, `/`); otherwise `kind` is treated as below 0.5
+     (the two-choice state) — a sentence must never be typed into a shell and sent.
    - `model` choice and `effort` score: reuse `JevFill`'s exact questions and floors (one source; extract them).
-   - `destructive` noul: "Does `text` delete data, force-push, deploy, publish, send messages or write to a live
-     third-party service?"
+   - `destructive` noul: "Does `text` push commits to a remote, delete or wipe data, force-push, deploy, publish,
+     send messages or write to a live third-party service?" (2026-10-07: push + wipe added after the first live run
+     scored "commit and push" 0.38 and "wipe all emtpy runs" 0.36 — in Prism a push to main IS a deploy.)
    Confidence floor 0.6 per slot (`CommandRouter.floor`); a slot below it shows the deterministic default with a
    dim "?" chip. `kind` below 0.5 → show two big choices "Run in shell" / "Send to Claude", no default.
 4. **Execution doors** (`CommandBar/CommandExecutor.swift`, only existing doors):
    - shell → typed into the focused pane if it is a plain shell, else a new split beside it in that project's cwd;
      typed, NOT auto-submitted when `destructive` ≥ 0.5 or a rule-matched dangerous pattern (`rm -rf`,
-     `git push --force`, `sudo`, `DROP`) — the user presses Return in the pane.
+     `git push` (any), `sudo`, `DROP`) — the user presses Return in the pane.
    - agent / question → focused Claude pane or awake seat via `PaneDelivery.write`; asleep seat → wake then
      deliver (existing summon path); new pane → the ⌘O path (`claude --dangerously-skip-permissions --model m
      --effort e '<text>'`, through claude-burn as seats do); background → `BuilderSpawn` with model, name derived
