@@ -15,6 +15,9 @@ final class TrayPanelController {
     static let inset: CGFloat = 12
     static let collapsedSize = CGSize(width: 156, height: 48)
     static let gridSize = CGSize(width: 444, height: 372)
+    /// Height of the screenshot area inside the grid panel (gridSize minus padding and header row).
+    static let shotsAreaHeight: CGFloat = 312
+    static let downloadRowHeight: CGFloat = 32
     static let zoomChrome: CGFloat = 46
     static let spring = Animation.spring(duration: 0.3, bounce: 0.1)
 
@@ -26,6 +29,7 @@ final class TrayPanelController {
     var toast: String?
 
     private let watcher = ScreenshotWatcher.shared
+    private let downloads = DownloadsWatcher.shared
     private var panel: TrayPanel?
     private var monitors: [Any] = []
     private var toastTask: Task<Void, Never>?
@@ -68,6 +72,7 @@ final class TrayPanelController {
     func set(_ new: TrayMode) {
         guard new != mode else { return }
         if new != .collapsed { watcher.recheckFolder(); watcher.markSeen() }
+        if new == .collapsed { downloads.stop() } else { downloads.start() }
         withAnimation(Self.spring) { mode = new }
         if new == .collapsed { markingUp = false; markupDirty = false }
         panel?.allowsKey = new != .collapsed
@@ -110,10 +115,17 @@ final class TrayPanelController {
         return NSScreen.screens.first { $0.frame.contains(mouse) } ?? panel?.screen ?? NSScreen.main
     }
 
+    /// Divider + header + rows (or one line for the empty/unreadable states) + spacing.
+    private var stripHeight: CGFloat {
+        let body = downloads.items.isEmpty || downloads.unreadable
+            ? 22 : CGFloat(downloads.items.count) * Self.downloadRowHeight
+        return 8 + 28 + 8 + body
+    }
+
     func size(for mode: TrayMode, visibleFrame: CGRect) -> CGSize {
         switch mode {
         case .collapsed: return Self.collapsedSize
-        case .grid: return Self.gridSize
+        case .grid: return CGSize(width: Self.gridSize.width, height: Self.gridSize.height + stripHeight)
         case .zoom(let id):
             let e = watcher.entries.first { $0.id == id }
             return TrayPanelFrame.zoomSize(visible: visibleFrame,

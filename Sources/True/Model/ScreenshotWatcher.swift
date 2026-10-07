@@ -319,6 +319,9 @@ final class ScreenshotWatcher {
         send(entry)
     }
 
+    /// Send to session for a file that is not a tray shot (a download): paste only, no outbox entry.
+    func sendPath(_ url: URL) { paste(path: TerminalDrop.pastePath(for: url)) }
+
     private func paste(path: String) {
         markSeen()
         let pane = WorkspaceModel.shared.selectedTab.focusedPane
