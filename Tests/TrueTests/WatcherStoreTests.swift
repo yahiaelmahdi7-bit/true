@@ -82,7 +82,7 @@ final class Box<T>: @unchecked Sendable {
         #expect(a[a.firstIndex(of: "--tools")! + 1] == "Read,Grep,Glob")
         let allowed = Array(a[(a.firstIndex(of: "--allowedTools")! + 1)...].prefix { !$0.hasPrefix("--") })
         for bad in ["Bash", "Edit", "Write", "WebFetch"] { #expect(!allowed.contains(bad)) }
-        #expect(a.contains("--max-turns") && a.contains("--max-budget-usd") && a.contains("--add-dir"))
+        #expect(!a.contains("--max-turns") && a.contains("--max-budget-usd") && a.contains("--add-dir"))
         #expect(a[a.firstIndex(of: "--permission-mode")! + 1] == "dontAsk")
     }
     @Test func hookOnlyWhenItExists() {
@@ -112,7 +112,7 @@ final class Box<T>: @unchecked Sendable {
         let clock: Box<Date>, root: URL
     }
 
-    static func rig(cost: Double = 0.2, fixSteps: [String] = ["Edit Package.swift"], danger: Double = 0.02, worth: Double = 0.95) -> Rig {
+    static func rig(cost: Double = 0.2, fixSteps: [String] = ["Edit Package.swift"], danger: Double = 0.02, worth: Double = 0.95, quote: String = "boom", lines: String = "1-2", jevKey: String? = "k") -> Rig {
         let root = tmp()
         let jev = NoulJev { id in
             if id.hasPrefix("wg_") { return id == "wg_injection" ? 0.02 : worth }
@@ -124,11 +124,11 @@ final class Box<T>: @unchecked Sendable {
         let spawns = Box<[[String]]>([])
         let clock = Box(Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 7, hour: 12))!)
         let rep = ItemReport(title: "Gate skipped", what: "The build failed", cause: "Missing flag", sure: "high",
-                             evidence: [.init(path: "a.swift", lines: "1-2", quote: "boom")],
+                             evidence: [.init(path: "a.swift", lines: lines, quote: quote)],
                              fix: .init(summary: "Add the flag", steps: fixSteps, commands: [], files: ["Package.swift"]), checked: [], unknowns: [])
         let out = "{\"total_cost_usd\":\(cost),\"usage\":{\"input_tokens\":2000},\"structured_output\":\(String(decoding: try! JSONEncoder().encode(rep), as: UTF8.self))}"
         var d = WatcherStore.Deps()
-        d.jev = JevClient(transport: jev, keyProvider: { "k" }, env: [:])
+        d.jev = JevClient(transport: jev, keyProvider: { jevKey }, env: [:])
         d.runner = { argv, _, _, env in runs.mutate { $0.append((argv, env)) }; return (0, out) }
         d.spawn = { argv in spawns.mutate { $0.append(argv) }; return (0, "STARTED b-123\n") }
         d.git = { _ in nil }
@@ -224,7 +224,7 @@ final class Box<T>: @unchecked Sendable {
         await r.store.scan(builders: [rec("b1", state: .failed)])
         let id = r.store.items[0].id
         let mem = r.root.appendingPathComponent("watcher/memory.md")
-        try? "# Watcher memory\n## Preferences\nalways mention the branch\n## Lessons\n".write(to: mem, atomically: true, encoding: .utf8)
+        try? "# Watcher memory\n## Preferences\nalways mention the branch\n## Yahia told me\n".write(to: mem, atomically: true, encoding: .utf8)
         r.store.reject(id, reason: "Not a problem")
         let text = (try? String(contentsOf: mem, encoding: .utf8)) ?? ""
         #expect(text.contains("always mention the branch") && text.contains("Not a problem: Gate skipped"))
@@ -252,7 +252,7 @@ final class Box<T>: @unchecked Sendable {
         let store = WatcherStore(deps: { var d = WatcherStore.Deps(); d.root = r.root; d.now = { r.clock.value }; d.enabled = { true }
             d.jev = JevClient(transport: r.jev, keyProvider: { "k" }, env: [:]); return d }(), channel: ch)
         store.digestIfDue()
-        #expect(ch.lastDigest?.contains("waiting") == true)
+        #expect(ch.lastDigest?.contains("1 open") == true)
         ch.lastDigest = nil
         store.digestIfDue()
         #expect(ch.lastDigest == nil)

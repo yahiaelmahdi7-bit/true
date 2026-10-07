@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// Where the Watcher puts things for Yahia. v1: the Hub reads the store directly; the digest is also kept as a line.
-protocol InboxChannel: AnyObject {
+@MainActor protocol InboxChannel: AnyObject {
     func deliver(item: InboxItem)
     func deliver(digest: String)
 }
@@ -10,9 +10,9 @@ protocol InboxChannel: AnyObject {
 /// The Hub's channel: the digest stays pinned (visible in the Watcher card) until Yahia opens it.
 @Observable @MainActor
 final class HubChannel: InboxChannel {
-    private(set) var lastDigest: String?
-    nonisolated func deliver(item: InboxItem) {}
-    nonisolated func deliver(digest: String) { Task { @MainActor in self.lastDigest = digest } }
+    var lastDigest: String?
+    func deliver(item: InboxItem) {}
+    func deliver(digest: String) { lastDigest = digest }
     func dismissDigest() { lastDigest = nil }
 }
 
