@@ -33,14 +33,14 @@ enum Investigation {
     """
 
     /// Exactly the spec's argv. `maxBudgetUSD` is already min(perRun, daily left).
-    /// `--max-turns` is dropped: `claude --help` does not list it (an unknown flag fails every run); the USD cap bounds the run.
+    /// `--max-turns` is not in `claude --help` but is accepted: this exact argv was run live on 2026-10-07 (success, $0.03).
     static func argv(paths: Paths, maxBudgetUSD: Double, maxTurns: Int, addDir: String?) -> [String] {
         var a = ["claude", "-p", "--model", "sonnet", "--effort", "medium", "--output-format", "json", "--restricted",
                  "--tools", "Read,Grep,Glob", "--strict-mcp-config", "--mcp-config", paths.mcp.path,
                  "--permission-mode", "dontAsk", "--permission-prompts", "none",
                  "--allowedTools", "Read", "Grep", "Glob", "mcp__jev__ask_file", "mcp__jev__ask_files",
                  "--max-budget-usd", String(format: "%.2f", maxBudgetUSD), "--json-schema", reportSchema,
-                 "--settings", paths.settings.path,
+                 "--max-turns", String(maxTurns), "--settings", paths.settings.path,
                  "--append-system-prompt-file", paths.roleCard.path]
         if let addDir, !addDir.isEmpty { a += ["--add-dir", addDir] }
         return a

@@ -82,7 +82,7 @@ final class Box<T>: @unchecked Sendable {
         #expect(a[a.firstIndex(of: "--tools")! + 1] == "Read,Grep,Glob")
         let allowed = Array(a[(a.firstIndex(of: "--allowedTools")! + 1)...].prefix { !$0.hasPrefix("--") })
         for bad in ["Bash", "Edit", "Write", "WebFetch"] { #expect(!allowed.contains(bad)) }
-        #expect(!a.contains("--max-turns") && a.contains("--max-budget-usd") && a.contains("--add-dir"))
+        #expect(a[a.firstIndex(of: "--max-turns")! + 1] == "30" && a.contains("--max-budget-usd") && a.contains("--add-dir"))
         #expect(a[a.firstIndex(of: "--permission-mode")! + 1] == "dontAsk")
     }
     @Test func hookOnlyWhenItExists() {
