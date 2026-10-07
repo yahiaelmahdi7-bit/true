@@ -11,13 +11,6 @@ enum InjectionScreen {
 
     static let evidenceCap = 2048
 
-    private static let invisible: Set<UInt32> = {
-        var s: Set<UInt32> = [0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0xFEFF, 0x00AD]
-        for v in 0x202A...0x202E { s.insert(UInt32(v)) }
-        for v in 0x2060...0x2069 { s.insert(UInt32(v)) }
-        return s
-    }()
-
     private static let patterns: [(name: String, regex: String)] = [
         ("ignore-instructions", #"\bignore\s+(all\s+|any\s+|the\s+)?(earlier|previous|prior|above|your)\s+(\w+\s+)?(instructions|rules|prompts?)\b"#),
         ("disregard", #"\bdisregard\s+(the\s+|all\s+|your\s+)?(task|above|previous|earlier|prior|instructions|rules|policy)\b"#),
@@ -28,10 +21,9 @@ enum InjectionScreen {
         ("note-to-agent", #"\b(note|message|instruction)s?\s+to\s+(the\s+)?(automated\s+)?(ai|agent|assistant)\b|\bAI\s+assistants?\s+reading\b"#),
     ]
 
+    /// Invisible/format characters removed, then NFKC (folds fullwidth and other confusables).
     static func strip(_ s: String) -> String {
-        var out = String.UnicodeScalarView()
-        for u in s.unicodeScalars where !invisible.contains(u.value) { out.append(u) }
-        return String(out)
+        DenyList.stripInvisible(s).precomposedStringWithCompatibilityMapping
     }
 
     static func flags(_ s: String) -> [String] {

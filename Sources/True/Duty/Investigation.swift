@@ -33,13 +33,14 @@ enum Investigation {
     """
 
     /// Exactly the spec's argv. `maxBudgetUSD` is already min(perRun, daily left).
+    /// `--max-turns` is dropped: `claude --help` does not list it (an unknown flag fails every run); the USD cap bounds the run.
     static func argv(paths: Paths, maxBudgetUSD: Double, maxTurns: Int, addDir: String?) -> [String] {
         var a = ["claude", "-p", "--model", "sonnet", "--effort", "medium", "--output-format", "json", "--restricted",
                  "--tools", "Read,Grep,Glob", "--strict-mcp-config", "--mcp-config", paths.mcp.path,
                  "--permission-mode", "dontAsk", "--permission-prompts", "none",
                  "--allowedTools", "Read", "Grep", "Glob", "mcp__jev__ask_file", "mcp__jev__ask_files",
                  "--max-budget-usd", String(format: "%.2f", maxBudgetUSD), "--json-schema", reportSchema,
-                 "--max-turns", String(maxTurns), "--settings", paths.settings.path,
+                 "--settings", paths.settings.path,
                  "--append-system-prompt-file", paths.roleCard.path]
         if let addDir, !addDir.isEmpty { a += ["--add-dir", addDir] }
         return a
@@ -47,7 +48,7 @@ enum Investigation {
 
     static func settingsJSON(duty: Duty, hookExists: Bool, homeDir: String = NSHomeDirectory()) -> String {
         var o: [String: Any] = [
-            "permissions": ["deny": ["Read(**/.env*)", "Read(**/*.key)", "Read(**/*.pem)", "Read(**/id_*)", "Read(\(homeDir)/.ssh/**)",
+            "permissions": ["deny": ["Read(**/.env*)", "Read(**/*.key)", "Read(**/*.pem)", "Read(**/id_*)", "Read(**/credentials*)", "Read(\(homeDir)/.aws/**)", "Read(\(homeDir)/.ssh/**)",
                                      "Read(\(homeDir)/.claude/sessions/**)", "Bash", "Edit", "Write", "WebFetch"]],
         ]
         if hookExists {
@@ -102,7 +103,7 @@ enum Investigation {
         \(signal.facts.sorted { $0.key < $1.key }.map { "- \($0.key): \($0.value)" }.joined(separator: "\n"))
         \(gitFacts.isEmpty ? "" : "Git facts:\n\(gitFacts)\n")
         <untrusted>
-        \(evidence)
+        \(evidence.replacingOccurrences(of: "<", with: "\u{2039}").replacingOccurrences(of: ">", with: "\u{203A}"))
         </untrusted>
         """
     }
