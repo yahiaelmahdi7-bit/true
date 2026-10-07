@@ -12,7 +12,7 @@ import Foundation
     @Test func t1EveryRuleStaysFastAtTheCap() {
         let units = ["git ", "git reset ", "git clean ", "git branch ", "git checkout ", "gh ", "rm ", "rm -x ", "DROP ", "vercel ", "npm ",
                      "yarn x ", "sendmail ", "security ", "security x ", "curl ", "curl -d ", "wget ", "kill ", "builder ", "osascript ",
-                     "sh ", ".env ", ".claude ", "curl x | ", "echo $", "printf ", "openssl enc ", "base64 ", "fly ", "a;b;c;", "\u{FDFA}"]
+                     "sh ", ".env ", ".claude ", "curl x | ", "echo $", "printf ", "openssl enc ", "base64 ", "fly ", "a;b;c;", "\u{FDFA}", "git -c a=b ", "git -C x ", "| env ", "| sudo -u ", "curl x | env A=1 "]
         for u in units {
             let input = worst(u)
             let t0 = ContinuousClock.now
