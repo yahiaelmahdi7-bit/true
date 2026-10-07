@@ -407,8 +407,14 @@ Idle ≈ 0%: no work at all while the bar is closed.
    hub", "results", "fill all displays") = that action.
 3. **Jev read** (`CommandBar/CommandRouter.swift`; one `JevClient.ask`, 3 s timeout, fired 300 ms after typing
    pauses while open, previous call cancelled; state = `{ text, focused: {kind: shell|claude|seat|empty, project,
-   seat}, projects: [top 8 from ProjectMatcher.rank(query: text) + recents], seats: [name, project, awake] }`):
-   - `kind` choice: shell_command / agent_task / question_for_claude / true_action / none.
+   seat, meaning}, projects: [top 8 from ProjectMatcher.rank(query: text) + recents], seats: [name, project, awake] }`;
+   `focused.meaning` is a fixed code-written sentence per kind — claude: "a Claude Code agent working in the
+   project's git repository" · seat: the same plus "(a named crew seat)" · shell: "a terminal shell in the project
+   folder" · empty: "no pane is focused"):
+   - `kind` choice: shell_command / agent_task / question_for_claude / true_action / none. Code builds the options:
+     `shell_command` is offered only when the first word passes the shell gate (described under `action` below); otherwise it
+     is left out, so a go-ahead line ("yes do that") is decided between the remaining kinds, never shown as the
+     shell-or-Claude two-choice.
    - `project` choice: each candidate id + `current` + `none` (criteria = name + path; code maps the id back).
    - `target` choice: focused_pane / new_claude_pane / seat_<name> (only seats in the picked or current project) /
      background_builder. **Seat policy (Yahia, 2026-10-07)** — code applies it after Jev answers, in this order:
@@ -425,9 +431,18 @@ Idle ≈ 0%: no work at all while the bar is closed.
      an executable on `$PATH`, a shell builtin or a path (`./`, `~/`, `/`); otherwise `kind` is treated as below 0.5
      (the two-choice state) — a sentence must never be typed into a shell and sent.
    - `model` choice and `effort` score: reuse `JevFill`'s exact questions and floors (one source; extract them).
-   - `destructive` noul: "Does `text` push commits to a remote, delete or wipe data, force-push, deploy, publish,
-     send messages or write to a live third-party service?" (2026-10-07: push + wipe added after the first live run
-     scored "commit and push" 0.38 and "wipe all emtpy runs" 0.36 — in Prism a push to main IS a deploy.)
+   - **Danger = five narrow nouls** in the same call, `destructive` = their max (Run 14c, 2026-10-07):
+     `danger_push` "Does `text` ask for git commits to be pushed to a remote repository?" ·
+     `danger_delete` "Does `text` ask to delete, wipe, purge or drop existing data, files or records?" ·
+     `danger_deploy` "Does `text` ask to deploy or publish something to production or a live site? Starting or
+     spawning agents or helpers is not a deploy." ·
+     `danger_send` "Does `text` ask for messages or emails to be sent to people? Forbidding or delaying sending is
+     not asking to send." ·
+     `danger_live` "Does `text` ask to change data, settings or secrets on a live hosted service, such as a
+     production database or environment variables?"
+     The log keeps all five. Why: one long question scored "lets push this to git you have my go ahaead" 0.18 and
+     "purge them" 0.29 on the held-out set; the narrow ones scored 0.92 / 0.90 on seen cases (dev evidence only —
+     validated on `.claude/heldout/commandbar-fresh.json`).
    Confidence floor 0.6 per slot (`CommandRouter.floor`); a slot below it shows the deterministic default with a
    dim "?" chip. `kind` below 0.5 → show two big choices "Run in shell" / "Send to Claude", no default.
 4. **Execution doors** (`CommandBar/CommandExecutor.swift`, only existing doors):
