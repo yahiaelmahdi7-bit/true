@@ -245,9 +245,9 @@ final class Box<T>: @unchecked Sendable {
     @Test func digestIsDueOnceAfterEightAndTwentyHours() async {
         let r = Self.rig()
         let ch = HubChannel()
+        await r.store.scan(builders: [rec("b1", state: .failed)])
         let store = WatcherStore(deps: { var d = WatcherStore.Deps(); d.root = r.root; d.now = { r.clock.value }; d.enabled = { true }
             d.jev = JevClient(transport: r.jev, keyProvider: { "k" }, env: [:]); return d }(), channel: ch)
-        await r.store.scan(builders: [rec("b1", state: .failed)])
         store.digestIfDue()
         #expect(ch.lastDigest?.contains("waiting") == true)
         ch.lastDigest = nil
