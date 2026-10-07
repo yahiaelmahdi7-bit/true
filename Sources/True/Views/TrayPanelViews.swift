@@ -77,6 +77,7 @@ private struct GridPanel: View {
     let controller: TrayPanelController
     let watcher: ScreenshotWatcher
     let ns: Namespace.ID
+    private let downloads = DownloadsWatcher.shared
     private let columns = Array(repeating: GridItem(.fixed(96), spacing: 8, alignment: .top), count: 4)
 
     var body: some View {
@@ -90,6 +91,7 @@ private struct GridPanel: View {
                 }
                 IconButton(symbol: "chevron.up", help: "Collapse (Esc)") { controller.set(.collapsed) }
             }
+            Group {
             if watcher.unreadable && watcher.entries.isEmpty {
                 Text("True can't read \(watcher.folder.lastPathComponent).")
                     .font(.callout).foregroundStyle(Theme.text).padding(.top, 6)
@@ -115,8 +117,79 @@ private struct GridPanel: View {
                 }
                 .scrollIndicators(.never)
             }
+            }
+            .frame(height: TrayPanelController.shotsAreaHeight, alignment: .top)
+            DownloadsStrip(controller: controller, downloads: downloads)
         }
         .padding(12)
+        .onChange(of: downloads.items.count) { controller.place(animated: true) }
+    }
+}
+
+// MARK: - Downloads strip
+
+private struct DownloadsStrip: View {
+    let controller: TrayPanelController
+    let downloads: DownloadsWatcher
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Divider().overlay(Theme.hairline).padding(.bottom, 4)
+            HStack(spacing: 8) {
+                Text("Downloads").font(.callout.weight(.semibold))
+                Text("\(downloads.items.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Spacer()
+                IconButton(symbol: "folder", help: "Show Downloads in Finder") {
+                    NSWorkspace.shared.open(downloads.directory)
+                }
+            }
+            if downloads.unreadable {
+                Text("True can't read Downloads.").font(.callout).foregroundStyle(Theme.text)
+                Button("Open Privacy Settings") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }.controlSize(.small)
+            } else if downloads.items.isEmpty {
+                Text("No recent downloads").font(.callout).foregroundStyle(.secondary)
+            } else {
+                ForEach(downloads.items) { item in DownloadRow(controller: controller, item: item) }
+            }
+        }
+    }
+}
+
+private struct DownloadRow: View {
+    let controller: TrayPanelController
+    let item: DownloadItem
+    @State private var hovering = false
+
+    private var detail: String {
+        let age = ScreenshotWatcher.relativeLabel(for: item.modified, now: Date(), calendar: .current)
+        return item.isDirectory ? age : "\(ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file)) · \(age)"
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path)).resizable().frame(width: 18, height: 18)
+            Text(item.name).font(.callout).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 4)
+            Text(detail).font(.caption2.monospaced()).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+            IconButton(symbol: "paperplane", help: "Send to session") {
+                ScreenshotWatcher.shared.sendPath(item.url)
+                controller.showToast("Sent to session")
+            }
+            IconButton(symbol: "link", help: "Copy path") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(item.url.path, forType: .string)
+                controller.showToast("Path copied")
+            }
+        }
+        .padding(.leading, 4)
+        .frame(height: TrayPanelController.downloadRowHeight - 4)
+        .background(hovering ? Theme.hubHoverFill : .clear, in: .rect(cornerRadius: 7, style: .continuous))
+        .onHover { hovering = $0 }
+        .onDrag { fileProvider(item.url) }
     }
 }
 
