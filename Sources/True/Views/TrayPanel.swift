@@ -27,6 +27,8 @@ final class TrayPanelController {
     var markingUp = false
     var markupDirty = false
     var toast: String?
+    /// Corner of the visible frame the chip rests in; remembered across launches (per corner, not coordinates).
+    private(set) var corner: PanelCorner = PanelCorner.load()
 
     private let watcher = ScreenshotWatcher.shared
     private let downloads = DownloadsWatcher.shared
@@ -50,7 +52,8 @@ final class TrayPanelController {
         panel = p
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.place(animated: false) }
+            // A display went away or moved: fall back to the remembered corner on the main screen.
+            MainActor.assumeIsolated { self?.place(animated: false, on: NSScreen.main ?? NSScreen.screens.first) }
         }
         installClickAway()
         if visible { show() }
@@ -110,9 +113,11 @@ final class TrayPanelController {
 
     // MARK: - Geometry
 
+    /// Where the panel rests: the screen it is already on; the one under the mouse the first time it shows.
     private func targetScreen() -> NSScreen? {
+        if let panel, panel.isVisible, let s = panel.screen { return s }
         let mouse = NSEvent.mouseLocation
-        return NSScreen.screens.first { $0.frame.contains(mouse) } ?? panel?.screen ?? NSScreen.main
+        return NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
     }
 
     /// Divider + header + rows (or one line for the empty/unreadable states) + spacing.
@@ -134,19 +139,54 @@ final class TrayPanelController {
         }
     }
 
-    func place(animated: Bool) {
-        guard let panel, let screen = targetScreen() else { return }
+    func place(animated: Bool, on screen: NSScreen? = nil, duration: TimeInterval = 0.3) {
+        guard let panel, let screen = screen ?? targetScreen() else { return }
         let v = screen.visibleFrame
-        let frame = TrayPanelFrame.topRight(visible: v, size: size(for: mode, visibleFrame: v), inset: Self.inset)
-        if animated && panel.isVisible {
+        let frame = TrayPanelFrame.frame(corner: corner, visible: v, size: size(for: mode, visibleFrame: v),
+                                         inset: Self.inset)
+        if animated && panel.isVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.3
+                ctx.duration = duration
                 ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1)
                 panel.animator().setFrame(frame, display: true)
             }
         } else {
             panel.setFrame(frame, display: true)
         }
+    }
+
+    // MARK: - Drag to corner (collapsed chip)
+
+    private var dragStartMouse: CGPoint?
+    private var dragStartOrigin = CGPoint.zero
+    private var dragging = false
+
+    /// Pointer moved while pressed on the chip. Past the click threshold the panel follows the pointer.
+    func dragChanged() {
+        guard let panel else { return }
+        let mouse = NSEvent.mouseLocation
+        if dragStartMouse == nil { dragStartMouse = mouse; dragStartOrigin = panel.frame.origin }
+        guard let start = dragStartMouse else { return }
+        if !dragging && TrayPanelFrame.isDrag(from: start, to: mouse) { dragging = true }
+        if dragging {
+            panel.setFrameOrigin(CGPoint(x: dragStartOrigin.x + mouse.x - start.x,
+                                         y: dragStartOrigin.y + mouse.y - start.y))
+        }
+    }
+
+    /// Release: a drag snaps to the nearest corner of the screen it ended on; anything shorter is a click.
+    /// Returns true if it was a click.
+    func dragEnded() -> Bool {
+        defer { dragStartMouse = nil; dragging = false }
+        guard dragging, let panel else { return true }
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? panel.screen ?? NSScreen.main
+        guard let screen else { return false }
+        corner = TrayPanelFrame.nearestCorner(to: CGPoint(x: panel.frame.midX, y: panel.frame.midY),
+                                              in: screen.visibleFrame)
+        corner.save()
+        place(animated: true, on: screen, duration: 0.25)
+        return false
     }
 
     // MARK: - Click away
