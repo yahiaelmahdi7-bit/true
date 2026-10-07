@@ -49,7 +49,7 @@ final class OverseerStore {
     /// The Watcher's hook: a failure verdict still standing when its pane closes (SPEC Run 15 §3 source 3).
     @ObservationIgnored var onDropped: ((UUID, OverseerVerdict) -> Void)?
 
-    static func isFailure(_ k: VerdictKind) -> Bool { k == .blocked || k == .unverified }
+    nonisolated static func isFailure(_ k: VerdictKind) -> Bool { k == .blocked || k == .unverified }
 
     /// Failure verdicts still standing (quit snapshot).
     var standingFailures: [(pane: UUID, verdict: OverseerVerdict)] {
