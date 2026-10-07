@@ -30,6 +30,7 @@ struct CommandContext: Equatable, Sendable {
     var focused: FocusedPane
     var projects: [Project]      // ranked candidates, at most `maxProjects`
     var seats: [BarSeat]
+    var all: [Project] = []      // every known project: `open_project` ranks over these, not just the candidates
     static let maxProjects = 8
 
     /// The project the focused pane is in, when it is one of the known projects.
@@ -89,7 +90,7 @@ enum CommandRouter {
 
     static func questions(text: String, context c: CommandContext, onlyDanger: Bool) -> [String: JevQuestion] {
         let destructive = JevQuestion.noul(
-            "Does `text` delete data, force-push, deploy, publish, send messages or write to a live third-party service?")
+            "Does `text` push commits to a remote, delete or wipe data, force-push, deploy, publish, send messages or write to a live third-party service?")
         if onlyDanger { return ["destructive": destructive] }
         var q: [String: JevQuestion] = ["destructive": destructive]
         q["kind"] = .choice("What does `text` ask for, given the `focused` pane?", [
@@ -136,7 +137,8 @@ enum CommandRouter {
         (f.kind == .claude || f.kind == .seat) ? .focusedPane : .newClaudePane
     }
 
-    static func route(text: String, reply: JevReply?, context c: CommandContext, rule: RuleMatch? = nil) -> Route {
+    static func route(text: String, reply: JevReply?, context c: CommandContext, rule: RuleMatch? = nil,
+                      isExecutable: (String) -> Bool = { _ in false }) -> Route {
         let payload = rule?.payload ?? text
         var r = Route(text: payload, kind: defaultKind(c.focused), kindConfidence: nil, project: nil,
                       target: .focusedPane, action: .none, seat: nil, destructive: nil, model: nil, effort: nil)
@@ -147,11 +149,12 @@ enum CommandRouter {
             return a
         }
 
+        var jevPickedKind = false
         if let reply {
             r.destructive = reply.answers["destructive"]?.noul
             if let a = reply.answers["kind"], let conf = a.confidence {
                 r.kindConfidence = conf
-                if let k = a.choice.flatMap(CommandKind.init(rawValue:)), k != .none, conf >= floor { r.kind = k }
+                if let k = a.choice.flatMap(CommandKind.init(rawValue:)), k != .none, conf >= floor { r.kind = k; jevPickedKind = true }
                 else {
                     r.uncertain.insert(.kind)
                     if conf < kindFloor { r.twoChoice = true }
@@ -182,6 +185,21 @@ enum CommandRouter {
             if let m = sure("model")?.choice.flatMap(AgentModel.init(rawValue:)) { r.model = m }
             if let s = sure("effort")?.score { r.effort = JevFill.effort(fromScore: s) }
         }
+        // A sentence must never be typed into a shell and sent: a shell kind needs a first word that can run.
+        if jevPickedKind, r.kind == .shellCommand,
+           !CommandRules.looksRunnable(payload, isExecutable: isExecutable) {
+            r.kind = defaultKind(c.focused)
+            r.uncertain.insert(.kind)
+            r.twoChoice = true
+        }
+        // open_project takes the matcher's top hit for the text minus the verb words; Jev's slot is the fallback.
+        if r.action == .openProject {
+            let q = CommandRules.stripVerbWords(payload)
+            if !q.isEmpty, let hit = ProjectMatcher.rank(c.all.isEmpty ? c.projects : c.all, query: q).first {
+                r.project = hit
+                r.uncertain.remove(.project)
+            }
+        }
         // A true_action with no verb is not runnable: fall back to the pane-aware default.
         if r.kind == .trueAction, r.action == .none { r.kind = defaultKind(c.focused) }
         // A seat target needs a seat of the project the work is for; a focused-pane target needs a pane.
@@ -189,8 +207,41 @@ enum CommandRouter {
         // Agent work aimed at another project cannot land in the focused pane.
         if r.project != nil, r.target == .focusedPane { r.target = .newClaudePane }
 
+        if r.action == .wakeSeat || r.action == .sleepSeat, r.seat == nil {
+            r.seat = CommandRules.namedSeat(in: payload, seats: c.seats, preferProject: c.focused.project)?.name
+        }
+        applySeatPolicy(&r, text: payload, context: c)
+
         if let rule { apply(rule, to: &r, context: c, jevAnswered: reply != nil) }
         return r
+    }
+
+    /// SPEC Run 14 item 3, in order: a seat named in the text wins; an agent_task never lands on an unnamed seat;
+    /// a question outside the focused Claude pane's project goes to an awake seat there, else a new pane.
+    private static func applySeatPolicy(_ r: inout Route, text: String, context c: CommandContext) {
+        guard r.kind.sendsToClaude else { return }
+        let focusedProject = c.focused.project
+        if let s = CommandRules.namedSeat(in: text, seats: c.seats, preferProject: r.project?.name ?? focusedProject) {
+            r.target = .seat(s.name)
+            r.seat = s.name
+            r.uncertain.remove(.target)
+            if s.project == focusedProject { r.project = nil; r.uncertain.remove(.project) }
+            else if let p = (c.projects + c.all).first(where: { $0.name == s.project }) { r.project = p; r.uncertain.remove(.project) }
+            return
+        }
+        if case .backgroundBuilder = r.target { return }
+        let project = r.project?.name ?? focusedProject
+        let onClaude = c.focused.kind == .claude || c.focused.kind == .seat
+        let focusedClaudeHere = onClaude && c.focused.project == project
+        switch r.kind {
+        case .agentTask:
+            if case .seat = r.target { r.target = focusedClaudeHere ? .focusedPane : .newClaudePane }
+        case .questionForClaude where !focusedClaudeHere:
+            let awake = project.map { p in c.seats.filter { $0.project == p && $0.awake } } ?? []
+            if case .seat(let n) = r.target, awake.contains(where: { $0.name == n }) { return }
+            if let first = awake.first { r.target = .seat(first.name); r.seat = first.name } else { r.target = .newClaudePane }
+        default: break
+        }
     }
 
     /// A seat target only stands when that seat belongs to the project the work is for.

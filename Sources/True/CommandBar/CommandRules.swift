@@ -112,6 +112,49 @@ enum CommandRules {
         }?.name
     }
 
+    /// The seat a sentence names, whole-word and case-insensitive, over ALL seats awake or asleep: its full name,
+    /// its CrewDisplay name, or any "-suffix" of it. Longest term wins; a tie prefers `preferProject`, then order.
+    static func namedSeat(in text: String, seats: [BarSeat], preferProject: String? = nil) -> BarSeat? {
+        var best: (seat: BarSeat, len: Int, preferred: Bool)?
+        for s in seats {
+            let name = s.name.lowercased()
+            let parts = name.split(separator: "-").map(String.init)
+            var terms = [name, CrewDisplay.name(name, repo: s.project).lowercased()]
+            terms += parts.indices.dropFirst().map { parts[$0...].joined(separator: "-") }
+            for t in Set(terms) where !t.isEmpty && containsWholeWord(text, t) {
+                let cand = (seat: s, len: t.count, preferred: s.project == preferProject)
+                if best == nil || cand.len > best!.len || (cand.len == best!.len && cand.preferred && !best!.preferred) { best = cand }
+            }
+        }
+        return best?.seat
+    }
+
+    static func containsWholeWord(_ text: String, _ term: String) -> Bool {
+        let pattern = #"(?<![\p{L}\p{N}-])"# + NSRegularExpression.escapedPattern(for: term) + #"(?![\p{L}\p{N}-])"#
+        return text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    /// Words that name the True verb, not the project: "open trading" asks for `trading`.
+    private static let verbWords: Set<String> = ["open", "project", "folder", "go", "to", "switch", "launch", "show", "the", "my", "in", "cd"]
+
+    static func stripVerbWords(_ text: String) -> String {
+        text.split(whereSeparator: { $0.isWhitespace }).filter { !verbWords.contains($0.lowercased()) }.joined(separator: " ")
+    }
+
+    /// Shell builtins that are not files on `$PATH`.
+    private static let builtins: Set<String> = [
+        "cd", "echo", "export", "alias", "unalias", "source", ".", "pwd", "set", "unset", "exit", "type", "history", "jobs", "fg", "bg",
+        "eval", "exec", "read", "umask", "ulimit", "wait", "kill", "pushd", "popd", "dirs", "which", "whence", "hash", "builtin",
+        "command", "printf", "test", "true", "false", "trap", "shift", "return", "let", "local", "declare", "typeset", "setopt", "unsetopt",
+    ]
+
+    /// Could the first word of `text` start a shell command? A path, a builtin, or an executable on `$PATH`.
+    static func looksRunnable(_ text: String, isExecutable: (String) -> Bool) -> Bool {
+        guard let first = text.split(whereSeparator: { $0.isWhitespace }).first.map(String.init) else { return false }
+        if first.hasPrefix("./") || first.hasPrefix("~/") || first.hasPrefix("/") { return true }
+        return builtins.contains(first) || isExecutable(first)
+    }
+
     /// Two or more purely alphabetic words after the command read as a sentence, not arguments.
     private static func hasProseTail(_ tail: ArraySlice<String>) -> Bool {
         tail.filter { w in w.count >= 2 && w.allSatisfy { $0.isLetter } }.count >= 2
@@ -121,7 +164,7 @@ enum CommandRules {
 
     private static let dangerous: [NSRegularExpression] = [
         #"\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*[fF]|-[a-zA-Z]*[fF][a-zA-Z]*[rR]|--recursive|--force)"#,
-        #"\bgit\s+push\b.*(\s--force\b|\s-f\b|\s--force-with-lease\b)"#,
+        #"\bgit\s+push\b"#,
         #"\bsudo\b"#,
         #"(?i)\bdrop\s+(table|database|schema)\b"#,
     ].compactMap { try? NSRegularExpression(pattern: $0) }
