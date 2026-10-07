@@ -132,7 +132,8 @@ private let fixedDigest = TurnDigest(asked: "ship it API_KEY=abc123", steps: [Tu
         let s = make(FakeJev(.reply(200, body("finished", proof: 0.1))), dir: dir)
         let log = OverseerLog(dir: dir)
         s.handle(stop(UUID()))
-        await settle(s) { FileManager.default.fileExists(atPath: log.file.path) }
+        // OverseerLog creates the file empty, then writes the line: wait for the newline, not just the file
+        await settle(s) { (try? String(contentsOf: log.file, encoding: .utf8))?.hasSuffix("\n") == true }
         let text = try String(contentsOf: log.file, encoding: .utf8)
         #expect(!text.contains("abc123") && text.contains("[redacted]"))
         let obj = try #require(try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
