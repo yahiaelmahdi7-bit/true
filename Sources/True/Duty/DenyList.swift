@@ -9,25 +9,30 @@ enum DenyList {
     private static let pm = "npm|pnpm|yarn|bun"
 
     static let rules: [(name: String, regex: String)] = [
-        ("git push", #"\bgit\b[^\n;&|]*?\bpush\b"#),
-        ("gh write", #"\bgh\s+(pr\s+(create|merge|close|edit|comment|review)|release\b|workflow\s+run|secret\b|repo\s+(delete|create|edit|rename|archive)|issue\s+(comment|create|close|edit|delete)|api\b[^\n]*(-X|--method|--input|\s-f\b|\s-F\b|--field))"#),
-        ("git destructive", #"\bgit\b[^\n;&|]*?(\breset\b[^\n;&|]*?--hard|\bclean\b[^\n;&|]*?(-\w*f|--force)|\bbranch\b[^\n;&|]*?-D\b|\bcheckout\b[^\n;&|]*?--\s+\.|\b(checkout|restore)\s+\.(\s|$))"#),
-        ("rm recursive", #"\brm\s(?:[^\n;&|]*?\s)?(-\w*[rR]\w*|--recursive)\b"#),
+        ("git push", #"\bgit\b[^\n;&|]{0,120}?\bpush\b"#),
+        ("gh write", #"\bgh\s+(pr\s+(create|merge|close|edit|comment|review)|release\b|workflow\s+run|secret\b|repo\s+(delete|create|edit|rename|archive)|issue\s+(comment|create|close|edit|delete)|api\b[^\n]{0,300}(-X|--method|--input|\s-f\b|\s-F\b|--field))"#),
+        ("git destructive", #"\breset\b[^\n;&|]{0,80}?--hard|\bclean\b[^\n;&|]{0,80}?(-\w*f|--force)|\bbranch\b[^\n;&|]{0,80}?-D\b|\bcheckout\b[^\n;&|]{0,80}?--\s+\.|\b(checkout|restore)\s+\.(\s|$)"#),
+        ("rm recursive", #"\brm\s(?:[^\n;&|]{0,200}?\s)?(-\w*[rR]\w*|--recursive)\b"#),
         ("sql destructive", #"\bDROP\s+(TABLE|DATABASE|SCHEMA|INDEX|VIEW)\b|\bDROP\s+COLUMN\b|\bTRUNCATE\b|\bDELETE\s+FROM\b"#),
         ("hosting cli", "(^|[;&|\\n]\\s*|\\bnpx\\s+|\\brun\\s+)(\(tools))\\b|\\b(\(tools))\\s+(\(toolVerbs))\\b|api\\.stripe\\.com"),
-        ("package publish", "\\b(\(pm))\\b[^\n;&|]*?\\bpublish\\b|\\bcargo\\s+publish\\b|\\btwine\\s+upload\\b|\\bfly(ctl)?\\s+(deploy|launch|secrets|apps)\\b"),
+        ("package publish", "\\b(\(pm))\\b[^\n;&|]{0,200}?\\bpublish\\b|\\bcargo\\s+publish\\b|\\btwine\\s+upload\\b|\\bfly(ctl)?\\s+(deploy|launch|secrets|apps)\\b"),
         ("messaging", #"\bsendmail\b|\bmailx?\s+(-|\S+@)|api\.resend\.com|\bresend\s+api\b|api\.telegram\.org|hooks\.slack\.com|\btelegram\b|\bslack\s+(message|webhook|post)\b"#),
-        ("keychain", #"\bsecurity\b[^\n;&|]*?(password|keychain)\b"#),
+        ("keychain", #"\bsecurity\b[^\n;&|]{0,200}?(password|keychain)\b"#),
         ("secret files", #"(?<![\w])\.env(\.[\w-]+)?(?![\w-])|\.(key|pem)(?!\w)|(?<![\w])id_(rsa|ed25519|ecdsa|dsa)\b|\.ssh/|\.aws/credentials|(?<![\w])credentials(\.\w+)?(?!\w)"#),
         ("protected config", #"\.claude/settings(\.local)?\.json|(~|\$HOME|/Users/\w+)/\.axon\b|(^|[\s'"])\.axon/"#),
-        ("kill", #"\b(killall|pkill|kill)\b|quit\s+app\s+"True"|osascript[^\n]*quit"#),
+        ("kill", #"\b(killall|pkill|kill)\b|quit\s+app\s+"True"|osascript[^\n]{0,200}quit"#),
         ("builder kill", #"\bbuilder\s+kill\b"#),
-        ("pipe to shell", #"\b(curl|wget)\b[^\n]*\|\s*(?:(?:sudo|env)\s+)*(?:[\w./-]*/)?(?:ba|z|da)?sh\b|\b(?:ba|z|da)?sh\s+(?:-\w+\s+)*(?:<\(|\$\()\s*(?:curl|wget)|\b(?:curl|wget)\b[^\n]*\|\s*(?:sudo\s+)?(?:python3?|perl|ruby|node)\b"#),
+        ("pipe to shell", #"\b(?:ba|z|da)?sh\s+(?:-\w+\s+)*(?:<\(|\$\()\s*(?:curl|wget)"#),
+        // Disguised commands cannot be de-obfuscated by regex, so obfuscation itself is the hit (false positives go to a human).
+        ("obfuscated shell", #"\$'|\$\{|\$\(|`|\beval\b|\bbase64\s+(?:-\w*[dD]|--decode)|\bxxd\s+-\w*r|\bprintf\b[^\n]{0,100}(?:\\x[0-9a-fA-F]|\\[0-7]{3})|\bopenssl\s+enc\s[^\n]{0,60}-d\b|\brev\s*\|"#),
     ]
 
     /// Needs two patterns in the same text (settings.json after `cd ~/.claude`).
     private static let combos: [(name: String, a: String, b: String)] = [
         ("protected config", #"\.claude\b"#, #"settings(\.local)?\.json"#),
+        // Order-agnostic on purpose (linear time): a download tool anywhere plus a pipe into a shell/interpreter, through any wrapper chain.
+        ("pipe to shell", #"\b(?:curl|wget)\b"#,
+         #"\|&?\s*(?:(?:sudo|env|nohup|xargs)(?:\s+[^\s|;&]{1,60}){0,8}?\s+){0,4}(?:[\w./-]{0,80}/)?(?:(?:ba|z|da|k|fi)?sh|python[\d.]{0,4}|perl|ruby|node)\b"#),
     ]
 
     private static let invisible: Set<UInt32> = {
@@ -52,6 +57,7 @@ enum DenyList {
     static func normalize(_ s: String) -> String {
         var t = s.replacingOccurrences(of: "\\\r\n", with: "").replacingOccurrences(of: "\\\n", with: "")
         t = stripInvisible(t)
+        t = t.replacingOccurrences(of: #"[ \t]{2,}"#, with: " ", options: .regularExpression)
         return t.precomposedStringWithCompatibilityMapping
     }
 
@@ -80,12 +86,18 @@ enum DenyList {
     }
 
     private static func allHostsLocal(_ seg: String) -> Bool {
+        // Anything that reroutes the connection makes "localhost" meaningless.
+        if matches(seg, #"(?<![\w-])(?:-x|--connect-to|--resolve|--proxy\S*|--preproxy|--socks\S*)(?![\w-])"#, caseInsensitive: false) { return false }
         var hosts: [String] = []
-        for tok in seg.split(whereSeparator: { " \t'\"".contains($0) }).map(String.init) where !tok.hasPrefix("-") {
+        var skip = false
+        for tok in seg.split(whereSeparator: { " \t'\"".contains($0) }).map(String.init) {
+            if skip { skip = false; continue }
+            if ["-X", "--request", "--method"].contains(tok) { skip = true; continue }
+            if tok.hasPrefix("-") || ["curl", "wget"].contains(tok.lowercased()) { continue }
             var rest = tok
             let hasScheme = rest.range(of: "://") != nil
             if let r = rest.range(of: "://") { rest = String(rest[r.upperBound...]) }
-            else if !(rest.contains(".") || rest.contains(":") || rest.lowercased() == "localhost") { continue }
+            // A dotless bare word is a possible host (`curl -d x localhost evil`), so it counts as non-local.
             if !hasScheme && rest.hasPrefix("@") { continue }
             var auth = String(rest.prefix { !"/?#".contains($0) })
             if let at = auth.lastIndex(of: "@") { auth = String(auth[auth.index(after: at)...]) }
@@ -97,17 +109,25 @@ enum DenyList {
         return !hosts.isEmpty && hosts.allSatisfy { local.contains($0) }
     }
 
+    /// Input cap (UTF-8 bytes), applied to the raw text and again after normalisation (NFKC can expand ~18x).
+    static let maxBytes = 8192
+
     /// Quotes and backslashes removed, so `git 'push'`, `git pu""sh`, `rm -r"f"` read as plain commands.
     static func dequoted(_ s: String) -> String { s.filter { !"'\"\\".contains($0) } }
 
     /// Names of every rule the text trips (empty = clear). THE entry point: investigate and approve both call this.
     /// Fails closed: oversize text is a hit; a regex that cannot run is a hit. Both the raw and the dequoted view are checked.
     static func hits(_ raw: String) -> [String] {
-        if raw.utf8.count > 65_536 { return ["oversize"] }
+        if raw.utf8.count > maxBytes { return ["oversize"] }
         let text = normalize(raw)
+        let deq = dequoted(text)
+        if text.utf8.count > maxBytes || deq.utf8.count > maxBytes { return ["oversize"] }
         var out: [String] = []
-        for view in [text, dequoted(text)] {
-            for r in rules where matches(view, r.regex) { out.append(r.name) }
+        for view in [text, deq] {
+            // Cheap literal pre-check so the git rules' gap scans only run when a git verb is present at all.
+            let gitVerb = matches(view, #"\b(push|reset|clean|branch|checkout|restore)\b"#)
+            let hasGit = matches(view, #"\bgit\b"#)
+            for r in rules where (r.name.hasPrefix("git ") ? (hasGit && gitVerb) : true) && matches(view, r.regex) { out.append(r.name) }
             for c in combos where matches(view, c.a) && matches(view, c.b) { out.append(c.name) }
             // Whole line, not split on ; | & (those can sit inside quotes): any curl/wget line that writes remotely.
             for line in view.split(separator: "\n") {
