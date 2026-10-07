@@ -61,7 +61,7 @@ enum DenyList {
         return t.precomposedStringWithCompatibilityMapping
     }
 
-    private static func matches(_ text: String, _ re: String, caseInsensitive: Bool = true) -> Bool {
+    static func matches(_ text: String, _ re: String, caseInsensitive: Bool = true) -> Bool {
         guard let rx = try? NSRegularExpression(pattern: re, options: caseInsensitive ? [.caseInsensitive] : []) else { return true }
         return rx.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil
     }
@@ -128,6 +128,7 @@ enum DenyList {
             let gitVerb = matches(view, #"\b(push|reset|clean|branch|checkout|restore)\b"#)
             let hasGit = matches(view, #"\bgit\b"#)
             for r in rules where (r.name.hasPrefix("git ") ? (hasGit && gitVerb) : true) && matches(view, r.regex) { out.append(r.name) }
+            out += tokenHits(view)
             for c in combos where matches(view, c.a) && matches(view, c.b) { out.append(c.name) }
             // Whole line, not split on ; | & (those can sit inside quotes): any curl/wget line that writes remotely.
             for line in view.split(separator: "\n") {
