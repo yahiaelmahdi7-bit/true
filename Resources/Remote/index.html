@@ -25,11 +25,21 @@
   <form id="pairForm"><input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" aria-label="Pairing code"><button type="submit" class="send">Pair</button></form>
 </main>
 
-<main id="list" aria-label="Panes">
-  <header class="bar"><h1>True</h1><span id="clock"></span></header>
+<main id="list" aria-label="Hub">
+  <header class="bar"><h1>Hub</h1><span id="clock"></span></header>
+  <p id="hubSummary" class="hint sum"></p>
   <div id="tabs"></div>
-  <p id="empty" hidden>No panes open on the Mac.</p>
+  <p id="empty" hidden>Nothing running on the Mac.</p>
+  <button id="fab" aria-label="Start work">＋</button>
 </main>
+
+<div id="sheet" hidden role="dialog" aria-modal="true" aria-label="Sheet">
+  <div id="sheetBack"></div>
+  <div id="sheetBox">
+    <header><h2 id="sheetTitle"></h2><button id="sheetClose" class="btn" aria-label="Close">✕</button></header>
+    <div id="sheetBody"></div>
+  </div>
+</div>
 
 <main id="shots" aria-label="Shots" hidden>
   <header class="bar"><h1>Shots</h1></header>
@@ -65,14 +75,14 @@
 </div>
 
 <nav id="nav" aria-label="Sections">
-  <button data-tab="panes" aria-current="page">Panes</button>
+  <button data-tab="panes" aria-current="page">Hub</button>
   <button data-tab="shots">Shots</button>
   <button data-tab="send">Send<span id="dot" hidden></span></button>
 </nav>
 
 <section id="term" hidden aria-label="Terminal">
   <header class="bar">
-    <button id="back" class="btn" aria-label="Back to panes">‹ Panes</button>
+    <button id="back" class="btn" aria-label="Back to Hub">‹ Hub</button>
     <span id="paneTitle"></span>
     <button id="fit" class="btn" aria-pressed="true" aria-label="Fit width">Fit</button>
   </header>

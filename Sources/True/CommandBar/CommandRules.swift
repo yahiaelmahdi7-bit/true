@@ -176,6 +176,8 @@ enum CommandRules {
 
     /// Shell syntax that chains or substitutes commands: the danger list cannot judge what these run.
     static func isCompound(_ text: String) -> Bool {
-        ["&&", "||", ";", "|", "$(", "`", ">"].contains { text.contains($0) }
+        // Line breaks count: each line would run (checked on scalars, since "\r\n" is one Character).
+        text.unicodeScalars.contains(where: { $0 == "\n" || $0 == "\r" })
+            || ["&&", "||", ";", "|", "$(", "`", ">"].contains { text.contains($0) }
     }
 }

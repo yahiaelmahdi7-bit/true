@@ -111,7 +111,7 @@ import AppKit
         var downloads: URL { files.downloads }
     }
 
-    func withEnv(port: UInt16, deadline: TimeInterval = 5, quarantine: (@Sendable (URL) -> Bool)? = nil, _ body: (Env) throws -> Void) throws {
+    func withEnv(port: UInt16, deadline: TimeInterval = 5, quarantine: (@Sendable (URL) -> Bool)? = nil, commands: RemoteCommands? = nil, _ body: (Env) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("true-drop-e2e-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -126,7 +126,8 @@ import AppKit
         let token = devices.pair(label: "Phone")
         let shortcut = devices.pair(label: "Shortcut", scope: .dropOnly)
         let s = RemoteServer(backend: FakeBackend(), codes: PairingCodes(), devices: devices, allowedLogin: { "me@x" },
-                             dnsName: { Self.dns }, files: files, dropDeadline: deadline, wsAuthTimeout: 0.7)
+                             dnsName: { Self.dns }, files: files, dropDeadline: deadline, wsAuthTimeout: 0.7,
+                             commands: commands ?? RemoteCommandsLive())
         #expect(s.start(port: port))
         defer { s.stop() }
         try body(Env(server: s, token: token, shortcut: shortcut, files: files, sink: sink, root: root))
