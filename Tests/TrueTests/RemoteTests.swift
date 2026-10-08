@@ -530,4 +530,42 @@ private func tempFile() -> URL {
             }
         }
     }
+
+    @Test func upgradeHeadersDoNotSkipBearerOutsidePaneSocket() throws {
+        try withServer(port: 18819) { _, _, _, _ in
+            let up = ["Upgrade: websocket", "Connection: Upgrade", "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+                      "Sec-WebSocket-Version: 13"]
+            let r = http(18819, "GET", "/api/tabs", origin: Self.origin, extra: up)
+            #expect(r.status == 400 && !r.body.contains("tabs"))
+            #expect(http(18819, "GET", "/", origin: Self.origin, extra: up).status == 400)
+            #expect(http(18819, "GET", "/api/tabs").status == 401)                       // plain, no bearer
+        }
+    }
+
+    @Test func revokeClosesLiveSocket() throws {
+        try withServer(port: 18820) { s, _, devices, be in
+            let tok = devices.pair(label: "t")
+            let id = try #require(devices.validate(tok)?.id)
+            let fd = open(18820, pane: be.pane, origin: Self.origin); defer { close(fd) }
+            awaitHead(fd)
+            let m = maskedFrame(1, Array(#"{"auth":"\#(tok)"}"#.utf8))
+            _ = send(fd, m, m.count, 0)
+            var buf = [UInt8](repeating: 0, count: 4096); var got: [UInt8] = []
+            while !String(decoding: got, as: UTF8.self).contains(#""t":"snap""#) {
+                let n = recv(fd, &buf, buf.count, 0); if n <= 0 { break }; got += buf[0..<n]
+            }
+            #expect(String(decoding: got, as: UTF8.self).contains(#""t":"snap""#))
+            devices.revoke(id); s.disconnect(device: id)
+            let t0 = Date()
+            _ = readAll(fd)                                                              // returns only once the server closed
+            #expect(Date().timeIntervalSince(t0) < 2)
+            #expect(devices.validate(tok) == nil)
+        }
+    }
+
+    @Test func emptyDNSNameFailsClosed() {
+        #expect(!RemoteAuth.hostMatches(host: "", dnsName: "."))
+        #expect(!RemoteAuth.hostMatches(host: ":8444", dnsName: "."))
+        #expect(!RemoteAuth.originMatches(origin: "https://:8444", dnsName: "."))
+    }
 }

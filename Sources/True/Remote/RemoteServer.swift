@@ -30,6 +30,8 @@ final class RemoteServer: @unchecked Sendable {
     private var listenFD: Int32 = -1
     private var running = false
     private var open: Set<Int32> = []
+    /// Authenticated WebSocket fds → the device that authed them, so a revoke can cut live sessions.
+    private var socketDevices: [Int32: UUID] = [:]
 
     init(backend: RemoteBackend, codes: PairingCodes, devices: DeviceStore,
          allowedLogin: @escaping @Sendable () -> String?, dnsName: @escaping @Sendable () -> String?,
@@ -68,6 +70,14 @@ final class RemoteServer: @unchecked Sendable {
         lock.unlock()
         for fd in fds { shutdown(fd, SHUT_RDWR) }
         Self.log.notice("remote stopped")
+    }
+
+    /// Close every live WebSocket that was authenticated by `device` (called on revoke).
+    func disconnect(device: UUID) {
+        lock.lock()
+        let fds = socketDevices.filter { $0.value == device }.map(\.key)
+        lock.unlock()
+        for fd in fds { shutdown(fd, SHUT_RDWR) }
     }
 
     // MARK: accept
@@ -147,9 +157,14 @@ final class RemoteServer: @unchecked Sendable {
         }
         let isAPI = req.path.hasPrefix("/api/")
         let ws = req.isWebSocketUpgrade
+        // The only request allowed to skip the bearer header is the pane WebSocket (it authenticates by first message).
+        let paneSocket = ws && req.path.hasPrefix("/api/pane/")
+        if ws && !paneSocket {
+            _ = send(fd, HTTPResponse.make(status: 400, reason: "Bad Request", body: Array("Bad request".utf8))); return
+        }
         let stateChanging = req.method != "GET" && req.method != "HEAD"
         // WebSocket auth is the first message (browsers can't set headers on a WS), so the upgrade itself needs no token.
-        let needsToken = isAPI && !ws
+        let needsToken = isAPI && !paneSocket
         let bearer = RemoteAuth.bearerToken(req.header("authorization"))
         let device = needsToken ? devices.validate(bearer) : nil
         let decision = RemoteAuth.decide(loginHeader: req.header(RemoteAuth.loginHeader), allowedLogin: allowedLogin(),
@@ -218,22 +233,22 @@ final class RemoteServer: @unchecked Sendable {
     }
 
     /// First WebSocket message must be text `{"auth":"<token>"}` within 5 s, else close 4401 and no PTY bytes flow.
-    private func authenticateSocket(_ fd: Int32, _ dec: inout WebSocket.Decoder, _ pending: inout [WebSocket.Message]) -> Bool {
+    private func authenticateSocket(_ fd: Int32, _ dec: inout WebSocket.Decoder, _ pending: inout [WebSocket.Message]) -> PairedDevice? {
         let end = Date().addingTimeInterval(wsAuthTimeout)
         var chunk = [UInt8](repeating: 0, count: 4096)
         while pending.isEmpty {
             let ms = Int32(max(0, end.timeIntervalSinceNow * 1000))
             var p = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
-            guard ms > 0, poll(&p, 1, ms) > 0 else { return false }
+            guard ms > 0, poll(&p, 1, ms) > 0 else { return nil }
             let n = recv(fd, &chunk, chunk.count, 0)
-            guard n > 0, let msgs = try? dec.feed(Array(chunk[0..<n])) else { return false }
+            guard n > 0, let msgs = try? dec.feed(Array(chunk[0..<n])) else { return nil }
             pending += msgs
         }
         let first = pending.removeFirst()
         guard first.op == .text,
               let tok = (try? JSONSerialization.jsonObject(with: Data(first.payload)) as? [String: Any])?["auth"] as? String,
-              devices.validate(tok) != nil else { return false }
-        return true
+              let dev = devices.validate(tok) else { return nil }
+        return dev
     }
 
     // MARK: pane stream
@@ -244,11 +259,15 @@ final class RemoteServer: @unchecked Sendable {
         guard send(fd, Array(head.utf8)) else { return }
         var dec = WebSocket.Decoder()
         var pending: [WebSocket.Message] = []
-        guard authenticateSocket(fd, &dec, &pending) else {
+        guard let authed = authenticateSocket(fd, &dec, &pending) else {
             Self.log.notice("ws auth failed")
             _ = send(fd, WebSocket.encode(.close, [0x11, 0x31]))   // 4401
             return
         }
+        lock.lock(); socketDevices[fd] = authed.id; lock.unlock()
+        defer { lock.lock(); socketDevices[fd] = nil; lock.unlock() }
+        // Revoked between validate and registration → no disconnect would ever reach this fd.
+        guard devices.all.contains(where: { $0.id == authed.id }) else { return }
         guard backend.snapshot(pane: pane) != nil else {
             _ = send(fd, WebSocket.encode(.text, Array(#"{"t":"gone"}"#.utf8)))
             _ = send(fd, WebSocket.encode(.close, [0x03, 0xE8])); return

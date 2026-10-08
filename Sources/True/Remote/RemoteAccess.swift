@@ -65,7 +65,7 @@ final class RemoteAccess {
         code = codes.issue(); codeExpiry = codes.expiry()
     }
 
-    func revoke(_ d: PairedDevice) { deviceStore.revoke(d.id); devices = deviceStore.all }
+    func revoke(_ d: PairedDevice) { deviceStore.revoke(d.id); server?.disconnect(device: d.id); devices = deviceStore.all }
     func reloadDevices() { devices = deviceStore.all }
 
     /// Reads the MagicDNS name and login from `tailscale status --json` at runtime (never at build time).

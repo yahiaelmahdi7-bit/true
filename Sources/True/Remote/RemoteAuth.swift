@@ -44,7 +44,7 @@ enum RemoteAuth {
     private static func clean(_ dns: String?) -> String? {
         guard var d = dns?.lowercased(), !d.isEmpty else { return nil }
         if d.hasSuffix(".") { d.removeLast() }
-        return d
+        return d.isEmpty ? nil : d
     }
 
     /// `Host` must be `<dnsName>:8444` or `<dnsName>` — anything else (a rebound attacker domain) is refused.
@@ -89,7 +89,8 @@ final class PairingCodes: @unchecked Sendable {
     func issue() -> String {
         lock.lock(); defer { lock.unlock() }
         var v: UInt32 = 0
-        _ = withUnsafeMutableBytes(of: &v) { SecRandomCopyBytes(kSecRandomDefault, 4, $0.baseAddress!) }
+        let rc = withUnsafeMutableBytes(of: &v) { SecRandomCopyBytes(kSecRandomDefault, 4, $0.baseAddress!) }
+        precondition(rc == errSecSuccess, "SecRandomCopyBytes failed")
         let c = String(format: "%06d", Int(v % 1_000_000))
         code = c; issuedAt = now(); wrong = 0; burnedFlag = false
         return c
