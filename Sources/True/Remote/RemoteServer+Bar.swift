@@ -4,12 +4,9 @@ import Foundation
 /// these handlers only ever act on a server-made routeId or a known builder id.
 extension RemoteServer {
     private func readJSON(_ fd: Int32, _ req: HTTPRequest) -> [String: Any]? {
-        let len = req.declaredLength
-        guard len > 0, len <= 16 * 1024 else { plainReply(fd, len > 16 * 1024 ? 413 : 400, len > 16 * 1024 ? "Payload Too Large" : "Bad Request", "Send small JSON"); return nil }
-        var body = Array(req.body.prefix(len))
-        if DropReceiver.pump(fd, have: body.count, total: len, deadline: HTTPRequest.bodyDeadline, sink: { body += $0; return true }) != .ok {
-            plainReply(fd, 408, "Request Timeout", "Too slow"); return nil
-        }
+        // Only the drop/clip routes stream; these small JSON bodies arrive fully buffered (parser caps them).
+        let body = req.body
+        guard !body.isEmpty, body.count <= 16 * 1024 else { plainReply(fd, 400, "Bad Request", "Send small JSON"); return nil }
         guard let o = (try? JSONSerialization.jsonObject(with: Data(body))) as? [String: Any] else {
             plainReply(fd, 400, "Bad Request", "Need JSON"); return nil
         }
