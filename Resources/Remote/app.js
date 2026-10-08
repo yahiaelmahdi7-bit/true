@@ -13,7 +13,7 @@ function api(path) { return fetch(path, { cache: 'no-store', headers: { Authoriz
 function unpair() {
   localStorage.removeItem(TOKEN_KEY); view = 'pair'; paneId = null;
   clearTimeout(retryTimer); if (ws) { ws.onclose = null; ws.close(); ws = null; }
-  for (const id of ['list', 'term', 'shots', 'send', 'viewer']) $(id).hidden = true;
+  for (const id of ['list', 'term', 'shots', 'send', 'viewer', 'sheet']) $(id).hidden = true;
   $('nav').hidden = true; document.body.classList.remove('hasnav'); $('pair').hidden = false; banner('');
 }
 
@@ -22,38 +22,38 @@ let fit = true, ctrl = false, retry = 0, retryTimer = null, listFails = 0, wsEve
 
 function banner(msg) { const b = $('banner'); b.textContent = msg || ''; b.hidden = !msg; }
 
-// ---------- list ----------
+// ---------- Hub (the Mac Hub's own model, GET /api/hub) ----------
 async function loadList() {
-  if (view !== 'list') return;
+  if (view !== 'list' || document.hidden) return;
   try {
-    const r = await api('/api/tabs');
+    const r = await api('/api/hub');
     if (r.status === 401) { unpair(); return; }
     if (!r.ok) throw new Error(String(r.status));
     const data = await r.json();
     listFails = 0; banner('');
-    renderList(data.tabs || []);
+    renderHub(data);
   } catch (e) {
     if (++listFails >= 2) banner('Mac asleep or offline — retrying…');
   }
 }
 
-function renderList(tabs) {
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+
+function renderHub(data) {
   const host = $('tabs'); host.textContent = '';
   let n = 0;
-  for (const t of tabs) {
-    const sec = document.createElement('section'); sec.className = 'tab';
-    const h = document.createElement('h2'); h.textContent = t.title; sec.appendChild(h);
-    for (const p of t.panes) {
+  $('hubSummary').textContent = data.summary || '';
+  for (const g of data.projects || []) {
+    const sec = el('section', 'tab');
+    sec.appendChild(el('h2', null, g.title + (g.summary ? ' · ' + g.summary : '')));
+    for (const r of g.rows || []) {
       n++;
-      const b = document.createElement('button');
-      b.className = 'pane' + (p.live ? '' : ' dead'); b.disabled = !p.live;
-      const box = document.createElement('span'); box.className = 't';
-      const a = document.createElement('span'); a.className = 'n'; a.textContent = p.title;
-      const c = document.createElement('span'); c.className = 'c'; c.textContent = p.cwd || '';
-      box.append(a, c); b.appendChild(box);
-      if (p.needsYou) { const s = document.createElement('span'); s.className = 'chip need'; s.textContent = 'Needs you'; b.appendChild(s); }
-      else if (p.busy) { const s = document.createElement('span'); s.className = 'chip busy'; s.textContent = 'Working'; b.appendChild(s); }
-      b.onclick = () => openPane(p.id, p.title);
+      const b = el('button', 'row2');
+      const box = el('span', 't');
+      box.append(el('span', 'n', r.name), el('span', 'c', [r.cwd, r.elapsed].filter(Boolean).join(' · ')));
+      b.appendChild(box);
+      b.appendChild(el('span', 'chip ' + (r.statusKey || 'idle'), r.status));
+      b.onclick = () => rowTap(r);
       sec.appendChild(b);
     }
     host.appendChild(sec);
@@ -61,6 +61,155 @@ function renderList(tabs) {
   $('empty').hidden = n > 0;
   $('clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
+
+function rowTap(r) {
+  if (r.pane) { openPane(r.pane, r.name); return; }
+  if (r.kind === 'background' && r.builderId) { openBuilder(r); return; }
+  openSheet(r.name, (body) => {
+    body.append(el('p', 'hint', 'Running in another terminal. Read-only here.'),
+      el('pre', null, [r.status, r.cwd, r.elapsed].filter(Boolean).join('\n')));
+  });
+}
+
+// ---------- sheets ----------
+function openSheet(title, fill) {
+  $('sheetTitle').textContent = title; const body = $('sheetBody'); body.textContent = '';
+  fill(body); $('sheet').hidden = false;
+}
+function closeSheet() { $('sheet').hidden = true; $('sheetBody').textContent = ''; }
+$('sheetClose').onclick = closeSheet; $('sheetBack').onclick = closeSheet;
+
+async function openBuilder(r) {
+  openSheet(r.name, (body) => body.appendChild(el('p', 'hint', 'Loading…')));
+  try {
+    const resp = await api('/api/hub/builder/' + encodeURIComponent(r.builderId));
+    if (resp.status === 401) { unpair(); return; }
+    if (!resp.ok) throw new Error(String(resp.status));
+    const d = await resp.json();
+    openSheet(d.name || r.name, (body) => {
+      body.append(el('p', 'hint', d.status + (d.acked ? ' · acknowledged' : '')), el('pre', null, d.text || '(no result text yet)'));
+      if (d.canAck && !d.acked) {
+        const ack = el('button', 'big', 'Ack');
+        ack.onclick = async () => {
+          ack.disabled = true;
+          const x = await api2('/api/hub/builder/' + encodeURIComponent(r.builderId) + '/ack', 'POST', '{}', { 'Content-Type': 'application/json' });
+          if (x.ok) { closeSheet(); loadList(); } else { ack.disabled = false; ack.textContent = 'Failed (' + x.status + ') — retry'; }
+        };
+        body.appendChild(ack);
+      }
+    });
+  } catch (e) { openSheet(r.name, (body) => body.appendChild(el('p', 'msg', 'Could not load (Mac offline?)'))); }
+}
+
+// ---------- ⌘K on the phone: the server proposes, the phone only picks from its lists ----------
+const SLOT_NAMES = { kind: 'Kind', project: 'Project', target: 'Where', model: 'Model', effort: 'Effort' };
+let cur = null;   // { routeId, route, candidates }
+
+$('fab').onclick = openComposer;
+async function openComposer() {
+  cur = null;
+  openSheet('Start work', (body) => {
+    const t = el('textarea', 'field'); t.id = 'cmdText'; t.rows = 3; t.maxLength = 4000; t.placeholder = 'What should happen? (fix the login test in true…)';
+    t.setAttribute('aria-label', 'Command');
+    const go = el('button', 'big', 'Route'); go.id = 'cmdRoute';
+    const out = el('div'); out.id = 'cmdOut';
+    const rec = el('div', 'recent'); rec.id = 'cmdRecent';
+    go.onclick = () => routeIt(t.value);
+    body.append(t, go, out, rec);
+    t.focus(); loadRecent(t);
+  });
+}
+
+async function loadRecent(t) {
+  try {
+    const r = await api('/api/recent'); if (!r.ok) return;
+    const d = await r.json(); const host = $('cmdRecent'); if (!host || !(d.items || []).length) return;
+    host.appendChild(el('h3', null, 'Recent'));
+    for (const s of d.items.slice(0, 12)) { const b = el('button', null, s); b.onclick = () => { t.value = s; t.focus(); }; host.appendChild(b); }
+  } catch (e) { /* history is optional */ }
+}
+
+async function routeIt(text) {
+  const out = $('cmdOut'); out.textContent = '';
+  if (!text.trim()) return;
+  out.appendChild(el('p', 'hint', 'Routing…'));
+  try {
+    const r = await api2('/api/route', 'POST', JSON.stringify({ text }), { 'Content-Type': 'application/json' });
+    if (r.status === 401) { unpair(); return; }
+    if (r.status === 429) { out.textContent = ''; out.appendChild(el('p', 'msg', 'Slow down — too many requests.')); return; }
+    if (!r.ok) throw new Error(String(r.status));
+    cur = await r.json(); renderRoute();
+  } catch (e) { out.textContent = ''; out.appendChild(el('p', 'msg', 'Could not route (Mac offline?)')); }
+}
+
+function renderRoute(note) {
+  const out = $('cmdOut'); out.textContent = '';
+  const r = cur.route;
+  const chips = el('div', 'chips');
+  const vals = { kind: r.kindLabel, project: r.project || '—', target: r.where, model: r.model || 'default', effort: r.effort || 'default' };
+  for (const s of Object.keys(SLOT_NAMES)) {
+    if (!(cur.candidates && cur.candidates[s] && cur.candidates[s].length)) continue;
+    const c = el('button', 'rc' + (r.uncertain && r.uncertain.includes(s) ? ' unsure' : '') + (s === 'kind' && r.dangerous ? ' danger' : ''), vals[s]);
+    c.setAttribute('aria-label', SLOT_NAMES[s] + ': ' + vals[s]);
+    c.onclick = () => pickSlot(s);
+    chips.appendChild(c);
+  }
+  out.appendChild(chips);
+  if (note) out.appendChild(el('p', 'msg', note));
+  if (r.twoChoice) out.appendChild(el('p', 'hint', 'Not sure what this is — pick a kind above.'));
+  if (r.dangerous) out.appendChild(el('p', 'msg', 'Looks risky — you will be asked to confirm.'));
+  const tog = el('label', 'tog'); const cb = el('input'); cb.type = 'checkbox'; cb.id = 'cmdBg';
+  tog.append(cb, document.createTextNode('Run in background'));
+  out.appendChild(tog);
+  const run = el('button', 'big', 'Run'); run.disabled = !r.runnable;
+  run.onclick = () => runIt(cb.checked, false, run);
+  out.appendChild(run);
+  if (!r.runnable) out.appendChild(el('p', 'hint', 'Nothing to run from the phone for this route.'));
+}
+
+function pickSlot(slot) {
+  const opts = (cur.candidates && cur.candidates[slot]) || [];
+  openSheet(SLOT_NAMES[slot], (body) => {
+    for (const o of opts) {
+      const b = el('button', 'opt', o.label); b.onclick = async () => {
+        const r = await api2('/api/route/' + encodeURIComponent(cur.routeId) + '/slot', 'POST', JSON.stringify({ slot, value: o.value }), { 'Content-Type': 'application/json' });
+        const keep = cur.routeId;
+        if (r.ok) { const d = await r.json(); cur = Object.assign(cur, d); cur.routeId = keep; }
+        const txt = $('cmdText') ? $('cmdText').value : ''; // sheet was replaced; rebuild the composer around the new route
+        const saved = cur; await openComposer(); $('cmdText').value = txt; cur = saved;
+        renderRoute(r.ok ? '' : r.status === 404 ? 'That route expired — tap Route again.' : 'That choice is not available.');
+      };
+      body.appendChild(b);
+    }
+  });
+}
+
+async function runIt(background, confirm, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api2('/api/run', 'POST', JSON.stringify({ routeId: cur.routeId, background, confirm }), { 'Content-Type': 'application/json' });
+    if (r.status === 401) { unpair(); return; }
+    if (r.status === 409) {
+      const d = await r.json();
+      openSheet('Confirm', (body) => {
+        body.append(el('p', 'msg', 'This looks destructive (' + String(d.reason || 'risky').replace(/_/g, ' ') + '). Run it anyway?'));
+        const yes = el('button', 'big', 'Run anyway'); yes.onclick = () => runIt(background, true, yes);
+        const no = el('button', 'big alt', 'Cancel'); no.onclick = closeSheet;
+        body.append(yes, no);
+      });
+      return;
+    }
+    if (r.ok) {
+      const d = await r.json(); closeSheet();
+      if (d.pane) openPane(d.pane, 'New pane'); else { banner(d.background ? 'Started in background: ' + d.background : 'Done'); setTimeout(() => banner(''), 3000); loadList(); }
+      return;
+    }
+    const msg = r.status === 404 ? 'That route expired — tap Route again.' : r.status === 429 ? 'Max 10 runs a minute — wait a moment.' : r.status === 403 ? 'The Mac refused this one.' : 'Failed (' + r.status + ')';
+    if ($('cmdOut')) { closeSheetKeepNone(); }
+    openSheet('Could not run', (body) => body.appendChild(el('p', 'msg', msg)));
+  } catch (e) { openSheet('Could not run', (body) => body.appendChild(el('p', 'msg', 'Mac unreachable.'))); }
+}
+function closeSheetKeepNone() { /* the error sheet replaces the composer */ }
 
 // ---------- terminal ----------
 function ensureTerm() {
@@ -347,5 +496,5 @@ $('clipSend').onclick = async () => {
   } catch (e) { note.textContent = 'Mac unreachable.'; }
 };
 
-setInterval(loadList, 3000);
+setInterval(loadList, 5000);   // Hub poll: only while visible (loadList bails when hidden)
 if (getToken()) start(); else unpair();
