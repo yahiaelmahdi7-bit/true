@@ -346,6 +346,7 @@ private struct ShotViewer: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.writeObjects([image])
             }
+            ToolbarButton(symbol: "iphone.and.arrow.forward", label: "Phone", help: "Send to Phone") { PhoneOutbox.sendFile(url) }
             ToolbarButton(symbol: "pencil.tip.crop.circle", label: "Markup", help: "Mark up") { c.markingUp = true; c.makeKey() }
             ToolbarButton(symbol: "folder", label: "Finder", help: "Show in Finder") {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -480,6 +481,7 @@ private struct DownloadChip: View {
             Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path)).resizable().frame(width: 28, height: 28)
             Text(item.name).font(.callout).lineLimit(1).truncationMode(.middle).frame(maxWidth: 150, alignment: .leading)
             ActionButton(symbol: "paperplane", help: "Send to session", flies: true) { controller.sendPath(item.url) }
+            ActionButton(symbol: "iphone.and.arrow.forward", help: "Send to Phone") { PhoneOutbox.sendFile(item.url) }
             ActionButton(symbol: "link", doneSymbol: "checkmark", help: "Copy path") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(item.url.path, forType: .string)

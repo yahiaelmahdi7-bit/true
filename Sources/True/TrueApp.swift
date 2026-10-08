@@ -62,6 +62,7 @@ struct TrueApp: App {
                 Button("Paste Latest Screenshot") { ScreenshotWatcher.shared.pasteLatest() }
                     .keyboardShortcut("v", modifiers: [.command, .option])
                 Divider()
+                Button("Send Clipboard to Phone") { PhoneOutbox.sendClipboard() }
                 Button("Remote Access…") { RemoteAccessWindow.shared.show() }
             }
             CommandMenu("Hub") {

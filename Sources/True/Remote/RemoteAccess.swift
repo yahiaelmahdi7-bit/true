@@ -68,6 +68,13 @@ final class RemoteAccess {
     func revoke(_ d: PairedDevice) { deviceStore.revoke(d.id); server?.disconnect(device: d.id); devices = deviceStore.all }
     func reloadDevices() { devices = deviceStore.all }
 
+    /// A paired device named "Shortcut" for the iOS share sheet. The raw token is returned once; only its hash is stored.
+    func createShortcutToken() -> String {
+        let t = deviceStore.pair(label: "Shortcut")
+        devices = deviceStore.all
+        return t
+    }
+
     /// Reads the MagicDNS name and login from `tailscale status --json` at runtime (never at build time).
     func refreshTailnet() {
         let cache = loginCache
@@ -152,7 +159,7 @@ final class RemoteAccessWindow {
         RemoteAccess.shared.refreshTailnet()
         if RemoteAccess.shared.enabled { RemoteAccess.shared.newCode() }   // a fresh code every time it is shown
         if window == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 560),
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 720),
                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
             w.title = "Remote Access"
             w.isReleasedWhenClosed = false
@@ -168,8 +175,16 @@ final class RemoteAccessWindow {
 struct RemoteAccessView: View {
     @State private var remote = RemoteAccess.shared
     @State private var login = RemoteAccess.shared.allowedLoginOverride
+    @State private var shortcutToken: String?
+    @State private var copied = false
 
     var body: some View {
+        ScrollView { content }
+            .frame(width: 440, height: 720, alignment: .topLeading)
+            .onAppear { remote.reloadDevices() }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 14) {
             Toggle("Allow access from my phone (tailnet only)", isOn: Binding(get: { remote.enabled },
                                                                           set: { remote.setEnabled($0) }))
@@ -219,12 +234,36 @@ struct RemoteAccessView: View {
                 }
                 Text("Blank = the Tailscale user signed in on this Mac. Anyone else is refused (403).")
                     .font(.caption).foregroundStyle(.secondary)
+                Divider()
+                shortcutSection
             }
-            Spacer(minLength: 0)
         }
         .padding(20)
-        .frame(width: 440, height: 560, alignment: .topLeading)
-        .onAppear { remote.reloadDevices() }
+        .frame(width: 440, alignment: .topLeading)
+    }
+
+    private var shortcutSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("iPhone Shortcut").font(.headline)
+            Text("Adds “Send to True” to the iPhone share sheet. The token is a paired device named “Shortcut” — revoke it above any time.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let t = shortcutToken {
+                Text(t).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                HStack {
+                    Button(copied ? "Copied" : "Copy token") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(t, forType: .string)
+                        copied = true
+                    }
+                    Button("Done") { shortcutToken = nil; copied = false }
+                }
+                Text("Shown once — it can't be shown again.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Button("Create Shortcut token") { shortcutToken = remote.createShortcutToken() }
+            }
+            Text("1. Shortcuts app → New Shortcut → turn on “Show in Share Sheet”.\n2. Add “Get Contents of URL”: \(remote.url ?? "https://<this-mac>.ts.net:8444")/api/drop\n3. Method POST. Headers: Authorization = Bearer <token>, X-Filename = Name (the Shortcut Input’s Name).\n4. Request Body = File → Shortcut Input.")
+                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        }
     }
 
     private var statusLine: String {

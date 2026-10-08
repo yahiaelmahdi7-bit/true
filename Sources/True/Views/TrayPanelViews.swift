@@ -187,6 +187,7 @@ private struct DownloadRow: View {
                 ScreenshotWatcher.shared.sendPath(item.url)
                 controller.showToast("Sent to session")
             }
+            IconButton(symbol: "iphone.and.arrow.forward", help: "Send to Phone") { PhoneOutbox.sendFile(item.url) }
             IconButton(symbol: "link", help: "Copy path") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(item.url.path, forType: .string)
@@ -296,6 +297,7 @@ private struct ZoomPanel: View {
                 watcher.send(entry)
                 controller.showToast("Sent to session")
             }
+            IconButton(symbol: "iphone.and.arrow.forward", help: "Send to Phone") { PhoneOutbox.sendFile(url) }
             IconButton(symbol: "link", help: "Copy path") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(url.path, forType: .string)
