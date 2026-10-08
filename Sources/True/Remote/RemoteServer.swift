@@ -32,6 +32,9 @@ final class RemoteServer: @unchecked Sendable {
     private var listenFD: Int32 = -1
     private var running = false
     private var open: Set<Int32> = []
+    /// Drop uploads in flight; the free-space check is per upload, so cap how many can pass it at once.
+    static let maxConcurrentDrops = 2
+    private var activeDrops = 0
     /// Authenticated WebSocket fds → the device that authed them, so a revoke can cut live sessions.
     private var socketDevices: [Int32: UUID] = [:]
 
@@ -172,6 +175,11 @@ final class RemoteServer: @unchecked Sendable {
         // Browsers always send Origin on POST, and a bearer token is not ambient (no CSRF), so ONLY the Shortcuts routes
         // may omit it. A present Origin must still be exact; a bad/missing bearer still gets 401.
         let originOptional = req.method == "POST" && Self.noOriginRoutes.contains(req.path) && req.header("origin") == nil
+        // A send-only (Shortcut) token is valid for nothing but POST /api/drop and /api/clip.
+        if let device, device.scope == .dropOnly, !(req.method == "POST" && Self.noOriginRoutes.contains(req.path)) {
+            Self.log.notice("deny 403 \(req.method, privacy: .public) \(req.path, privacy: .public): send-only token")
+            _ = send(fd, HTTPResponse.make(status: 403, reason: "Forbidden", body: Array("Forbidden".utf8))); return
+        }
         let decision = RemoteAuth.decide(loginHeader: req.header(RemoteAuth.loginHeader), allowedLogin: allowedLogin(),
                                          host: req.header("host"), origin: req.header("origin"), dnsName: dnsName(),
                                          requiresOrigin: (stateChanging || ws) && !originOptional, requiresToken: needsToken,
@@ -265,6 +273,15 @@ final class RemoteServer: @unchecked Sendable {
         let len = req.declaredLength
         guard len > 0 else { plain(fd, len == 0 ? 400 : 411, len == 0 ? "Bad Request" : "Length Required", "Send a Content-Length"); return }
         guard len <= RemoteFiles.maxDropBytes else { plain(fd, 413, "Payload Too Large", "Over 200 MB"); return }
+        lock.lock()
+        let slot = activeDrops < Self.maxConcurrentDrops
+        if slot { activeDrops += 1 }
+        lock.unlock()
+        guard slot else {
+            _ = send(fd, HTTPResponse.make(status: 503, reason: "Service Unavailable", headers: ["Retry-After": "2"],
+                                           body: Array("Busy, retry".utf8))); return
+        }
+        defer { lock.lock(); activeDrops -= 1; lock.unlock() }
         guard files.freeBytes(files.tmpDir) >= DropFS.minFreeBytes else {
             plain(fd, 507, "Insufficient Storage", "The Mac is almost out of disk space"); return
         }
@@ -383,7 +400,7 @@ final class RemoteServer: @unchecked Sendable {
         let first = pending.removeFirst()
         guard first.op == .text,
               let tok = (try? JSONSerialization.jsonObject(with: Data(first.payload)) as? [String: Any])?["auth"] as? String,
-              let dev = devices.validate(tok) else { return nil }
+              let dev = devices.validate(tok), dev.scope == .full else { return nil }
         return dev
     }
 

@@ -130,6 +130,26 @@ struct PairedDevice: Codable, Equatable, Identifiable, Sendable {
     var tokenHash: String
     var created: Date
     var lastSeen: Date
+    var scope: Scope = .full
+
+    /// `dropOnly` (the iOS Shortcut token) may only POST /api/drop and /api/clip.
+    enum Scope: String, Codable, Sendable { case full, dropOnly }
+
+    init(id: UUID, label: String, tokenHash: String, created: Date, lastSeen: Date, scope: Scope = .full) {
+        self.id = id; self.label = label; self.tokenHash = tokenHash
+        self.created = created; self.lastSeen = lastSeen; self.scope = scope
+    }
+
+    /// A missing `scope` key (devices paired before scopes existed) decodes as `full`.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        label = try c.decode(String.self, forKey: .label)
+        tokenHash = try c.decode(String.self, forKey: .tokenHash)
+        created = try c.decode(Date.self, forKey: .created)
+        lastSeen = try c.decode(Date.self, forKey: .lastSeen)
+        scope = try c.decodeIfPresent(Scope.self, forKey: .scope) ?? .full
+    }
 }
 
 /// Paired phones, hashed at rest in Application Support (mode 0600). Raw tokens are never stored.
@@ -152,11 +172,11 @@ final class DeviceStore: @unchecked Sendable {
     var all: [PairedDevice] { lock.lock(); defer { lock.unlock() }; return devices }
 
     /// Register a new device; returns the raw token to hand to the phone exactly once.
-    func pair(label: String, at date: Date = Date()) -> String {
+    func pair(label: String, scope: PairedDevice.Scope = .full, at date: Date = Date()) -> String {
         lock.lock(); defer { lock.unlock() }
         let token = RemoteAuth.newToken()
         devices.append(PairedDevice(id: UUID(), label: label, tokenHash: RemoteAuth.sha256Hex(token),
-                                    created: date, lastSeen: date))
+                                    created: date, lastSeen: date, scope: scope))
         save()
         return token
     }

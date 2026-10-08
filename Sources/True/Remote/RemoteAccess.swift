@@ -70,7 +70,7 @@ final class RemoteAccess {
 
     /// A paired device named "Shortcut" for the iOS share sheet. The raw token is returned once; only its hash is stored.
     func createShortcutToken() -> String {
-        let t = deviceStore.pair(label: "Shortcut")
+        let t = deviceStore.pair(label: "Shortcut", scope: .dropOnly)
         devices = deviceStore.all
         return t
     }
@@ -217,7 +217,7 @@ struct RemoteAccessView: View {
                 ForEach(remote.devices) { d in
                     HStack {
                         VStack(alignment: .leading) {
-                            Text(d.label)
+                            Text(d.scope == .dropOnly ? "\(d.label) · send only" : d.label)
                             Text("last seen \(d.lastSeen.formatted(.relative(presentation: .named)))")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
@@ -245,17 +245,24 @@ struct RemoteAccessView: View {
     private var shortcutSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("iPhone Shortcut").font(.headline)
-            Text("Adds “Send to True” to the iPhone share sheet. The token is a paired device named “Shortcut” — revoke it above any time.")
+            Text("Adds “Send to True” to the iPhone share sheet. The token is a send-only device named “Shortcut” (it can only send files and text to this Mac) — revoke it above any time.")
                 .font(.caption).foregroundStyle(.secondary)
             if let t = shortcutToken {
                 Text(t).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                 HStack {
                     Button(copied ? "Copied" : "Copy token") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(t, forType: .string)
+                        let pb = NSPasteboard.general
+                        pb.clearContents()
+                        // Ask clipboard managers (nspasteboard.org convention) not to record the token.
+                        pb.declareTypes([.string, NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")], owner: nil)
+                        pb.setString(t, forType: .string)
+                        pb.setString("", forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
                         copied = true
                     }
-                    Button("Done") { shortcutToken = nil; copied = false }
+                    Button("Done") {
+                        if NSPasteboard.general.string(forType: .string) == t { NSPasteboard.general.clearContents() }
+                        shortcutToken = nil; copied = false
+                    }
                 }
                 Text("Shown once — it can't be shown again.").font(.caption).foregroundStyle(.secondary)
             } else {

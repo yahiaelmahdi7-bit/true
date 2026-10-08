@@ -107,11 +107,11 @@ import AppKit
     final class Sink: @unchecked Sendable { var toasts: [String] = []; var clip: [String] = []; var ingests = 0; var free: Int64 = 50 << 30 }
 
     struct Env {
-        let server: RemoteServer, token: String, files: RemoteFiles, sink: Sink, root: URL
+        let server: RemoteServer, token: String, shortcut: String, files: RemoteFiles, sink: Sink, root: URL
         var downloads: URL { files.downloads }
     }
 
-    func withEnv(port: UInt16, deadline: TimeInterval = 5, _ body: (Env) throws -> Void) throws {
+    func withEnv(port: UInt16, deadline: TimeInterval = 5, quarantine: (@Sendable (URL) -> Bool)? = nil, _ body: (Env) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("true-drop-e2e-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -120,14 +120,16 @@ import AppKit
         let files = RemoteFiles(tray: { tray }, inbox: RemoteInbox(root: root.appendingPathComponent("inbox")),
                                 downloads: root.appendingPathComponent("Downloads"), tmpDir: root.appendingPathComponent("tmp"),
                                 freeBytes: { _ in sink.free },
-                                notify: { sink.toasts.append($0) }, setClipboard: { sink.clip.append($0) }, didIngest: { sink.ingests += 1 })
+                                notify: { sink.toasts.append($0) }, setClipboard: { sink.clip.append($0) }, didIngest: { sink.ingests += 1 },
+                                quarantine: quarantine ?? { DropFS.setQuarantine($0) })
         let devices = DeviceStore(url: root.appendingPathComponent("d.json"))
-        let token = devices.pair(label: "Shortcut")
+        let token = devices.pair(label: "Phone")
+        let shortcut = devices.pair(label: "Shortcut", scope: .dropOnly)
         let s = RemoteServer(backend: FakeBackend(), codes: PairingCodes(), devices: devices, allowedLogin: { "me@x" },
                              dnsName: { Self.dns }, files: files, dropDeadline: deadline, wsAuthTimeout: 0.7)
         #expect(s.start(port: port))
         defer { s.stop() }
-        try body(Env(server: s, token: token, files: files, sink: sink, root: root))
+        try body(Env(server: s, token: token, shortcut: shortcut, files: files, sink: sink, root: root))
     }
 
     func connect(_ port: UInt16) -> Int32 {
@@ -352,5 +354,101 @@ import AppKit
             #expect(r.header("Content-Type") == "image/png")
             #expect(r.all("Content-Security-Policy").contains("sandbox"))
         }
+    }
+
+    // MARK: scope, concurrency, quarantine, header (security review)
+
+    @Test func shortcutTokenCanOnlyDropAndClip() throws {
+        try withEnv(port: 18851) { env in
+            let item = try #require(env.files.inbox.add(name: "n.txt", kind: .text, data: Data("x".utf8)))
+            for (m, p) in [("GET", "/api/tabs"), ("GET", "/api/shots"), ("GET", "/api/inbox"),
+                           ("GET", "/api/inbox/\(item.id)"), ("DELETE", "/api/inbox/\(item.id)")] {
+                #expect(raw(18851, m, p, bearer: env.shortcut, origin: Self.origin).status == 403, "\(m) \(p)")
+            }
+            #expect(env.files.inbox.list().count == 1)                                       // DELETE did nothing
+            #expect(raw(18851, "POST", "/api/drop", bearer: env.shortcut, extra: ["X-Filename: a.txt"], body: Array("x".utf8)).status == 200)
+            #expect(raw(18851, "POST", "/api/clip", bearer: env.shortcut, body: Array(#"{"text":"hi"}"#.utf8)).status == 200)
+            // the full token is unaffected
+            #expect(raw(18851, "GET", "/api/tabs", bearer: env.token, origin: Self.origin).status == 200)
+            #expect(raw(18851, "GET", "/api/inbox", bearer: env.token, origin: Self.origin).status == 200)
+        }
+    }
+
+    @Test func shortcutTokenIsRefusedOnTheWebSocket() throws {
+        try withEnv(port: 18852) { env in
+            let pane = UUID().uuidString.lowercased()
+            func closeCode(for tok: String) -> (head: String, code: Int?) {
+                let fd = connect(18852); defer { close(fd) }
+                let req = "GET /api/pane/\(pane) HTTP/1.1\r\nHost: \(Self.dns):8444\r\nTailscale-User-Login: me@x\r\nOrigin: \(Self.origin)\r\n"
+                    + "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+                _ = send(fd, Array(req.utf8), req.utf8.count, 0)
+                var buf = [UInt8](repeating: 0, count: 4096); var got: [UInt8] = []
+                while !got.contains(where: { _ in String(decoding: got, as: UTF8.self).contains("\r\n\r\n") }) {
+                    let n = recv(fd, &buf, buf.count, 0); if n <= 0 { break }; got += buf[0..<n]
+                }
+                // masked client text frame {"auth":tok}
+                let payload = Array(#"{"auth":"\#(tok)"}"#.utf8), mask: [UInt8] = [1, 2, 3, 4]
+                var f: [UInt8] = [0x81, 0x80 | UInt8(payload.count)] + mask
+                for (i, b) in payload.enumerated() { f.append(b ^ mask[i % 4]) }
+                _ = send(fd, f, f.count, 0)
+                var all: [UInt8] = []
+                while true { let n = recv(fd, &buf, buf.count, 0); if n <= 0 { break }; all += buf[0..<n] }
+                let text = String(decoding: got, as: UTF8.self)
+                guard all.count >= 4, all[0] == 0x88 else { return (text, nil) }
+                return (text, Int(all[2]) << 8 | Int(all[3]))
+            }
+            #expect(closeCode(for: env.shortcut).code == 4401)
+        }
+    }
+
+    @Test func oldDeviceJSONWithoutScopeDecodesAsFull() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("true-scope-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let url = root.appendingPathComponent("remote-devices.json")
+        let h = RemoteAuth.sha256Hex("old-token")
+        let json = #"[{"id":"\#(UUID().uuidString)","label":"iPhone","tokenHash":"\#(h)","created":1000,"lastSeen":2000}]"#
+        try Data(json.utf8).write(to: url)
+        let store = DeviceStore(url: url)
+        #expect(store.all.count == 1 && store.all[0].scope == .full)
+        #expect(store.validate("old-token")?.scope == .full)
+        // round trip keeps a dropOnly scope
+        let t = store.pair(label: "Shortcut", scope: .dropOnly)
+        #expect(DeviceStore(url: url).validate(t)?.scope == .dropOnly)
+    }
+
+    @Test func thirdConcurrentDropIsBusy() throws {
+        try withEnv(port: 18853, deadline: 30) { env in
+            func hold() -> Int32 {                     // headers + a partial body: the upload stays in flight
+                let fd = connect(18853)
+                let h = "POST /api/drop HTTP/1.1\r\nHost: \(Self.dns):8444\r\nTailscale-User-Login: me@x\r\nAuthorization: Bearer \(env.token)\r\nX-Filename: big.bin\r\nContent-Length: 1000\r\n\r\nabc"
+                _ = send(fd, Array(h.utf8), h.utf8.count, 0)
+                return fd
+            }
+            let a = hold(), b = hold()
+            defer { close(a); close(b) }
+            Thread.sleep(forTimeInterval: 0.5)
+            let third = raw(18853, "POST", "/api/drop", bearer: env.token, extra: ["X-Filename: c.txt"], body: Array("x".utf8))
+            #expect(third.status == 503 && third.text == "Busy, retry" && third.header("Retry-After") != nil)
+            // releasing a slot lets the next one through
+            close(a)
+            Thread.sleep(forTimeInterval: 0.5)
+            #expect(raw(18853, "POST", "/api/drop", bearer: env.token, extra: ["X-Filename: c.txt"], body: Array("x".utf8)).status == 200)
+        }
+    }
+
+    @Test func failedQuarantineRemovesTheFileAnd500s() throws {
+        try withEnv(port: 18854, quarantine: { _ in false }) { env in
+            let r = drop(18854, env, name: "evil.bin", body: Array("x".utf8))
+            #expect(r.status == 500)
+            let left = (try? FileManager.default.contentsOfDirectory(atPath: env.downloads.path)) ?? []
+            #expect(left.isEmpty)
+        }
+    }
+
+    @Test func contentDispositionIsAsciiOnly() {
+        let h = DropName.attachment("café 写真.svg")
+        #expect(h.allSatisfy { $0.isASCII })
+        #expect(h.contains("filename*=UTF-8''caf%C3%A9%20%E5%86%99%E7%9C%9F.svg"))
     }
 }

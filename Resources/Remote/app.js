@@ -316,19 +316,24 @@ function upload(file) {
   n.append(nm, st);
   const pr = document.createElement('progress'); pr.max = 100; pr.value = 0;
   row.append(n, pr); $('uploads').prepend(row);
+  const fail = (m) => { row.classList.add('bad'); st.textContent = m; pr.hidden = true; };
+  const attempt = (n) => {
   const x = new XMLHttpRequest();
   x.open('POST', '/api/drop');
   x.setRequestHeader('Authorization', 'Bearer ' + getToken());
   x.setRequestHeader('X-Filename', encodeURIComponent(file.name || 'iPhone-upload'));
   x.upload.onprogress = (e) => { if (e.lengthComputable) { const p = Math.round((e.loaded / e.total) * 100); pr.value = p; st.textContent = p + '%'; } };
-  const fail = (m) => { row.classList.add('bad'); st.textContent = m; pr.hidden = true; };
   x.onload = () => {
     if (x.status === 401) { unpair(); return; }
+    // The Mac takes 2 uploads at a time; a 503 means "busy" — wait 1s, 2s, 4s… (6 tries) and go again.
+    if (x.status === 503 && n < 6) { pr.value = 0; st.textContent = 'Waiting…'; setTimeout(() => attempt(n + 1), 1000 * 2 ** n); return; }
     if (x.status >= 200 && x.status < 300) { pr.value = 100; st.textContent = 'Sent ✓'; setTimeout(() => row.remove(), 6000); }
-    else fail(({ 413: 'Too big (200 MB max)', 507: 'Mac disk is full', 408: 'Timed out' })[x.status] || 'Failed (' + x.status + ')');
+    else fail(({ 413: 'Too big (200 MB max)', 507: 'Mac disk is full', 408: 'Timed out', 503: 'Mac is busy, try again' })[x.status] || 'Failed (' + x.status + ')');
   };
   x.onerror = () => fail('Mac unreachable');
   x.send(file);
+  };
+  attempt(0);
 }
 
 $('clipSend').onclick = async () => {

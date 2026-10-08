@@ -81,10 +81,13 @@ enum DropName {
         }
     }
 
+    /// ASCII only (`.alphanumerics` admits Unicode letters, which must be percent-encoded).
+    private static let rfc5987Allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+
     /// `Content-Disposition` value: ASCII fallback plus RFC 5987 UTF-8 name.
     static func attachment(_ name: String) -> String {
         let ascii = String(name.unicodeScalars.map { $0.isASCII && $0.value >= 0x20 && $0 != "\"" && $0 != "\\" ? Character($0) : "_" })
-        let pct = name.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "file"
+        let pct = name.addingPercentEncoding(withAllowedCharacters: rfc5987Allowed) ?? "file"
         return "attachment; filename=\"\(ascii)\"; filename*=UTF-8''\(pct)"
     }
 }
@@ -356,14 +359,16 @@ final class RemoteFiles: @unchecked Sendable {
     let notify: @Sendable (String) -> Void
     let setClipboard: @Sendable (String) -> Void
     let didIngest: @Sendable () -> Void
+    let quarantine: @Sendable (URL) -> Bool
 
     init(tray: @escaping @Sendable () -> TrayStore, inbox: RemoteInbox, downloads: URL, tmpDir: URL,
          freeBytes: @escaping @Sendable (URL) -> Int64 = { DropFS.freeBytes(at: $0) },
          notify: @escaping @Sendable (String) -> Void = { _ in },
          setClipboard: @escaping @Sendable (String) -> Void = { _ in },
-         didIngest: @escaping @Sendable () -> Void = {}) {
+         didIngest: @escaping @Sendable () -> Void = {},
+         quarantine: @escaping @Sendable (URL) -> Bool = { DropFS.setQuarantine($0) }) {
         self.tray = tray; self.inbox = inbox; self.downloads = downloads; self.tmpDir = tmpDir
-        self.freeBytes = freeBytes; self.notify = notify; self.setClipboard = setClipboard; self.didIngest = didIngest
+        self.freeBytes = freeBytes; self.notify = notify; self.setClipboard = setClipboard; self.didIngest = didIngest; self.quarantine = quarantine
     }
 
     enum Landed: Equatable { case shot(String), file(URL) }
@@ -379,7 +384,12 @@ final class RemoteFiles: @unchecked Sendable {
         }
         DropFS.ensureDir(downloads)
         guard let placed = DropFS.placeExclusive(tmp, in: downloads, name: name) else { return nil }
-        DropFS.setQuarantine(placed)
+        guard quarantine(placed) else {
+            // An unquarantined download would skip Gatekeeper; refuse rather than leave it.
+            unlink(placed.path)
+            NSLog("True drop: could not quarantine %@; removed", placed.lastPathComponent)
+            return nil
+        }
         notify("Received \(placed.lastPathComponent) from iPhone")
         return .file(placed)
     }
