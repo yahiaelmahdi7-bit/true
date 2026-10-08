@@ -417,6 +417,8 @@ final class TrueTerminalView: LocalProcessTerminalView {
 
     override func dataReceived(slice: ArraySlice<UInt8>) {
         super.dataReceived(slice: slice)
+        // Tee the same bytes to phone viewers (no-op unless Remote Access has a viewer on this pane).
+        if let id = paneID { RemoteHub.shared.publish(id, slice) }
         Self.notePressure(slice.count)
         // Every arrival is evidence the backlog is still draining; the pause logic reads this.
         lastChunkAt = DispatchTime.now().uptimeNanoseconds

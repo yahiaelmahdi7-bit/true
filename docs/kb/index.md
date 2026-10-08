@@ -16,7 +16,7 @@ Build `.app` with `scripts/package.sh` (never launches it). Gates: see [conventi
 ## Doc map
 - [roadmap](roadmap.md) · [architecture](architecture.md) · [decisions](decisions.md) · [conventions](conventions.md)
 - [integrations](integrations.md) · [security](security.md) · [ux](ux.md) · [design-system](design-system.md)
-- [operations](operations.md) · [glossary](glossary.md)
+- [operations](operations.md) · [glossary](glossary.md) · [remote-access](remote-access.md)
 - Truth lives in [../../SPEC.md](../../SPEC.md); KB links to it rather than copying.
 
 ## Crew
