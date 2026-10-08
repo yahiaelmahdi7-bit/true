@@ -8,7 +8,7 @@ enum ScrollbackSerializer {
     static let maxLines = 5_000
     static let maxBytes = 2_000_000
 
-    private struct Style: Equatable {
+    struct Style: Equatable {
         var fg: Attribute.Color, bg: Attribute.Color
         var style: CharacterStyle
         var underline: UnderlineStyle
@@ -50,7 +50,7 @@ enum ScrollbackSerializer {
         return rows.suffix(keep).joined(separator: "\r\n")
     }
 
-    private static func cells(of l: BufferLine, terminal t: Terminal, trimTrailing: Bool, style: inout Style) -> String {
+    static func cells(of l: BufferLine, terminal t: Terminal, trimTrailing: Bool, style: inout Style) -> String {
         var end = l.count
         if trimTrailing {
             while end > 0 {

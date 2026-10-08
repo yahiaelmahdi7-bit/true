@@ -61,6 +61,8 @@ struct TrueApp: App {
                 }
                 Button("Paste Latest Screenshot") { ScreenshotWatcher.shared.pasteLatest() }
                     .keyboardShortcut("v", modifiers: [.command, .option])
+                Divider()
+                Button("Remote Access…") { RemoteAccessWindow.shared.show() }
             }
             CommandMenu("Hub") {
                 Button(registry.panelOpen ? "Hide Hub" : "Show Hub") { registry.panelOpen.toggle() }.keyboardShortcut("e")
@@ -95,6 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // A SwiftPM executable starts with no bundle policy; without this it gets no menu bar/Dock icon.
         NSApp.setActivationPolicy(.regular)
+        // Launch side effect: bind 127.0.0.1:8801 for the phone view — ONLY when the user turned Remote Access on
+        // (default off), so a fresh install never listens.
+        RemoteAccess.shared.startIfEnabled()
         // Launch side effect: paint the live Dock tile with the bare cursive T. The bundle icon alone gets
         // boxed into a grey tile by macOS 26; a runtime image is drawn as-is. One-shot, no ongoing cost.
         if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),

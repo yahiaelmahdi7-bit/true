@@ -1,0 +1,16 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#000000">
+<link rel="apple-touch-icon" href="/icon.png"><title>True · Pair</title>
+<style>
+html,body{margin:0;height:100%;background:#000;color:#f2f2f2;font:16px -apple-system,system-ui,sans-serif}
+main{max-width:360px;margin:0 auto;padding:max(env(safe-area-inset-top),48px) 20px 20px}
+h1{font-size:22px;margin:0 0 8px}p{color:#8a8a8e;margin:0 0 20px}
+input{width:100%;min-height:56px;font:600 28px ui-monospace,Menlo,monospace;letter-spacing:.4em;text-align:center;border:1px solid #26262a;border-radius:14px;background:#17171a;color:#f2f2f2}
+button{width:100%;min-height:52px;margin-top:12px;border:0;border-radius:14px;background:#f2f2f2;color:#000;font-weight:600;font-size:17px;font-family:inherit}
+.err{color:#ff9f0a;font-weight:600;margin-bottom:14px}
+</style></head><body><main>
+<h1>Pair this phone</h1>
+<p>On the Mac: Shell ▸ Remote Access… Type the 6-digit code shown there.</p>
+<!--MSG-->
+<form method="post" action="/pair"><input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" autofocus aria-label="Pairing code"><button type="submit">Pair</button></form>
+</main></body></html>
