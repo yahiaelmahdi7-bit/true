@@ -28,6 +28,8 @@ final class RemoteServer: @unchecked Sendable {
     private let wsAuthTimeout: TimeInterval
     private let files: RemoteFiles
     private let dropDeadline: TimeInterval
+    private let commands: RemoteCommands
+    private let bar: RemoteBar
     private let lock = NSLock()
     private var listenFD: Int32 = -1
     private var running = false
@@ -40,7 +42,9 @@ final class RemoteServer: @unchecked Sendable {
 
     init(backend: RemoteBackend, codes: PairingCodes, devices: DeviceStore,
          allowedLogin: @escaping @Sendable () -> String?, dnsName: @escaping @Sendable () -> String?,
-         files: RemoteFiles = RemoteFilesLive.make(), dropDeadline: TimeInterval = 120, wsAuthTimeout: TimeInterval = 5) {
+         files: RemoteFiles = RemoteFilesLive.make(), dropDeadline: TimeInterval = 120, wsAuthTimeout: TimeInterval = 5,
+         commands: RemoteCommands = RemoteCommandsLive()) {
+        self.commands = commands; self.bar = RemoteBar(commands: commands)
         self.wsAuthTimeout = wsAuthTimeout
         self.files = files; self.dropDeadline = dropDeadline
         self.backend = backend; self.codes = codes; self.devices = devices
@@ -193,7 +197,7 @@ final class RemoteServer: @unchecked Sendable {
             _ = send(fd, HTTPResponse.make(status: 401, reason: "Unauthorized", body: Array("Not paired".utf8)))
         case .allow:
             Self.log.notice("allow \(req.method, privacy: .public) \(req.path, privacy: .public) device=\(device?.label ?? "-", privacy: .public)")
-            route(fd, req)
+            route(fd, req, device: device?.id)
         }
     }
 
@@ -202,6 +206,8 @@ final class RemoteServer: @unchecked Sendable {
     static let routeTable: [String] = [
         "POST /pair", "GET /api/tabs", "WS /api/pane/<uuid>", "POST /api/drop", "POST /api/clip",
         "GET /api/shots", "GET /api/shots/<id>", "GET /api/inbox", "GET /api/inbox/<id>", "DELETE /api/inbox/<id>",
+        "GET /api/hub", "GET /api/hub/builder/<id>", "POST /api/hub/builder/<id>/ack",
+        "POST /api/route", "POST /api/route/<routeId>/slot", "POST /api/run", "GET /api/recent",
     ]
 
     private func json(_ fd: Int32, _ status: Int, _ reason: String, _ obj: [String: Any], extra: [String: String] = [:]) {
@@ -232,8 +238,12 @@ final class RemoteServer: @unchecked Sendable {
     }
 
     /// Identity, Host and (where needed) Origin/token already passed.
-    private func route(_ fd: Int32, _ req: HTTPRequest) {
+    private func route(_ fd: Int32, _ req: HTTPRequest, device: UUID? = nil) {
         if req.method == "POST" && req.path == "/pair" { handlePair(fd, req); return }
+        if req.path.hasPrefix("/api/hub") || req.path.hasPrefix("/api/route") || req.path == "/api/run" || req.path == "/api/recent" {
+            guard let device else { plain(fd, 401, "Unauthorized", "Not paired"); return }
+            handleBar(fd, req, device: device); return
+        }
         if req.path == "/api/tabs", req.method == "GET" {
             _ = send(fd, HTTPResponse.make(status: 200, reason: "OK", body: [UInt8](backend.tabsJSON()),
                                            contentType: "application/json")); return
