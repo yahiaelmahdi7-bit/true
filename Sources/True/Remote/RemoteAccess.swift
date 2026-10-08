@@ -11,8 +11,8 @@ import Observation
 final class RemoteAccess {
     static let shared = RemoteAccess()
     static let enabledKey = "remote.enabled"
-    static let loginOverrideKey = "remote.allowedLogin"
-    static let tailscale = "/opt/homebrew/bin/tailscale"
+    nonisolated static let loginOverrideKey = "remote.allowedLogin"
+    nonisolated static let tailscale = "/opt/homebrew/bin/tailscale"
     static let httpsPort = 8444   // what Claude exposes with `tailscale serve --https=8444 http://127.0.0.1:8801`
 
     private(set) var enabled = UserDefaults.standard.bool(forKey: RemoteAccess.enabledKey)
