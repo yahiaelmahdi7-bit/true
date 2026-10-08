@@ -13,7 +13,7 @@ final class RemoteAccess {
     static let enabledKey = "remote.enabled"
     nonisolated static let loginOverrideKey = "remote.allowedLogin"
     nonisolated static let tailscale = "/opt/homebrew/bin/tailscale"
-    static let httpsPort = 8444   // what Claude exposes with `tailscale serve --https=8444 http://127.0.0.1:8801`
+    static let httpsPort = RemoteAuth.httpsPort   // what Claude exposes with `tailscale serve --https=8444 http://127.0.0.1:8801`
 
     private(set) var enabled = UserDefaults.standard.bool(forKey: RemoteAccess.enabledKey)
     private(set) var listening = false
@@ -50,7 +50,7 @@ final class RemoteAccess {
             server = RemoteServer(backend: RemoteBackendLive(), codes: codes, devices: deviceStore) {
                 let o = UserDefaults.standard.string(forKey: RemoteAccess.loginOverrideKey) ?? ""
                 return o.isEmpty ? cache.login() : o
-            }
+            } dnsName: { cache.dns() }
         }
         listening = server?.start() ?? false
         devices = deviceStore.all
@@ -90,6 +90,13 @@ final class RemoteAccess {
             lock.lock(); let c = cached; lock.unlock()
             if let c, Date().timeIntervalSince(c.at) < 60 { return c.login }
             return refresh()?.login
+        }
+
+        /// Self.DNSName for the exact Host/Origin checks; same 60 s cache.
+        func dns() -> String? {
+            lock.lock(); let c = cached; lock.unlock()
+            if let c, Date().timeIntervalSince(c.at) < 60 { return c.dns }
+            return refresh()?.dns
         }
 
         @discardableResult
@@ -227,6 +234,7 @@ struct RemoteAccessView: View {
     }
 
     private func expiryText(_ now: Date) -> String {
+        if remote.codes.isBurned { return "Code burned — show a new one" }
         guard let e = remote.codeExpiry else { return "" }
         let s = Int(e.timeIntervalSince(now))
         return s > 0 ? String(format: "expires in %d:%02d", s / 60, s % 60) : "expired — tap New code"

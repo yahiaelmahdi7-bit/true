@@ -40,3 +40,9 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
 #text{flex:1;min-width:0;min-height:44px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--key);color:var(--fg);font-size:16px}
 .send{padding:0 18px}
 @media (max-width:360px){.k{font-size:13px}}
+
+#pair{max-width:360px;margin:0 auto;padding:max(var(--safe-t),48px) 20px 20px}
+#pair h1{font-size:22px;margin:0 0 8px}#pair p{color:var(--dim);margin:0 0 20px}
+#pair input{width:100%;min-height:56px;font:600 28px ui-monospace,Menlo,monospace;letter-spacing:.4em;text-align:center;border:1px solid var(--line);border-radius:14px;background:var(--key);color:var(--fg)}
+#pair button{width:100%;min-height:52px;margin-top:12px;border:0;border-radius:14px;background:var(--fg);color:#000;font-weight:600;font-size:17px;font-family:inherit}
+#pair .err{color:var(--warn);font-weight:600;margin-bottom:14px}

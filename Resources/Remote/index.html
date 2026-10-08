@@ -8,7 +8,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="True">
-<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
+<link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icon.png">
 <link rel="icon" href="/icon.png">
 <link rel="stylesheet" href="/xterm.css">
@@ -17,6 +17,13 @@
 </head>
 <body>
 <div id="banner" role="status" hidden></div>
+
+<main id="pair" aria-label="Pair this phone" hidden>
+  <h1>Pair this phone</h1>
+  <p>On the Mac: Shell ▸ Remote Access… Type the 6-digit code shown there.</p>
+  <div id="pairErr" class="err" role="alert" hidden></div>
+  <form id="pairForm"><input id="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" aria-label="Pairing code"><button type="submit" class="send">Pair</button></form>
+</main>
 
 <main id="list" aria-label="Panes">
   <header class="bar"><h1>True</h1><span id="clock"></span></header>

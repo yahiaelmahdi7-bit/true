@@ -24,14 +24,19 @@ final class RemoteServer: @unchecked Sendable {
     let devices: DeviceStore
     private let backend: RemoteBackend
     private let allowedLogin: @Sendable () -> String?
+    private let dnsName: @Sendable () -> String?
+    private let wsAuthTimeout: TimeInterval
     private let lock = NSLock()
     private var listenFD: Int32 = -1
     private var running = false
     private var open: Set<Int32> = []
 
     init(backend: RemoteBackend, codes: PairingCodes, devices: DeviceStore,
-         allowedLogin: @escaping @Sendable () -> String?) {
-        self.backend = backend; self.codes = codes; self.devices = devices; self.allowedLogin = allowedLogin
+         allowedLogin: @escaping @Sendable () -> String?, dnsName: @escaping @Sendable () -> String?,
+         wsAuthTimeout: TimeInterval = 5) {
+        self.wsAuthTimeout = wsAuthTimeout
+        self.backend = backend; self.codes = codes; self.devices = devices
+        self.allowedLogin = allowedLogin; self.dnsName = dnsName
     }
 
     var isRunning: Bool { lock.lock(); defer { lock.unlock() }; return running }
@@ -104,20 +109,29 @@ final class RemoteServer: @unchecked Sendable {
         return true
     }
 
-    /// Read until a full HTTP request parses (5 s overall idle limit per read).
-    private func readRequest(_ fd: Int32) -> HTTPRequest? {
-        var tv = timeval(tv_sec: 5, tv_usec: 0)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+    enum ReadOutcome: Equatable { case request(HTTPRequest), bad, timedOut }
+    static let requestDeadline: TimeInterval = 10
+
+    /// Read until a full HTTP request parses. The deadline is for the WHOLE request, not per read, so a client
+    /// dribbling one byte at a time (slowloris) is cut off; the head is capped at 16 KB by the parser.
+    static func readRequest(_ fd: Int32, deadline: TimeInterval = requestDeadline) -> ReadOutcome {
+        let end = Date().addingTimeInterval(deadline)
         var buf: [UInt8] = []
         var chunk = [UInt8](repeating: 0, count: 4096)
         while true {
             switch HTTPRequest.parse(buf) {
-            case .bad: return nil
-            case .request(let r, _): return r
+            case .bad: return .bad
+            case .request(let r, _): return .request(r)
             case .needMore: break
             }
+            let ms = Int32(max(0, min(end.timeIntervalSinceNow * 1000, 10_000)))
+            if ms == 0 { return .timedOut }
+            var p = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            let rc = poll(&p, 1, ms)
+            if rc == 0 { return .timedOut }
+            if rc < 0 { if errno == EINTR { continue }; return .timedOut }
             let n = recv(fd, &chunk, chunk.count, 0)
-            if n <= 0 { return nil }
+            if n <= 0 { return .timedOut }
             buf += chunk[0..<n]
         }
     }
@@ -125,61 +139,66 @@ final class RemoteServer: @unchecked Sendable {
     // MARK: request handling
 
     private func handle(_ fd: Int32) {
-        guard let req = readRequest(fd) else { return }
-        let login = req.header(RemoteAuth.loginHeader)
-        let device = devices.validate(req.cookies[RemoteAuth.cookieName])
-        let decision = RemoteAuth.decide(loginHeader: login, allowedLogin: allowedLogin(), deviceValid: device != nil,
-                                         webSocketOrigin: req.header("origin"), isWebSocket: req.isWebSocketUpgrade,
-                                         host: req.header("host"))
+        let req: HTTPRequest
+        switch Self.readRequest(fd) {
+        case .timedOut: return
+        case .bad: _ = send(fd, HTTPResponse.make(status: 400, reason: "Bad Request", body: Array("Bad request".utf8))); return
+        case .request(let r): req = r
+        }
+        let isAPI = req.path.hasPrefix("/api/")
+        let ws = req.isWebSocketUpgrade
+        let stateChanging = req.method != "GET" && req.method != "HEAD"
+        // WebSocket auth is the first message (browsers can't set headers on a WS), so the upgrade itself needs no token.
+        let needsToken = isAPI && !ws
+        let bearer = RemoteAuth.bearerToken(req.header("authorization"))
+        let device = needsToken ? devices.validate(bearer) : nil
+        let decision = RemoteAuth.decide(loginHeader: req.header(RemoteAuth.loginHeader), allowedLogin: allowedLogin(),
+                                         host: req.header("host"), origin: req.header("origin"), dnsName: dnsName(),
+                                         requiresOrigin: stateChanging || ws, requiresToken: needsToken,
+                                         tokenValid: device != nil)
         switch decision {
         case .forbidden(let why):
             Self.log.notice("deny 403 \(req.method, privacy: .public) \(req.path, privacy: .public): \(why, privacy: .public)")
             _ = send(fd, HTTPResponse.make(status: 403, reason: "Forbidden", body: Array("Forbidden".utf8)))
         case .needsPairing:
-            handleUnpaired(fd, req)
-        case .allow:
-            Self.log.notice("allow \(req.method, privacy: .public) \(req.path, privacy: .public) device=\(device?.label ?? "?", privacy: .public)")
-            handlePaired(fd, req)
-        }
-    }
-
-    /// Identity is right, device unknown: the only things served are static assets for the pair page and /pair.
-    private func handleUnpaired(_ fd: Int32, _ req: HTTPRequest) {
-        if req.method == "POST" && req.path == "/pair" {
-            let form = Self.parseForm(req.body)
-            switch codes.attempt(form["code"] ?? "") {
-            case .ok:
-                let label = Self.deviceLabel(req.header("user-agent") ?? "")
-                let token = devices.pair(label: label)
-                Self.log.notice("paired device \(label, privacy: .public)")
-                let cookie = "\(RemoteAuth.cookieName)=\(token); Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=31536000"
-                _ = send(fd, HTTPResponse.make(status: 303, reason: "See Other", headers: ["Location": "/"], setCookies: [cookie]))
-            case .rateLimited:
-                Self.log.notice("pair rate-limited")
-                _ = send(fd, HTTPResponse.make(status: 429, reason: "Too Many Requests", headers: ["Retry-After": "60"],
-                                               body: Array(RemoteWebAssets.pairPage("Too many tries. Wait a minute.").utf8),
-                                               contentType: "text/html; charset=utf-8"))
-            case .wrong, .expired:
-                Self.log.notice("pair wrong/expired code")
-                _ = send(fd, HTTPResponse.make(status: 401, reason: "Unauthorized",
-                                               body: Array(RemoteWebAssets.pairPage("That code didn't work. Show a fresh one on the Mac.").utf8),
-                                               contentType: "text/html; charset=utf-8"))
-            }
-            return
-        }
-        if req.isWebSocketUpgrade || req.path.hasPrefix("/api/") {
             Self.log.notice("deny 401 \(req.path, privacy: .public): not paired")
             _ = send(fd, HTTPResponse.make(status: 401, reason: "Unauthorized", body: Array("Not paired".utf8)))
-            return
+        case .allow:
+            Self.log.notice("allow \(req.method, privacy: .public) \(req.path, privacy: .public) device=\(device?.label ?? "-", privacy: .public)")
+            route(fd, req)
         }
-        if let asset = RemoteWebAssets.publicAsset(req.path) {
-            _ = send(fd, HTTPResponse.make(status: 200, reason: "OK", body: asset.body, contentType: asset.type)); return
-        }
-        _ = send(fd, HTTPResponse.make(status: 200, reason: "OK", body: Array(RemoteWebAssets.pairPage(nil).utf8),
-                                       contentType: "text/html; charset=utf-8"))
     }
 
-    private func handlePaired(_ fd: Int32, _ req: HTTPRequest) {
+    private func json(_ fd: Int32, _ status: Int, _ reason: String, _ obj: [String: Any], extra: [String: String] = [:]) {
+        let body = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data("{}".utf8)
+        _ = send(fd, HTTPResponse.make(status: status, reason: reason, headers: extra, body: [UInt8](body),
+                                       contentType: "application/json"))
+    }
+
+    /// POST /pair {"code":"123456"} → {"token":"…"}; the phone keeps the token in localStorage.
+    private func handlePair(_ fd: Int32, _ req: HTTPRequest) {
+        let code = (try? JSONSerialization.jsonObject(with: Data(req.body)) as? [String: Any])?["code"] as? String
+        switch codes.attempt(code ?? "") {
+        case .ok:
+            let label = Self.deviceLabel(req.header("user-agent") ?? "")
+            let token = devices.pair(label: label)
+            Self.log.notice("paired device \(label, privacy: .public)")
+            json(fd, 200, "OK", ["token": token])
+        case .rateLimited:
+            Self.log.notice("pair rate-limited")
+            json(fd, 429, "Too Many Requests", ["error": "Too many tries. Wait a minute."], extra: ["Retry-After": "60"])
+        case .burned:
+            Self.log.notice("pair code burned")
+            json(fd, 401, "Unauthorized", ["error": "Code burned. Show a new one on the Mac."])
+        case .wrong, .expired:
+            Self.log.notice("pair wrong/expired code")
+            json(fd, 401, "Unauthorized", ["error": "That code didn't work. Show a fresh one on the Mac."])
+        }
+    }
+
+    /// Identity, Host and (where needed) Origin/token already passed.
+    private func route(_ fd: Int32, _ req: HTTPRequest) {
+        if req.method == "POST" && req.path == "/pair" { handlePair(fd, req); return }
         if req.path == "/api/tabs", req.method == "GET" {
             _ = send(fd, HTTPResponse.make(status: 200, reason: "OK", body: [UInt8](backend.tabsJSON()),
                                            contentType: "application/json")); return
@@ -191,21 +210,49 @@ final class RemoteServer: @unchecked Sendable {
             }
             streamPane(fd, pane: id, key: key); return
         }
-        if req.method == "GET", let asset = RemoteWebAssets.asset(req.path) {
+        // The web app itself is not secret; all data sits behind /api/* and the token.
+        if req.method == "GET", !req.path.hasPrefix("/api/"), let asset = RemoteWebAssets.asset(req.path) {
             _ = send(fd, HTTPResponse.make(status: 200, reason: "OK", body: asset.body, contentType: asset.type)); return
         }
         _ = send(fd, HTTPResponse.make(status: 404, reason: "Not Found", body: Array("Not found".utf8)))
     }
 
+    /// First WebSocket message must be text `{"auth":"<token>"}` within 5 s, else close 4401 and no PTY bytes flow.
+    private func authenticateSocket(_ fd: Int32, _ dec: inout WebSocket.Decoder, _ pending: inout [WebSocket.Message]) -> Bool {
+        let end = Date().addingTimeInterval(wsAuthTimeout)
+        var chunk = [UInt8](repeating: 0, count: 4096)
+        while pending.isEmpty {
+            let ms = Int32(max(0, end.timeIntervalSinceNow * 1000))
+            var p = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            guard ms > 0, poll(&p, 1, ms) > 0 else { return false }
+            let n = recv(fd, &chunk, chunk.count, 0)
+            guard n > 0, let msgs = try? dec.feed(Array(chunk[0..<n])) else { return false }
+            pending += msgs
+        }
+        let first = pending.removeFirst()
+        guard first.op == .text,
+              let tok = (try? JSONSerialization.jsonObject(with: Data(first.payload)) as? [String: Any])?["auth"] as? String,
+              devices.validate(tok) != nil else { return false }
+        return true
+    }
+
     // MARK: pane stream
 
     private func streamPane(_ fd: Int32, pane: UUID, key: String) {
-        guard backend.snapshot(pane: pane) != nil else {
-            _ = send(fd, HTTPResponse.make(status: 404, reason: "Not Found", body: Array("No such pane".utf8))); return
-        }
         let head = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
             + "Sec-WebSocket-Accept: \(WebSocket.acceptKey(for: key))\r\n\r\n"
         guard send(fd, Array(head.utf8)) else { return }
+        var dec = WebSocket.Decoder()
+        var pending: [WebSocket.Message] = []
+        guard authenticateSocket(fd, &dec, &pending) else {
+            Self.log.notice("ws auth failed")
+            _ = send(fd, WebSocket.encode(.close, [0x11, 0x31]))   // 4401
+            return
+        }
+        guard backend.snapshot(pane: pane) != nil else {
+            _ = send(fd, WebSocket.encode(.text, Array(#"{"t":"gone"}"#.utf8)))
+            _ = send(fd, WebSocket.encode(.close, [0x03, 0xE8])); return
+        }
         Self.log.notice("ws open pane=\(pane.uuidString.prefix(8), privacy: .public)")
         let viewer = RemoteHub.shared.subscribe(pane)
         let sendLock = NSLock()
@@ -232,14 +279,17 @@ final class RemoteServer: @unchecked Sendable {
         }
         writer.start()
         // Reader: client input → PTY. No resize message exists; the Mac stays authoritative.
-        var dec = WebSocket.Decoder()
         var tv = timeval(tv_sec: 0, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         var chunk = [UInt8](repeating: 0, count: 8192)
         readLoop: while isRunning {
-            let n = recv(fd, &chunk, chunk.count, 0)
-            if n <= 0 { break }
-            guard let msgs = try? dec.feed(Array(chunk[0..<n])) else { break }
+            var msgs = pending; pending = []
+            if msgs.isEmpty {
+                let n = recv(fd, &chunk, chunk.count, 0)
+                if n <= 0 { break }
+                guard let got = try? dec.feed(Array(chunk[0..<n])) else { break }
+                msgs = got
+            }
             for m in msgs {
                 switch m.op {
                 case .close: _ = out(.close, []); break readLoop

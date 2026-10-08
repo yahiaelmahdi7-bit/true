@@ -10,15 +10,6 @@ struct HTTPRequest: Equatable {
 
     func header(_ name: String) -> String? { headers[name.lowercased()] }
 
-    var cookies: [String: String] {
-        var out: [String: String] = [:]
-        for part in (header("cookie") ?? "").split(separator: ";") {
-            let kv = part.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            if kv.count == 2 { out[kv[0]] = kv[1] }
-        }
-        return out
-    }
-
     var isWebSocketUpgrade: Bool {
         (header("upgrade") ?? "").lowercased() == "websocket"
             && (header("connection") ?? "").lowercased().contains("upgrade")
@@ -28,6 +19,7 @@ struct HTTPRequest: Equatable {
 
     static let maxHead = 16 * 1024
     static let maxBody = 4 * 1024
+    static let singletonHeaders: Set<String> = ["tailscale-user-login", "host", "origin", "authorization"]
 
     /// Parse as much of `bytes` as forms one request. `.needMore` until the head (and any body) is complete.
     static func parse(_ bytes: [UInt8]) -> ParseResult {
@@ -40,7 +32,10 @@ struct HTTPRequest: Equatable {
         var headers: [String: String] = [:]
         for l in lines {
             guard let c = l.firstIndex(of: ":") else { return .bad }
-            headers[l[..<c].lowercased()] = l[l.index(after: c)...].trimmingCharacters(in: .whitespaces)
+            let name = l[..<c].lowercased()
+            // A second copy of a security-relevant header is how proxies and servers disagree about who is asking.
+            if singletonHeaders.contains(name), headers[name] != nil { return .bad }
+            headers[name] = l[l.index(after: c)...].trimmingCharacters(in: .whitespaces)
         }
         let target = String(first[1])
         let comps = target.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
@@ -69,12 +64,15 @@ struct HTTPRequest: Equatable {
 }
 
 enum HTTPResponse {
+    /// Every response carries the same hardening headers; `Cache-Control: no-store` is on all of them (a superset of /api/*).
+    static let csp = "default-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; style-src 'self' 'unsafe-inline'"
+
     static func make(status: Int, reason: String, headers: [String: String] = [:], body: [UInt8] = [],
-                     contentType: String = "text/plain; charset=utf-8", setCookies: [String] = []) -> [UInt8] {
+                     contentType: String = "text/plain; charset=utf-8") -> [UInt8] {
         var h = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: \(contentType)\r\nContent-Length: \(body.count)\r\n"
-        h += "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n"
+        h += "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n"
+        h += "X-Frame-Options: DENY\r\nContent-Security-Policy: \(csp)\r\nConnection: close\r\n"
         for (k, v) in headers { h += "\(k): \(v)\r\n" }
-        for c in setCookies { h += "Set-Cookie: \(c)\r\n" }
         return Array((h + "\r\n").utf8) + body
     }
 }

@@ -2,17 +2,19 @@ import Foundation
 import CryptoKit
 import Security
 
-/// Remote Access auth: three independent checks (loopback bind, tailnet identity header, paired-device
-/// cookie). All pure or injectable so the decision table is unit-tested without a socket.
+/// Remote Access auth: independent checks (loopback bind, tailnet identity header, exact Host/Origin, paired-device
+/// bearer token). The token lives in the phone's localStorage and travels in `Authorization` / the first WebSocket
+/// message — never a cookie (cookies ignore ports, so they would also go to other services on the same hostname).
+/// All pure or injectable so the decision table is unit-tested without a socket.
 enum RemoteAuth {
-    static let cookieName = "true_dev"
     static let loginHeader = "Tailscale-User-Login"
+    static let httpsPort = 8444
 
     static func sha256Hex(_ s: String) -> String {
         SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// 32 random bytes, hex. The raw token only ever exists in the phone's cookie.
+    /// 32 random bytes, hex. The raw token only ever exists in the phone's localStorage.
     static func newToken() -> String {
         var b = [UInt8](repeating: 0, count: 32)
         let rc = SecRandomCopyBytes(kSecRandomDefault, b.count, &b)
@@ -22,34 +24,53 @@ enum RemoteAuth {
 
     enum Decision: Equatable {
         case allow
-        case forbidden(String)      // 403 — wrong network identity
-        case needsPairing           // no/bad/revoked device cookie
+        case forbidden(String)      // 403 — wrong network identity, host or origin
+        case needsPairing           // 401 — no/bad/revoked bearer token
     }
 
-    /// Decision table, in order: identity header first (403 beats everything), then the device cookie,
-    /// then (WebSocket only) the Origin check.
-    static func decide(loginHeader: String?, allowedLogin: String?, deviceValid: Bool,
-                       webSocketOrigin: String?, isWebSocket: Bool, host: String?) -> Decision {
+    /// Decision table, in order: identity header (403 beats everything), exact Host, exact Origin (state-changing
+    /// requests and the WS upgrade), then the bearer token where the route needs one.
+    static func decide(loginHeader: String?, allowedLogin: String?, host: String?, origin: String?, dnsName: String?,
+                       requiresOrigin: Bool, requiresToken: Bool, tokenValid: Bool) -> Decision {
         guard let allowed = allowedLogin?.lowercased(), !allowed.isEmpty else { return .forbidden("no allowed login configured") }
         guard let login = loginHeader?.lowercased(), !login.isEmpty else { return .forbidden("missing tailscale login") }
         guard login == allowed else { return .forbidden("login not allowed") }
-        guard deviceValid else { return .needsPairing }
-        if isWebSocket, !originMatches(origin: webSocketOrigin, host: host) { return .forbidden("origin mismatch") }
+        guard hostMatches(host: host, dnsName: dnsName) else { return .forbidden("host mismatch") }
+        if requiresOrigin, !originMatches(origin: origin, dnsName: dnsName) { return .forbidden("origin mismatch") }
+        if requiresToken, !tokenValid { return .needsPairing }
         return .allow
     }
 
-    /// `Origin: https://mac.tailnet.ts.net:8444` must name the same host as `Host` (ports ignored: the
-    /// tailnet proxy rewrites them).
-    static func originMatches(origin: String?, host: String?) -> Bool {
-        guard let origin, let host, let u = URL(string: origin), let oh = u.host?.lowercased() else { return false }
-        let h = host.split(separator: ":").first.map { String($0).lowercased() } ?? host.lowercased()
-        return !h.isEmpty && oh == h
+    private static func clean(_ dns: String?) -> String? {
+        guard var d = dns?.lowercased(), !d.isEmpty else { return nil }
+        if d.hasSuffix(".") { d.removeLast() }
+        return d
+    }
+
+    /// `Host` must be `<dnsName>:8444` or `<dnsName>` — anything else (a rebound attacker domain) is refused.
+    static func hostMatches(host: String?, dnsName: String?) -> Bool {
+        guard let d = clean(dnsName), let h = host?.lowercased() else { return false }
+        return h == d || h == "\(d):\(httpsPort)"
+    }
+
+    /// `Origin` must be exactly `https://<dnsName>:8444` (scheme + host + port).
+    static func originMatches(origin: String?, dnsName: String?) -> Bool {
+        guard let d = clean(dnsName), let o = origin else { return false }
+        return o == "https://\(d):\(httpsPort)"
+    }
+
+    static func bearerToken(_ authorization: String?) -> String? {
+        guard let a = authorization, a.hasPrefix("Bearer ") else { return nil }
+        let t = String(a.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+        return t.isEmpty ? nil : t
     }
 }
 
-/// The 6-digit pairing code: fresh each time it is shown, valid 5 minutes, single use, ≤5 guesses a minute.
+/// The 6-digit pairing code: fresh each time it is shown, valid 5 minutes, single use, ≤5 guesses a minute,
+/// and burned outright after 5 wrong guesses (a new code must be shown on the Mac).
 final class PairingCodes: @unchecked Sendable {
-    enum Outcome: Equatable { case ok, wrong, expired, rateLimited }
+    enum Outcome: Equatable { case ok, wrong, burned, expired, rateLimited }
+    static let maxWrong = 5
     static let lifetime: TimeInterval = 300
     static let maxAttemptsPerMinute = 5
 
@@ -58,6 +79,8 @@ final class PairingCodes: @unchecked Sendable {
     private var code: String?
     private var issuedAt = Date.distantPast
     private var attempts: [Date] = []
+    private var wrong = 0
+    private var burnedFlag = false
 
     init(now: @escaping @Sendable () -> Date = { Date() }) { self.now = now }
 
@@ -68,7 +91,7 @@ final class PairingCodes: @unchecked Sendable {
         var v: UInt32 = 0
         _ = withUnsafeMutableBytes(of: &v) { SecRandomCopyBytes(kSecRandomDefault, 4, $0.baseAddress!) }
         let c = String(format: "%06d", Int(v % 1_000_000))
-        code = c; issuedAt = now()
+        code = c; issuedAt = now(); wrong = 0; burnedFlag = false
         return c
     }
 
@@ -77,7 +100,10 @@ final class PairingCodes: @unchecked Sendable {
         return code == nil ? nil : issuedAt.addingTimeInterval(Self.lifetime)
     }
 
-    func revokeCode() { lock.lock(); code = nil; lock.unlock() }
+    func revokeCode() { lock.lock(); code = nil; burnedFlag = false; lock.unlock() }
+
+    /// True after 5 wrong guesses killed the current code (shown in the Mac sheet).
+    var isBurned: Bool { lock.lock(); defer { lock.unlock() }; return burnedFlag }
 
     func attempt(_ guess: String) -> Outcome {
         lock.lock(); defer { lock.unlock() }
@@ -87,7 +113,11 @@ final class PairingCodes: @unchecked Sendable {
         attempts.append(t)
         guard let c = code else { return .expired }
         guard t.timeIntervalSince(issuedAt) <= Self.lifetime else { code = nil; return .expired }
-        guard guess == c else { return .wrong }
+        guard guess == c else {
+            wrong += 1
+            if wrong >= Self.maxWrong { code = nil; burnedFlag = true; return .burned }
+            return .wrong
+        }
         code = nil
         return .ok
     }
@@ -146,11 +176,29 @@ final class DeviceStore: @unchecked Sendable {
         save()
     }
 
+    /// Written to a fresh 0600 temp file (created with the mode, never chmod-ed after) and renamed into place;
+    /// the parent directory is 0700.
     private func save() {
         let enc = JSONEncoder(); enc.dateEncodingStrategy = .secondsSince1970
         guard let data = try? enc.encode(devices) else { return }
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: url, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let dir = url.deletingLastPathComponent()
+        let fm = FileManager.default
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        let tmp = dir.appendingPathComponent(".remote-devices-\(UUID().uuidString).tmp").path
+        let fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL, 0o600)
+        guard fd >= 0 else { return }
+        let ok = data.withUnsafeBytes { buf -> Bool in
+            var off = 0
+            while off < buf.count {
+                let n = write(fd, buf.baseAddress! + off, buf.count - off)
+                if n <= 0 { return false }
+                off += n
+            }
+            return true
+        }
+        close(fd)
+        if ok, rename(tmp, url.path) == 0 { return }
+        unlink(tmp)
     }
 }

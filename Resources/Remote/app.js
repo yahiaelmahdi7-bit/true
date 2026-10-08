@@ -5,6 +5,17 @@ const $ = (id) => document.getElementById(id);
 const enc = new TextEncoder();
 const KEYS = { esc: '\x1b', tab: '\t', up: '\x1b[A', down: '\x1b[B', right: '\x1b[C', left: '\x1b[D', cc: '\x03' };
 
+// Pairing token: localStorage + Authorization header, never a cookie (cookies ignore ports and would also reach
+// other services on the same *.ts.net hostname).
+const TOKEN_KEY = 'true.token';
+const getToken = () => localStorage.getItem(TOKEN_KEY);
+function api(path) { return fetch(path, { cache: 'no-store', headers: { Authorization: 'Bearer ' + getToken() } }); }
+function unpair() {
+  localStorage.removeItem(TOKEN_KEY); view = 'pair'; paneId = null;
+  clearTimeout(retryTimer); if (ws) { ws.onclose = null; ws.close(); ws = null; }
+  $('list').hidden = true; $('term').hidden = true; $('pair').hidden = false; banner('');
+}
+
 let view = 'list', paneId = null, term = null, ws = null, cols = 80, rows = 24;
 let fit = true, ctrl = false, retry = 0, retryTimer = null, listFails = 0, wsEverOpen = false;
 
@@ -14,8 +25,9 @@ function banner(msg) { const b = $('banner'); b.textContent = msg || ''; b.hidde
 async function loadList() {
   if (view !== 'list') return;
   try {
-    const r = await fetch('/api/tabs', { credentials: 'same-origin', cache: 'no-store' });
-    if (r.status === 401 || r.status === 403) { location.reload(); return; }
+    const r = await api('/api/tabs');
+    if (r.status === 401) { unpair(); return; }
+    if (!r.ok) throw new Error(String(r.status));
     const data = await r.json();
     listFails = 0; banner('');
     renderList(data.tabs || []);
@@ -98,7 +110,7 @@ function connect() {
   ws = new WebSocket(proto + location.host + '/api/pane/' + paneId);
   ws.binaryType = 'arraybuffer';
   const mine = ws;
-  ws.onopen = () => { wsEverOpen = true; retry = 0; banner(''); };
+  ws.onopen = () => { ws.send(JSON.stringify({ auth: getToken() })); wsEverOpen = true; retry = 0; banner(''); };
   ws.onmessage = (ev) => {
     if (typeof ev.data === 'string') {
       const m = JSON.parse(ev.data);
@@ -106,14 +118,13 @@ function connect() {
       else if (m.t === 'gone') { banner('This pane was closed on the Mac.'); }
     } else { term.write(new Uint8Array(ev.data)); }
   };
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
     if (mine !== ws || view !== 'term') return;
+    if (ev.code === 4401) { unpair(); return; }
     retry++;
     banner(retry > 2 ? 'Mac asleep or offline — retrying…' : 'Reconnecting…');
-    // A refused upgrade (401/403/404) looks like a plain close; check whether we are still paired.
-    fetch('/api/tabs', { credentials: 'same-origin', cache: 'no-store' })
-      .then((r) => { if (r.status === 401 || r.status === 403) location.reload(); })
-      .catch(() => {});
+    // A refused upgrade (403/404) looks like a plain close; check whether we are still paired.
+    api('/api/tabs').then((r) => { if (r.status === 401) unpair(); }).catch(() => {});
     retryTimer = setTimeout(connect, Math.min(15000, 1000 * 2 ** Math.min(retry, 4)));
   };
 }
@@ -139,6 +150,24 @@ document.addEventListener('visibilitychange', () => {
   if (view === 'term' && (!ws || ws.readyState > 1)) { retry = 0; connect(); } else loadList();
 });
 
+$('pairForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const err = $('pairErr'); err.hidden = true;
+  try {
+    const r = await fetch('/pair', { method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
+                                     body: JSON.stringify({ code: $('code').value.trim() }) });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok && data.token) { localStorage.setItem(TOKEN_KEY, data.token); $('code').value = ''; start(); return; }
+    err.textContent = data.error || 'Pairing failed.'; err.hidden = false;
+  } catch (x) { err.textContent = 'Could not reach the Mac.'; err.hidden = false; }
+};
+
+function start() {
+  $('pair').hidden = true;
+  view = 'list'; $('list').hidden = false;
+  const m = /p=([0-9a-fA-F-]{36})/.exec(location.hash);
+  if (m) openPane(m[1], 'Pane'); else loadList();
+}
+
 setInterval(loadList, 3000);
-const m = /p=([0-9a-fA-F-]{36})/.exec(location.hash);
-if (m) openPane(m[1], 'Pane'); else loadList();
+if (getToken()) start(); else unpair();
