@@ -151,14 +151,14 @@ struct RemoteCommandsLive: RemoteCommands {
     }
 
     func hubJSON() -> Data {
-        let obj: [String: Any] = Self.onMain {
+        return Self.onMain {
             let reg = AgentRegistry.shared, hub = HubStore.shared
             let now = Date().timeIntervalSince1970
             let groups = HubModel.build(seats: reg.crew, seatStatus: { reg.statusOf($0) }, seatAwake: { reg.isAwake($0) },
                                         peers: hub.peers, builders: hub.builders, now: now)
-            return RemoteHubJSON.make(groups: groups, seatStatus: { reg.statusOf($0) }, seatPane: { reg.panes[$0] }, now: now)
+            let obj: [String: Any] = RemoteHubJSON.make(groups: groups, seatStatus: { reg.statusOf($0) }, seatPane: { reg.panes[$0] }, now: now)
+            return (try? JSONSerialization.data(withJSONObject: obj)) ?? Data("{}".utf8)
         }
-        return (try? JSONSerialization.data(withJSONObject: obj)) ?? Data("{}".utf8)
     }
 
     func builderDetail(id: String) -> Data? {

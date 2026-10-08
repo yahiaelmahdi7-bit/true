@@ -28,8 +28,8 @@ final class RemoteServer: @unchecked Sendable {
     private let wsAuthTimeout: TimeInterval
     private let files: RemoteFiles
     private let dropDeadline: TimeInterval
-    private let commands: RemoteCommands
-    private let bar: RemoteBar
+    let commands: RemoteCommands
+    let bar: RemoteBar
     private let lock = NSLock()
     private var listenFD: Int32 = -1
     private var running = false
@@ -118,7 +118,7 @@ final class RemoteServer: @unchecked Sendable {
 
     // MARK: socket io
 
-    private func send(_ fd: Int32, _ bytes: [UInt8]) -> Bool {
+    func send(_ fd: Int32, _ bytes: [UInt8]) -> Bool {
         var off = 0
         while off < bytes.count {
             let n = bytes[off...].withUnsafeBytes { Darwin.send(fd, $0.baseAddress, $0.count, 0) }

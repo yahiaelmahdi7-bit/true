@@ -28,7 +28,8 @@ struct TabState: Codable, Equatable, Identifiable, Sendable {
     var title: String {
         if let n = customName?.trimmingCharacters(in: .whitespaces), !n.isEmpty { return n }
         let path = cwds[focusedPane] ?? cwds.values.first ?? "~"
-        return Self.basename(path)
+        let base = Self.basename(path)
+        return cwds.keys.contains(where: { RemoteOrigin.shared.isRecent($0) }) ? base + " · from iPhone" : base
     }
 
     static func basename(_ path: String) -> String {

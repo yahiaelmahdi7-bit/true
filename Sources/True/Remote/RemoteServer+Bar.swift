@@ -18,24 +18,24 @@ extension RemoteServer {
 
     private func plainReply(_ fd: Int32, _ status: Int, _ reason: String, _ msg: String) {
         let body = (try? JSONSerialization.data(withJSONObject: ["error": msg])) ?? Data()
-        _ = sendBytes(fd, HTTPResponse.make(status: status, reason: reason, body: [UInt8](body), contentType: "application/json"))
+        _ = send(fd, HTTPResponse.make(status: status, reason: reason, body: [UInt8](body), contentType: "application/json"))
     }
 
     private func jsonReply(_ fd: Int32, _ status: Int, _ reason: String, _ obj: [String: Any]) {
         let body = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data("{}".utf8)
-        _ = sendBytes(fd, HTTPResponse.make(status: status, reason: reason, body: [UInt8](body), contentType: "application/json"))
+        _ = send(fd, HTTPResponse.make(status: status, reason: reason, body: [UInt8](body), contentType: "application/json"))
     }
 
     func handleBar(_ fd: Int32, _ req: HTTPRequest, device: UUID) {
         let path = req.path
         if req.method == "GET", path == "/api/hub" {
-            _ = sendBytes(fd, HTTPResponse.make(status: 200, reason: "OK", body: [UInt8](commands.hubJSON()), contentType: "application/json")); return
+            _ = send(fd, HTTPResponse.make(status: 200, reason: "OK", body: [UInt8](commands.hubJSON()), contentType: "application/json")); return
         }
         if path.hasPrefix("/api/hub/builder/") {
             let rest = String(path.dropFirst("/api/hub/builder/".count))
             if req.method == "GET" {
                 guard let d = commands.builderDetail(id: rest) else { plainReply(fd, 404, "Not Found", "No such builder"); return }
-                _ = sendBytes(fd, HTTPResponse.make(status: 200, reason: "OK", body: [UInt8](d), contentType: "application/json")); return
+                _ = send(fd, HTTPResponse.make(status: 200, reason: "OK", body: [UInt8](d), contentType: "application/json")); return
             }
             if req.method == "POST", rest.hasSuffix("/ack") {
                 let id = String(rest.dropLast("/ack".count))
