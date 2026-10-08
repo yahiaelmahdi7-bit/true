@@ -114,7 +114,10 @@ async function openComposer() {
     const go = el('button', 'big', 'Route'); go.id = 'cmdRoute';
     const out = el('div'); out.id = 'cmdOut';
     const rec = el('div', 'recent'); rec.id = 'cmdRecent';
-    go.onclick = () => routeIt(t.value);
+    // One line only: a line break would act as Enter in a shell, so it is never sent.
+    t.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go.click(); } });
+    t.addEventListener('input', () => { if (/[\r\n]/.test(t.value)) t.value = t.value.replace(/[\r\n]+/g, ' '); });
+    go.onclick = () => routeIt(t.value.replace(/[\r\n]+/g, ' '));
     body.append(t, go, out, rec);
     t.focus(); loadRecent(t);
   });
@@ -184,6 +187,12 @@ function pickSlot(slot) {
   });
 }
 
+const CONFIRM_WHY = {
+  background_builder: 'Starts a background builder (~$5 ceiling)',
+  unjudged: "Couldn't check this for danger",
+  dangerous_text: 'This looks destructive',
+  seat_working: 'That seat is working and sleeping it interrupts the task',
+};
 async function runIt(background, confirm, btn) {
   if (btn) btn.disabled = true;
   try {
@@ -192,7 +201,8 @@ async function runIt(background, confirm, btn) {
     if (r.status === 409) {
       const d = await r.json();
       openSheet('Confirm', (body) => {
-        body.append(el('p', 'msg', 'This looks destructive (' + String(d.reason || 'risky').replace(/_/g, ' ') + '). Run it anyway?'));
+        const why = CONFIRM_WHY[d.reason] || ('This looks destructive (' + String(d.reason || 'risky').replace(/_/g, ' ') + ')');
+        body.append(el('p', 'msg', why + '. Run it anyway?'));
         const yes = el('button', 'big', 'Run anyway'); yes.onclick = () => runIt(background, true, yes);
         const no = el('button', 'big alt', 'Cancel'); no.onclick = closeSheet;
         body.append(yes, no);
@@ -204,7 +214,7 @@ async function runIt(background, confirm, btn) {
       if (d.pane) openPane(d.pane, 'New pane'); else { banner(d.background ? 'Started in background: ' + d.background : 'Done'); setTimeout(() => banner(''), 3000); loadList(); }
       return;
     }
-    const msg = r.status === 404 ? 'That route expired — tap Route again.' : r.status === 429 ? 'Max 10 runs a minute — wait a moment.' : r.status === 403 ? 'The Mac refused this one.' : 'Failed (' + r.status + ')';
+    const msg = r.status === 404 ? 'That route expired — tap Route again.' : r.status === 429 ? 'Too many runs or phone builders — wait a moment.' : r.status === 403 ? 'The Mac refused this one.' : 'Failed (' + r.status + ')';
     if ($('cmdOut')) { closeSheetKeepNone(); }
     openSheet('Could not run', (body) => body.appendChild(el('p', 'msg', msg)));
   } catch (e) { openSheet('Could not run', (body) => body.appendChild(el('p', 'msg', 'Mac unreachable.'))); }

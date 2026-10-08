@@ -20,6 +20,24 @@ final class RemoteOrigin: @unchecked Sendable {
     }
 }
 
+/// Builders the phone started. A name counts while the Hub shows it running; a fresh launch counts for 60 s
+/// before the Hub has had time to list it.
+final class PhoneBuilders: @unchecked Sendable {
+    private let lock = NSLock()
+    private var launched: [String: Date] = [:]
+
+    func mark(_ name: String, now: Date = Date()) { lock.lock(); launched[name] = now; lock.unlock() }
+
+    func running(records: [(name: String, running: Bool)], now: Date = Date()) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        launched = launched.filter { now.timeIntervalSince($0.value) < 6 * 3600 }
+        return launched.filter { name, t in
+            let matches = records.filter { $0.name == name || $0.name.contains(name) }
+            return matches.isEmpty ? now.timeIntervalSince(t) < 60 : matches.contains { $0.running }
+        }.count
+    }
+}
+
 /// The Hub as JSON, from the Mac Hub's own groups (HubModel.build): same grouping, order, counts and status labels.
 enum RemoteHubJSON {
     static func make(groups: [HubProjectGroup], seatStatus: (String) -> AgentStatus, seatPane: (String) -> UUID?,
@@ -65,7 +83,8 @@ enum RemoteHubJSON {
 
     /// Mark a builder acknowledged: the same `acked: true` the builder CLI writes into meta.json. Id must be known.
     static func ack(id: String, known: [BuilderRecord]) -> Bool {
-        guard isValidBuilderID(id, known: known), let dir = known.first(where: { $0.id == id })?.dir else { return false }
+        guard isValidBuilderID(id, known: known), let rec = known.first(where: { $0.id == id }), rec.state != .running,
+              let dir = rec.dir else { return false }
         let url = URL(fileURLWithPath: dir).appendingPathComponent("meta.json")
         guard let data = try? Data(contentsOf: url),
               var obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
@@ -100,20 +119,25 @@ struct RemoteCommandsLive: RemoteCommands {
         return box.reply
     }
 
+    /// Phone-started builders, for the 3-at-once cap.
+    private static let phoneBuilders = PhoneBuilders()
+
     func launch(_ plan: Plan, route r: Route) -> RemoteLaunch {
         let rec = CommandBarLog.Record(event: .run, text: plan.argv.last ?? r.text, latencyMs: nil, route: r,
-                                       door: String(describing: plan.door), background: false)
+                                       door: RemoteBar.doorName(plan.door), background: false)
         CommandBarLog.standard.append(rec)
         return Self.onMain {
             let ws = WorkspaceModel.shared
+            // Only a pane this very action created is tagged "from iPhone"; nothing else is marked or returned.
             var pane: UUID?
             switch plan.door {
             case .newClaudePane(let cwd):
                 let cmd = CommandExecutor.startupCommand(argv: plan.argv, settings: AgentPaths.standard.paneSettingsPath)
                 pane = ws.openProjectBeside(path: cwd ?? NSHomeDirectory(), startupCommand: cmd)
             case .newShellSplit(let cwd):
+                // A new tab, not a split of whichever tab the Mac is looking at.
                 let text = plan.argv.last ?? ""
-                let new = ws.split(.horizontal, cwd: cwd ?? NSHomeDirectory())
+                let new = ws.openShellTab(cwd: cwd ?? NSHomeDirectory())
                 if plan.autoSubmit { PaneStartup.shared.set("\(text); exec \"${SHELL:-/bin/zsh}\" -l", for: new) }
                 else {
                     Task { @MainActor in
@@ -132,9 +156,12 @@ struct RemoteCommandsLive: RemoteCommands {
             case .seat(let n):
                 CommandExecutor.run(plan, route: r)
                 pane = AgentRegistry.shared.panes[n]
-            case .trueAction:
+            case .trueAction(let a):
+                let before = ws.allPanes
                 CommandExecutor.run(plan, route: r)
-                pane = ws.selectedTab.focusedPane
+                if a == .sleepSeat { return .done }
+                pane = ws.allPanes.subtracting(before).first
+                if a == .wakeSeat, let n = plan.argv.first { pane = AgentRegistry.shared.panes[n] }
             default:
                 return .failed("not allowed from the phone")
             }
@@ -143,6 +170,15 @@ struct RemoteCommandsLive: RemoteCommands {
             return .pane(p)
         }
     }
+
+    func markPhoneBuilder(_ name: String) { Self.phoneBuilders.mark(name) }
+
+    func phoneBuildersRunning() -> Int {
+        let records = Self.onMain { HubStore.shared.builders }
+        return Self.phoneBuilders.running(records: records.map { ($0.name, $0.state == .running) })
+    }
+
+    func seatIsWorking(_ name: String) -> Bool { Self.onMain { AgentRegistry.shared.statusOf(name) == .working } }
 
     func history() -> [String] { CommandBarLog.standard.loadHistory() }
     func pushHistory(_ text: String) {

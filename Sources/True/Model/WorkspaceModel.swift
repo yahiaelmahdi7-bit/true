@@ -90,6 +90,13 @@ final class WorkspaceModel {
         return new
     }
 
+    /// A new tab with one shell pane in `cwd` (never a split of the tab the Mac is using). Returns that pane.
+    @discardableResult
+    func openShellTab(cwd: String) -> UUID { state.addTab(cwd: cwd).focusedPane }
+
+    /// Every pane id in every tab.
+    var allPanes: Set<UUID> { Set(state.tabs.flatMap { $0.cwds.keys }) }
+
     /// An ordinary tab, named after the agent, that the registry then starts `claude` in.
     /// Returns the tab's (only) pane.
     @discardableResult

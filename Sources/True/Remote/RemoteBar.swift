@@ -16,6 +16,10 @@ protocol RemoteCommands: Sendable {
     func builderDetail(id: String) -> Data?
     func ackBuilder(id: String) -> Bool
     func record(_ line: [String: Any])
+    /// Phone-started background builders still running (or just launched and not on the Hub yet).
+    func phoneBuildersRunning() -> Int
+    func markPhoneBuilder(_ name: String)
+    func seatIsWorking(_ name: String) -> Bool
 }
 
 enum RemoteLaunch: Equatable, Sendable {
@@ -37,6 +41,7 @@ enum RemoteRunResult: Equatable {
     case needsConfirm(String)
     case refused(String)
     case rateLimited
+    case tooManyBuilders
     case gone
 }
 
@@ -48,6 +53,8 @@ final class RemoteBar: @unchecked Sendable {
     static let maxRunsPerMinute = 10
     static let maxProposalsPerMinute = 30
     static let maxText = 4000
+    static let maxPhoneBuilders = 3
+    static let backgroundConfirm = "background_builder"
 
     private let commands: RemoteCommands
     private let lock = NSLock()
@@ -57,9 +64,10 @@ final class RemoteBar: @unchecked Sendable {
 
     init(commands: RemoteCommands) { self.commands = commands }
 
-    static func newID() -> String {
+    /// nil if the system random source fails: no route is created without real randomness.
+    static func newID() -> String? {
         var b = [UInt8](repeating: 0, count: 16)
-        _ = SecRandomCopyBytes(kSecRandomDefault, b.count, &b)
+        guard SecRandomCopyBytes(kSecRandomDefault, b.count, &b) == errSecSuccess else { return nil }
         return b.map { String(format: "%02x", $0) }.joined()
     }
 
@@ -79,10 +87,15 @@ final class RemoteBar: @unchecked Sendable {
 
     // MARK: Propose
 
-    /// nil = rate limited. Never runs anything.
+    /// Tab is the only control character allowed; a line break would act as Enter in a shell.
+    static func isSingleLine(_ text: String) -> Bool {
+        text.unicodeScalars.allSatisfy { $0 == "\t" || ($0.value >= 0x20 && $0.value != 0x7F) }
+    }
+
+    /// nil = rate limited, bad text (see `isSingleLine`), or no randomness. Never runs anything.
     func propose(device: UUID, text raw: String, now: Date = Date()) -> (id: String, entry: RemoteRouteEntry)? {
         let text = String(raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.maxText))
-        guard !text.isEmpty else { return nil }
+        guard !text.isEmpty, Self.isSingleLine(text) else { return nil }
         lock.lock()
         sweep(now: now)
         var stamps = fresh(&proposalStamps, device, now: now)
@@ -103,7 +116,7 @@ final class RemoteBar: @unchecked Sendable {
         }
         let route = CommandRouter.route(text: text, reply: reply, context: ctx, rule: rule)
         let entry = RemoteRouteEntry(device: device, text: text, route: route, context: ctx, created: now)
-        let id = Self.newID()
+        guard let id = Self.newID() else { return nil }
         lock.lock(); entries[id] = entry; lock.unlock()
         commands.record(["event": "propose", "device": device.uuidString, "textHash": Self.hash(text),
                          "route": Self.summary(route), "at": ISO8601DateFormatter().string(from: now)])
@@ -207,24 +220,49 @@ final class RemoteBar: @unchecked Sendable {
         let r = e.route
         let plan = CommandExecutor.plan(route: r, background: background, context: e.context, stamp: Int(now.timeIntervalSince1970))
         guard !r.twoChoice, Self.allowed(plan.door) else { lock.unlock(); return .refused("Nothing to run from the phone") }
-        if plan.needsSecondReturn, !(e.armed && confirm) {
+        var building = false
+        if case .background = plan.door { building = true }
+        if building, commands.phoneBuildersRunning() >= Self.maxPhoneBuilders { lock.unlock(); return .tooManyBuilders }
+        // Fail closed from the phone: a Claude task Jev never judged, or text the danger list flags, asks first.
+        var why: String?
+        if plan.needsSecondReturn { why = r.dangerTop ?? "destructive" }
+        else if building { why = Self.backgroundConfirm }
+        else if r.kind.sendsToClaude && r.destructive == nil { why = "unjudged" }
+        else if CommandRules.isDangerous(e.text) { why = "dangerous_text" }
+        else if case .trueAction(.sleepSeat) = plan.door, let n = plan.argv.first, commands.seatIsWorking(n) { why = "seat_working" }
+        if let why, !(e.armed && confirm) {
             e.armed = true; entries[id] = e
             lock.unlock()
-            return .needsConfirm(r.dangerTop ?? "destructive")
+            return .needsConfirm(why)
         }
         entries[id] = nil                       // single use
         stamps.append(now); runStamps[device] = stamps
         lock.unlock()
 
         let result = commands.launch(plan, route: r)
+        if building, case .background(let name, _, _) = plan.door { commands.markPhoneBuilder(name) }
         commands.pushHistory(e.text)
         var res = "ok"
         if case .failed(let why) = result { res = "failed: \(why)" }
         commands.record(["event": "run", "device": device.uuidString, "textHash": Self.hash(e.text),
-                         "route": Self.summary(r), "door": String(describing: plan.door), "background": background,
+                         "route": Self.summary(r), "door": Self.doorName(plan.door), "background": background,
                          "result": res, "at": ISO8601DateFormatter().string(from: now)])
         if case .failed(let why) = result { return .refused(why) }
         return .ok(result)
+    }
+
+    /// The door's case name only: the associated values carry builder names and paths, which stay out of the log.
+    static func doorName(_ d: Plan.Door) -> String {
+        switch d {
+        case .typeInFocusedShell: "typeInFocusedShell"
+        case .newShellSplit: "newShellSplit"
+        case .writeToFocusedClaude: "writeToFocusedClaude"
+        case .newClaudePane: "newClaudePane"
+        case .seat: "seat"
+        case .background: "background"
+        case .trueAction: "trueAction"
+        case .nothing: "nothing"
+        }
     }
 
     // MARK: JSON

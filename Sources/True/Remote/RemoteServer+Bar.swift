@@ -48,6 +48,9 @@ extension RemoteServer {
             guard let text = o["text"] as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 plainReply(fd, 400, "Bad Request", "Need {\"text\"}"); return
             }
+            guard RemoteBar.isSingleLine(text.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                plainReply(fd, 400, "Bad Request", "One line only"); return
+            }
             guard let p = bar.propose(device: device, text: text) else { plainReply(fd, 429, "Too Many Requests", "Slow down"); return }
             jsonReply(fd, 200, "OK", RemoteBar.routeJSON(id: p.id, p.entry)); return
         }
@@ -77,6 +80,7 @@ extension RemoteServer {
             case .needsConfirm(let why): jsonReply(fd, 409, "Conflict", ["needsConfirm": true, "reason": why])
             case .refused(let why): plainReply(fd, 403, "Forbidden", why)
             case .rateLimited: plainReply(fd, 429, "Too Many Requests", "Max 10 runs a minute")
+            case .tooManyBuilders: plainReply(fd, 429, "Too Many Requests", "3 phone builders already running")
             case .gone: plainReply(fd, 404, "Not Found", "Route expired")
             }
             return

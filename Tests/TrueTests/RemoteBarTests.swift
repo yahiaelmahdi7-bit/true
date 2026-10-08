@@ -6,10 +6,11 @@ final class FakeCommands: RemoteCommands, @unchecked Sendable {
     var projects = [Project(name: "app", path: "/tmp/true-fake/app", parent: "~/tmp")]
     var reply: JevReply?
     var launches = 0
+    var seats: [BarSeat] = []
     var records: [[String: Any]] = []
     var pushed: [String] = []
     func environment() -> BarEnvironment {
-        BarEnvironment(focused: FocusedPane(kind: .empty, project: nil, seat: nil, cwd: nil), projects: projects, recent: [], seats: [])
+        BarEnvironment(focused: FocusedPane(kind: .empty, project: nil, seat: nil, cwd: nil), projects: projects, recent: [], seats: seats)
     }
     func isExecutable(_ name: String) -> Bool { ["git", "ls"].contains(name) }
     var jevEnabled: Bool { reply != nil }
@@ -21,12 +22,113 @@ final class FakeCommands: RemoteCommands, @unchecked Sendable {
     func builderDetail(id: String) -> Data? { nil }
     func ackBuilder(id: String) -> Bool { false }
     func record(_ line: [String: Any]) { records.append(line) }
+    var phoneBuilders = 0
+    var marked: [String] = []
+    var workingSeats: Set<String> = []
+    func phoneBuildersRunning() -> Int { phoneBuilders }
+    func markPhoneBuilder(_ name: String) { marked.append(name) }
+    func seatIsWorking(_ name: String) -> Bool { workingSeats.contains(name) }
 }
 
-func answer(_ kind: String, danger: Double? = nil) -> JevReply {
+/// Defaults to a low danger answer (Jev judged it safe); `judged: false` = Jev answered no danger noul (destructive nil).
+func answer(_ kind: String, danger: Double? = nil, judged: Bool = true) -> JevReply {
+    let danger = danger ?? (judged ? 0.0 : nil)
     var a: [String: JevAnswer] = ["kind": JevAnswer(type: "choice", choice: kind, confidence: 0.95, probabilities: nil, noul: nil, score: nil)]
     if let danger { a["danger_push"] = JevAnswer(type: "noul", choice: nil, confidence: 0.9, probabilities: nil, noul: danger, score: nil) }
     return JevReply(answers: a)
+}
+
+@Suite struct RemoteBarSecurityTests {
+    let dev = UUID()
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    func make(_ reply: JevReply?) -> (RemoteBar, FakeCommands) {
+        let c = FakeCommands(); c.reply = reply
+        return (RemoteBar(commands: c), c)
+    }
+
+    @Test func multiLineTextIsRejected() {
+        let (bar, _) = make(answer("shell_command"))
+        for bad in ["ls\nrm -rf x", "ls\r\nwhoami", "a\u{0}b", "a\u{1B}[0m", "a\u{7F}b", "git status\rwhoami"] {
+            #expect(bar.propose(device: dev, text: bad, now: t0) == nil, "\(bad.debugDescription)")
+            #expect(!RemoteBar.isSingleLine(bad))
+        }
+        #expect(RemoteBar.isSingleLine("ls\t-la"))
+        #expect(bar.propose(device: dev, text: "  git status \n", now: t0) != nil)   // ends are trimmed, not rejected
+    }
+
+    @Test func newlineMakesACommandCompound() {
+        #expect(CommandRules.isCompound("a\nb"))
+        #expect(CommandRules.isCompound("a\r\nb"))
+        #expect(CommandRules.isCompound("a\rb"))
+        #expect(!CommandRules.isCompound("git status"))
+    }
+
+    @Test func unjudgedAgentTaskNeedsConfirmFromThePhone() throws {
+        let (bar, c) = make(answer("agent_task", judged: false))
+        let a = try #require(bar.propose(device: dev, text: "fix the tests in app", now: t0))
+        #expect(bar.run(a.id, device: dev, background: false, confirm: true, now: t0) == .needsConfirm("unjudged"))   // unarmed confirm
+        #expect(c.launches == 0)
+        guard case .ok = bar.run(a.id, device: dev, background: false, confirm: true, now: t0) else { Issue.record("armed"); return }
+        #expect(c.launches == 1)
+    }
+
+    @Test func dangerousTextNeedsConfirmEvenWhenJevSaysSafe() throws {
+        let (bar, c) = make(answer("agent_task"))
+        let text = "rm -rf build in app"
+        try #require(CommandRules.isDangerous(text))
+        let a = try #require(bar.propose(device: dev, text: text, now: t0))
+        #expect(bar.run(a.id, device: dev, background: false, confirm: false, now: t0) == .needsConfirm("dangerous_text"))
+        #expect(c.launches == 0)
+    }
+
+    @Test func backgroundRunsNeedConfirmAndCapAtThree() throws {
+        let (bar, c) = make(answer("agent_task"))
+        let a = try #require(bar.propose(device: dev, text: "fix the tests in app", now: t0))
+        #expect(bar.run(a.id, device: dev, background: true, confirm: false, now: t0) == .needsConfirm(RemoteBar.backgroundConfirm))
+        #expect(c.launches == 0)
+        guard case .ok(.pane) = bar.run(a.id, device: dev, background: true, confirm: true, now: t0) else { Issue.record("armed run"); return }
+        #expect(c.launches == 1 && c.marked.count == 1)
+        c.phoneBuilders = 3
+        let b = try #require(bar.propose(device: dev, text: "fix the tests in app", now: t0))
+        #expect(bar.run(b.id, device: dev, background: true, confirm: false, now: t0) == .tooManyBuilders)
+        #expect(bar.run(b.id, device: dev, background: true, confirm: true, now: t0) == .tooManyBuilders)
+        #expect(c.launches == 1)
+    }
+
+    @Test func runLogNamesTheDoorCaseOnly() {
+        for d: Plan.Door in [.background(name: "secret-builder", cwd: "/Users/x/secret", model: "m"), .seat("secret-seat"),
+                             .newClaudePane(cwd: "/Users/x/secret"), .newShellSplit(cwd: "/Users/x/secret")] {
+            let n = RemoteBar.doorName(d)
+            #expect(!n.contains("secret") && !n.contains("/") && !n.contains("("))
+        }
+    }
+
+    @Test func sleepingAWorkingSeatNeedsConfirm() throws {
+        let sleep = JevReply(answers: [
+            "kind": JevAnswer(type: "choice", choice: "true_action", confidence: 0.95, probabilities: nil, noul: nil, score: nil),
+            "action": JevAnswer(type: "choice", choice: "sleep_seat", confidence: 0.95, probabilities: nil, noul: nil, score: nil)])
+        let (bar, c) = make(sleep)
+        c.seats = [BarSeat(name: "ada", project: "app", awake: true)]
+        c.workingSeats = ["ada"]
+        let a = try #require(bar.propose(device: dev, text: "sleep ada", now: t0))
+        try #require(a.entry.route.action == .sleepSeat && a.entry.route.seat == "ada")
+        #expect(bar.run(a.id, device: dev, background: false, confirm: false, now: t0) == .needsConfirm("seat_working"))
+        c.workingSeats = []
+        guard case .ok = bar.run(a.id, device: dev, background: false, confirm: false, now: t0) else { Issue.record("idle seat sleeps"); return }
+        #expect(c.launches == 1)
+    }
+
+    @Test func phoneBuilderCountUsesRunningStateAndFreshLaunches() {
+        let p = PhoneBuilders(), now = Date()
+        p.mark("a", now: now); p.mark("b", now: now); p.mark("c", now: now.addingTimeInterval(-3600))
+        #expect(p.running(records: [], now: now) == 2)                                    // c is stale, unlisted
+        #expect(p.running(records: [("a", true), ("b", false), ("c", true)], now: now) == 2)
+        #expect(p.running(records: [("a", false), ("b", false)], now: now) == 0)
+    }
+
+    @Test func randomnessFailureRefusesToMakeARoute() {
+        #expect(RemoteBar.newID() != nil)
+    }
 }
 
 @Suite struct RemoteBarTests {
@@ -186,6 +288,7 @@ func answer(_ kind: String, danger: Double? = nil) -> JevReply {
             #expect(!RemoteHubJSON.isValidBuilderID(bad, known: known), "\(bad)")
             #expect(!RemoteHubJSON.ack(id: bad, known: known))
         }
+        #expect(!RemoteHubJSON.ack(id: "r1", known: [builder("r1", .running, dir: dir.path)]))   // still running: canAck is false
         #expect(RemoteHubJSON.ack(id: "b2", known: known))
         let obj = try JSONSerialization.jsonObject(with: Data(contentsOf: dir.appendingPathComponent("meta.json"))) as? [String: Any]
         #expect(obj?["acked"] as? Bool == true && obj?["status"] as? String == "done")
