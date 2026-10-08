@@ -74,10 +74,9 @@ final class RemoteServer: @unchecked Sendable {
 
     /// Close every live WebSocket that was authenticated by `device` (called on revoke).
     func disconnect(device: UUID) {
-        lock.lock()
-        let fds = socketDevices.filter { $0.value == device }.map(\.key)
-        lock.unlock()
-        for fd in fds { shutdown(fd, SHUT_RDWR) }
+        // Shut down while holding the lock: an fd still in the map hasn't been closed, so it can't have been reused.
+        lock.lock(); defer { lock.unlock() }
+        for (fd, d) in socketDevices where d == device { shutdown(fd, SHUT_RDWR) }
     }
 
     // MARK: accept
