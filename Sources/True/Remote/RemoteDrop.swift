@@ -220,7 +220,7 @@ enum DropReceiver {
 
 // MARK: - Phone inbox (Mac → phone, push only)
 
-struct InboxItem: Codable, Equatable, Sendable {
+struct PhoneInboxItem: Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable { case file, image, text }
     var id: String
     var name: String
@@ -256,12 +256,12 @@ final class RemoteInbox: @unchecked Sendable {
     private var indexURL: URL { root.appendingPathComponent("index.json") }
     private func fileURL(_ id: String) -> URL { root.appendingPathComponent("\(id).dat") }
 
-    private func loadLocked() -> [InboxItem] {
+    private func loadLocked() -> [PhoneInboxItem] {
         let dec = JSONDecoder(); dec.dateDecodingStrategy = .secondsSince1970
-        return (try? Data(contentsOf: indexURL)).flatMap { try? dec.decode([InboxItem].self, from: $0) } ?? []
+        return (try? Data(contentsOf: indexURL)).flatMap { try? dec.decode([PhoneInboxItem].self, from: $0) } ?? []
     }
 
-    private func saveLocked(_ items: [InboxItem]) {
+    private func saveLocked(_ items: [PhoneInboxItem]) {
         DropFS.ensureDir(root)
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
         let enc = JSONEncoder(); enc.dateEncodingStrategy = .secondsSince1970
@@ -269,7 +269,7 @@ final class RemoteInbox: @unchecked Sendable {
     }
 
     /// Newest first; expired and over-cap items are deleted from disk.
-    private func pruneLocked(_ items: [InboxItem]) -> [InboxItem] {
+    private func pruneLocked(_ items: [PhoneInboxItem]) -> [PhoneInboxItem] {
         let t = now()
         var keep = items.filter { t.timeIntervalSince($0.created) < Self.lifetime }.sorted { $0.created > $1.created }
         let drop = items.filter { i in !keep.contains { $0.id == i.id } } + keep.dropFirst(Self.maxItems)
@@ -278,14 +278,14 @@ final class RemoteInbox: @unchecked Sendable {
         return keep
     }
 
-    func list() -> [InboxItem] {
+    func list() -> [PhoneInboxItem] {
         lock.lock(); defer { lock.unlock() }
         let all = loadLocked(); let kept = pruneLocked(all)
         if kept != all { saveLocked(kept) }
         return kept
     }
 
-    func item(_ id: String) -> (item: InboxItem, url: URL)? {
+    func item(_ id: String) -> (item: PhoneInboxItem, url: URL)? {
         guard Self.validID(id), let i = list().first(where: { $0.id == id }) else { return nil }
         return (i, fileURL(id))
     }
@@ -299,7 +299,7 @@ final class RemoteInbox: @unchecked Sendable {
 
     /// Copy a file (or write text) into the inbox. nil when too big or the copy fails.
     @discardableResult
-    func add(name: String, kind: InboxItem.Kind, from url: URL? = nil, data: Data? = nil) -> InboxItem? {
+    func add(name: String, kind: PhoneInboxItem.Kind, from url: URL? = nil, data: Data? = nil) -> PhoneInboxItem? {
         lock.lock(); defer { lock.unlock() }
         DropFS.ensureDir(root)
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
@@ -324,7 +324,7 @@ final class RemoteInbox: @unchecked Sendable {
             if !ok { unlink(dst.path); return nil }
             size = data.count
         } else { return nil }
-        let item = InboxItem(id: id, name: DropName.sanitize(name, now: now()), kind: kind, size: size, created: now())
+        let item = PhoneInboxItem(id: id, name: DropName.sanitize(name, now: now()), kind: kind, size: size, created: now())
         saveLocked(pruneLocked([item] + loadLocked()))
         return item
     }

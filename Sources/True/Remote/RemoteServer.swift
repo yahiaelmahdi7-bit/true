@@ -301,12 +301,10 @@ final class RemoteServer: @unchecked Sendable {
         json(fd, 200, "OK", ["ok": true])
     }
 
-    private static let isoOut: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); return f }()
-
     /// GET /api/shots — the tray, newest first. Nothing else about the Mac.
     private func handleShotsList(_ fd: Int32) {
         let rows: [[String: Any]] = files.tray().load().shots.map {
-            ["id": $0.id, "created": Self.isoOut.string(from: $0.created), "kind": $0.kind.rawValue, "w": $0.width, "h": $0.height]
+            ["id": $0.id, "created": ISO8601DateFormatter().string(from: $0.created), "kind": $0.kind.rawValue, "w": $0.width, "h": $0.height]
         }
         json(fd, 200, "OK", ["shots": rows])
     }
@@ -350,7 +348,7 @@ final class RemoteServer: @unchecked Sendable {
     /// is an octet-stream attachment, and every file response adds `Content-Security-Policy: sandbox`, so nothing served
     /// from here can run script in this origin.
     func sendFile(_ fd: Int32, _ url: URL, name: String) {
-        let ifd = open(url.path, O_RDONLY)
+        let ifd = Darwin.open(url.path, O_RDONLY)
         guard ifd >= 0 else { plain(fd, 404, "Not Found", "Not found"); return }
         defer { close(ifd) }
         var st = stat()
