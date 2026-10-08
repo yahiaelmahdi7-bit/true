@@ -218,7 +218,8 @@ final class RemoteBar: @unchecked Sendable {
         var stamps = fresh(&runStamps, device, now: now)
         guard stamps.count < Self.maxRunsPerMinute else { lock.unlock(); return .rateLimited }
         let r = e.route
-        let plan = CommandExecutor.plan(route: r, background: background, context: e.context, stamp: Int(now.timeIntervalSince1970))
+        let plan = CommandExecutor.plan(route: r, background: background, context: e.context, stamp: Int(now.timeIntervalSince1970),
+                                        fromPhone: true)
         guard !r.twoChoice, Self.allowed(plan.door) else { lock.unlock(); return .refused("Nothing to run from the phone") }
         var building = false
         if case .background = plan.door { building = true }
@@ -285,7 +286,7 @@ final class RemoteBar: @unchecked Sendable {
 
     static func routeJSON(id: String, _ e: RemoteRouteEntry) -> [String: Any] {
         let r = e.route
-        let plan = CommandExecutor.plan(route: r, background: false, context: e.context)
+        let plan = CommandExecutor.plan(route: r, background: false, context: e.context, fromPhone: true)
         func opts(_ o: [Option]?) -> [[String: String]] { (o ?? []).map { ["value": $0.value, "label": $0.label] } }
         let cands = candidates(e)
         return [

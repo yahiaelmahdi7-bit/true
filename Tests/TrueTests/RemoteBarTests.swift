@@ -126,6 +126,19 @@ func answer(_ kind: String, danger: Double? = nil, judged: Bool = true) -> JevRe
         #expect(p.running(records: [("a", false), ("b", false)], now: now) == 0)
     }
 
+    @Test func phoneClaudePaneUsesAutoModeMacKeepsSkipPermissions() throws {
+        let (bar, _) = make(answer("agent_task"))
+        let a = try #require(bar.propose(device: dev, text: "fix the tests in app", now: t0))
+        let phone = CommandExecutor.plan(route: a.entry.route, background: false, context: a.entry.context, fromPhone: true)
+        let mac = CommandExecutor.plan(route: a.entry.route, background: false, context: a.entry.context)
+        guard case .newClaudePane = phone.door, case .newClaudePane = mac.door else { Issue.record("expected new pane"); return }
+        #expect(phone.argv.contains("--permission-mode") && phone.argv.contains("auto"))
+        #expect(!phone.argv.contains("--dangerously-skip-permissions"))
+        #expect(mac.argv.contains("--dangerously-skip-permissions") && !mac.argv.contains("--permission-mode"))
+        let cmd = CommandExecutor.startupCommand(argv: phone.argv, settings: "/tmp/s.json")
+        #expect(cmd.contains("--permission-mode") && cmd.contains("auto") && cmd.contains("--settings") && !cmd.contains("dangerously"))
+    }
+
     @Test func randomnessFailureRefusesToMakeARoute() {
         #expect(RemoteBar.newID() != nil)
     }

@@ -30,7 +30,8 @@ enum CommandExecutor {
         return SpawnRequest.isValidName(n) ? n : "cb-\(stamp % 100_000)"
     }
 
-    static func plan(route r: Route, background: Bool, context c: CommandContext, stamp: Int = 0) -> Plan {
+    static func plan(route r: Route, background: Bool, context c: CommandContext, stamp: Int = 0,
+                     fromPhone: Bool = false) -> Plan {
         let text = r.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let cwd = r.project?.path ?? c.focused.cwd
         guard !text.isEmpty || r.kind == .trueAction else {
@@ -65,7 +66,8 @@ enum CommandExecutor {
             case .focusedPane where onClaude:
                 return Plan(door: .writeToFocusedClaude, argv: [text], autoSubmit: true, needsSecondReturn: second)
             default:
-                var argv = ["claude", "--dangerously-skip-permissions"]
+                // The Mac bar runs without prompts; a pane the phone starts uses auto mode (a checker approves routine steps).
+                var argv = ["claude"] + (fromPhone ? ["--permission-mode", "auto"] : ["--dangerously-skip-permissions"])
                 if let m = r.model { argv += ["--model", m.rawValue] }
                 if let e = r.effort { argv += ["--effort", e.rawValue] }
                 argv.append(text)
