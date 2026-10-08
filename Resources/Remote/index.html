@@ -31,6 +31,45 @@
   <p id="empty" hidden>No panes open on the Mac.</p>
 </main>
 
+<main id="shots" aria-label="Shots" hidden>
+  <header class="bar"><h1>Shots</h1></header>
+  <p id="shotsEmpty" class="hint" hidden>No screenshots on the Mac yet.</p>
+  <div id="grid"></div>
+</main>
+
+<main id="send" aria-label="Send" hidden>
+  <header class="bar"><h1>Send</h1></header>
+  <section class="card" id="inboxBox" hidden>
+    <h2>From your Mac</h2>
+    <div id="inbox"></div>
+  </section>
+  <section class="card">
+    <h2>To your Mac</h2>
+    <input id="files" type="file" multiple hidden>
+    <button id="pick" class="big">Send to Mac</button>
+    <p class="hint">Photos, camera or Files. Pictures land in the Shots tray, everything else in Downloads.</p>
+    <div id="uploads"></div>
+  </section>
+  <section class="card">
+    <h2>Clipboard</h2>
+    <textarea id="clipText" rows="3" maxlength="262144" placeholder="Text to put on the Mac clipboard" aria-label="Text for the Mac clipboard"></textarea>
+    <button id="clipSend" class="big alt">Send to Mac clipboard</button>
+    <p id="clipNote" class="hint" role="status"></p>
+  </section>
+</main>
+
+<div id="viewer" hidden role="dialog" aria-label="Shot">
+  <header class="bar"><button id="vClose" class="btn" aria-label="Close">‹ Shots</button><span id="vTitle"></span></header>
+  <div id="vBody"></div>
+  <footer id="vBar"><button id="vShare" class="big">Share</button><button id="vSave" class="big alt">Save</button></footer>
+</div>
+
+<nav id="nav" aria-label="Sections">
+  <button data-tab="panes" aria-current="page">Panes</button>
+  <button data-tab="shots">Shots</button>
+  <button data-tab="send">Send<span id="dot" hidden></span></button>
+</nav>
+
 <section id="term" hidden aria-label="Terminal">
   <header class="bar">
     <button id="back" class="btn" aria-label="Back to panes">‹ Panes</button>

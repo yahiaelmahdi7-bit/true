@@ -7,6 +7,9 @@ struct HTTPRequest: Equatable {
     var query: [String: String]
     var headers: [String: String]      // lower-cased names
     var body: [UInt8] = []
+    /// Routes that read their own (large) body after auth: the head is parsed alone; `body` holds whatever already arrived.
+    var streamsBody = false
+    var declaredLength = 0
 
     func header(_ name: String) -> String? { headers[name.lowercased()] }
 
@@ -18,7 +21,10 @@ struct HTTPRequest: Equatable {
     enum ParseResult: Equatable { case needMore, bad, request(HTTPRequest, consumed: Int) }
 
     static let maxHead = 16 * 1024
+    static let bodyDeadline: TimeInterval = 10
     static let maxBody = 4 * 1024
+    /// POST routes whose body is read after authentication, under their own caps (drop 200 MB streamed, clip 1 MB).
+    static let bodyRoutes: Set<String> = ["/api/drop", "/api/clip"]
     static let singletonHeaders: Set<String> = ["tailscale-user-login", "host", "origin", "authorization"]
 
     /// Parse as much of `bytes` as forms one request. `.needMore` until the head (and any body) is complete.
@@ -47,6 +53,13 @@ struct HTTPRequest: Equatable {
                     p.count == 2 ? (String(p[1]).removingPercentEncoding ?? String(p[1])) : ""
             }
         }
+        if first[0] == "POST", bodyRoutes.contains(String(comps[0])) {
+            let len = headers["transfer-encoding"] == nil ? (headers["content-length"].flatMap { Int($0) } ?? -1) : -1
+            let have = Array(bytes[(end + 4)...].prefix(max(len, 0)))
+            var r = HTTPRequest(method: String(first[0]), path: String(comps[0]), query: query, headers: headers, body: have)
+            r.streamsBody = true; r.declaredLength = len
+            return .request(r, consumed: end + 4 + have.count)
+        }
         let bodyLen = Int(headers["content-length"] ?? "0") ?? -1
         guard bodyLen >= 0, bodyLen <= maxBody else { return .bad }
         let total = end + 4 + bodyLen
@@ -69,10 +82,16 @@ enum HTTPResponse {
 
     static func make(status: Int, reason: String, headers: [String: String] = [:], body: [UInt8] = [],
                      contentType: String = "text/plain; charset=utf-8") -> [UInt8] {
-        var h = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: \(contentType)\r\nContent-Length: \(body.count)\r\n"
+        head(status: status, reason: reason, headers: headers, length: body.count, contentType: contentType) + body
+    }
+
+    /// Status line + headers only (file responses stream the body after it).
+    static func head(status: Int, reason: String, headers: [String: String] = [:], length: Int,
+                     contentType: String) -> [UInt8] {
+        var h = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: \(contentType)\r\nContent-Length: \(length)\r\n"
         h += "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n"
         h += "X-Frame-Options: DENY\r\nContent-Security-Policy: \(csp)\r\nConnection: close\r\n"
         for (k, v) in headers { h += "\(k): \(v)\r\n" }
-        return Array((h + "\r\n").utf8) + body
+        return Array((h + "\r\n").utf8)
     }
 }

@@ -26,17 +26,23 @@ final class RemoteServer: @unchecked Sendable {
     private let allowedLogin: @Sendable () -> String?
     private let dnsName: @Sendable () -> String?
     private let wsAuthTimeout: TimeInterval
+    private let files: RemoteFiles
+    private let dropDeadline: TimeInterval
     private let lock = NSLock()
     private var listenFD: Int32 = -1
     private var running = false
     private var open: Set<Int32> = []
+    /// Drop uploads in flight; the free-space check is per upload, so cap how many can pass it at once.
+    static let maxConcurrentDrops = 2
+    private var activeDrops = 0
     /// Authenticated WebSocket fds → the device that authed them, so a revoke can cut live sessions.
     private var socketDevices: [Int32: UUID] = [:]
 
     init(backend: RemoteBackend, codes: PairingCodes, devices: DeviceStore,
          allowedLogin: @escaping @Sendable () -> String?, dnsName: @escaping @Sendable () -> String?,
-         wsAuthTimeout: TimeInterval = 5) {
+         files: RemoteFiles = RemoteFilesLive.make(), dropDeadline: TimeInterval = 120, wsAuthTimeout: TimeInterval = 5) {
         self.wsAuthTimeout = wsAuthTimeout
+        self.files = files; self.dropDeadline = dropDeadline
         self.backend = backend; self.codes = codes; self.devices = devices
         self.allowedLogin = allowedLogin; self.dnsName = dnsName
     }
@@ -166,9 +172,17 @@ final class RemoteServer: @unchecked Sendable {
         let needsToken = isAPI && !paneSocket
         let bearer = RemoteAuth.bearerToken(req.header("authorization"))
         let device = needsToken ? devices.validate(bearer) : nil
+        // Browsers always send Origin on POST, and a bearer token is not ambient (no CSRF), so ONLY the Shortcuts routes
+        // may omit it. A present Origin must still be exact; a bad/missing bearer still gets 401.
+        let originOptional = req.method == "POST" && Self.noOriginRoutes.contains(req.path) && req.header("origin") == nil
+        // A send-only (Shortcut) token is valid for nothing but POST /api/drop and /api/clip.
+        if let device, device.scope == .dropOnly, !(req.method == "POST" && Self.noOriginRoutes.contains(req.path)) {
+            Self.log.notice("deny 403 \(req.method, privacy: .public) \(req.path, privacy: .public): send-only token")
+            _ = send(fd, HTTPResponse.make(status: 403, reason: "Forbidden", body: Array("Forbidden".utf8))); return
+        }
         let decision = RemoteAuth.decide(loginHeader: req.header(RemoteAuth.loginHeader), allowedLogin: allowedLogin(),
                                          host: req.header("host"), origin: req.header("origin"), dnsName: dnsName(),
-                                         requiresOrigin: stateChanging || ws, requiresToken: needsToken,
+                                         requiresOrigin: (stateChanging || ws) && !originOptional, requiresToken: needsToken,
                                          tokenValid: device != nil)
         switch decision {
         case .forbidden(let why):
@@ -182,6 +196,13 @@ final class RemoteServer: @unchecked Sendable {
             route(fd, req)
         }
     }
+
+    static let noOriginRoutes: Set<String> = ["/api/drop", "/api/clip"]
+    /// Every API route this server answers (the test asserts none of them reads the Mac clipboard or a Mac path).
+    static let routeTable: [String] = [
+        "POST /pair", "GET /api/tabs", "WS /api/pane/<uuid>", "POST /api/drop", "POST /api/clip",
+        "GET /api/shots", "GET /api/shots/<id>", "GET /api/inbox", "GET /api/inbox/<id>", "DELETE /api/inbox/<id>",
+    ]
 
     private func json(_ fd: Int32, _ status: Int, _ reason: String, _ obj: [String: Any], extra: [String: String] = [:]) {
         let body = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data("{}".utf8)
@@ -217,6 +238,16 @@ final class RemoteServer: @unchecked Sendable {
             _ = send(fd, HTTPResponse.make(status: 200, reason: "OK", body: [UInt8](backend.tabsJSON()),
                                            contentType: "application/json")); return
         }
+        if req.method == "POST", req.path == "/api/drop" { handleDrop(fd, req); return }
+        if req.method == "POST", req.path == "/api/clip" { handleClip(fd, req); return }
+        if req.method == "GET", req.path == "/api/shots" { handleShotsList(fd); return }
+        if req.method == "GET", req.path.hasPrefix("/api/shots/") { handleShot(fd, String(req.path.dropFirst("/api/shots/".count))); return }
+        if req.path == "/api/inbox", req.method == "GET" { handleInboxList(fd); return }
+        if req.path.hasPrefix("/api/inbox/") {
+            let id = String(req.path.dropFirst("/api/inbox/".count))
+            if req.method == "GET" { handleInboxItem(fd, id); return }
+            if req.method == "DELETE" { handleInboxDelete(fd, id); return }
+        }
         if req.path.hasPrefix("/api/pane/"), req.isWebSocketUpgrade {
             guard let id = UUID(uuidString: String(req.path.dropFirst("/api/pane/".count))),
                   let key = req.header("sec-websocket-key") else {
@@ -229,6 +260,129 @@ final class RemoteServer: @unchecked Sendable {
             _ = send(fd, HTTPResponse.make(status: 200, reason: "OK", body: asset.body, contentType: asset.type)); return
         }
         _ = send(fd, HTTPResponse.make(status: 404, reason: "Not Found", body: Array("Not found".utf8)))
+    }
+
+    // MARK: phone ↔ Mac files
+
+    private func plain(_ fd: Int32, _ status: Int, _ reason: String, _ msg: String) {
+        _ = send(fd, HTTPResponse.make(status: status, reason: reason, body: Array(msg.utf8)))
+    }
+
+    /// POST /api/drop — raw body, name in `X-Filename`. Streamed to a temp file under one 120 s deadline.
+    private func handleDrop(_ fd: Int32, _ req: HTTPRequest) {
+        let len = req.declaredLength
+        guard len > 0 else { plain(fd, len == 0 ? 400 : 411, len == 0 ? "Bad Request" : "Length Required", "Send a Content-Length"); return }
+        guard len <= RemoteFiles.maxDropBytes else { plain(fd, 413, "Payload Too Large", "Over 200 MB"); return }
+        lock.lock()
+        let slot = activeDrops < Self.maxConcurrentDrops
+        if slot { activeDrops += 1 }
+        lock.unlock()
+        guard slot else {
+            _ = send(fd, HTTPResponse.make(status: 503, reason: "Service Unavailable", headers: ["Retry-After": "2"],
+                                           body: Array("Busy, retry".utf8))); return
+        }
+        defer { lock.lock(); activeDrops -= 1; lock.unlock() }
+        guard files.freeBytes(files.tmpDir) >= DropFS.minFreeBytes else {
+            plain(fd, 507, "Insufficient Storage", "The Mac is almost out of disk space"); return
+        }
+        let name = DropName.sanitize(req.header("x-filename"))
+        if (req.header("expect") ?? "").lowercased() == "100-continue" { _ = send(fd, Array("HTTP/1.1 100 Continue\r\n\r\n".utf8)) }
+        let tmp = files.newTemp(ext: DropName.safeExtension(name))
+        switch DropReceiver.receive(fd, initial: req.body, total: len, deadline: dropDeadline, into: tmp) {
+        case .ok: break
+        case .timedOut: unlink(tmp.path); plain(fd, 408, "Request Timeout", "Too slow"); return
+        case .closed: unlink(tmp.path); return
+        case .ioError: unlink(tmp.path); plain(fd, 500, "Internal Server Error", "Could not write the file"); return
+        }
+        switch files.land(tmp: tmp, name: name) {
+        case .shot(let id): json(fd, 200, "OK", ["ok": true, "where": "shots", "id": id])
+        case .file(let url): json(fd, 200, "OK", ["ok": true, "where": "downloads", "name": url.lastPathComponent])
+        case nil: plain(fd, 500, "Internal Server Error", "Could not save the file")
+        }
+    }
+
+    /// POST /api/clip {"text"} (≤ 256 KB) → the Mac pasteboard.
+    private func handleClip(_ fd: Int32, _ req: HTTPRequest) {
+        let len = req.declaredLength
+        guard len > 0 else { plain(fd, 400, "Bad Request", "Send JSON"); return }
+        guard len <= 1024 * 1024 else { plain(fd, 413, "Payload Too Large", "Over 256 KB"); return }
+        var body = Array(req.body.prefix(len))
+        if DropReceiver.pump(fd, have: body.count, total: len, deadline: HTTPRequest.bodyDeadline, sink: { body += $0; return true }) != .ok {
+            plain(fd, 408, "Request Timeout", "Too slow"); return
+        }
+        guard let text = (try? JSONSerialization.jsonObject(with: Data(body)) as? [String: Any])?["text"] as? String,
+              !text.isEmpty else { plain(fd, 400, "Bad Request", "Need {\"text\"}"); return }
+        guard text.utf8.count <= RemoteFiles.maxClipBytes else { plain(fd, 413, "Payload Too Large", "Over 256 KB"); return }
+        files.setClipboard(text)
+        files.notify("Clipboard from iPhone")
+        json(fd, 200, "OK", ["ok": true])
+    }
+
+    /// GET /api/shots — the tray, newest first. Nothing else about the Mac.
+    private func handleShotsList(_ fd: Int32) {
+        let rows: [[String: Any]] = files.tray().load().shots.map {
+            ["id": $0.id, "created": ISO8601DateFormatter().string(from: $0.created), "kind": $0.kind.rawValue, "w": $0.width, "h": $0.height]
+        }
+        json(fd, 200, "OK", ["shots": rows])
+    }
+
+    /// `^\d{8}-\d{6}-[0-9a-f]{4}$` AND present in index.json. The id picks an index entry; it is never a path.
+    static func validShotID(_ s: String) -> Bool {
+        let u = Array(s.utf8)
+        guard u.count == 20, u[8] == 45, u[15] == 45 else { return false }
+        func digit(_ b: UInt8) -> Bool { b >= 48 && b <= 57 }
+        func hex(_ b: UInt8) -> Bool { digit(b) || (b >= 97 && b <= 102) }
+        return u[0..<8].allSatisfy(digit) && u[9..<15].allSatisfy(digit) && u[16..<20].allSatisfy(hex)
+    }
+
+    private func handleShot(_ fd: Int32, _ id: String) {
+        let store = files.tray()
+        guard Self.validShotID(id), let e = store.load().shots.first(where: { $0.id == id }),
+              e.file.hasPrefix("shots/"), !e.file.contains("..") else { plain(fd, 404, "Not Found", "Not found"); return }
+        sendFile(fd, store.url(for: e), name: e.file.split(separator: "/").last.map(String.init) ?? id)
+    }
+
+    private func handleInboxList(_ fd: Int32) {
+        let rows: [[String: Any]] = files.inbox.list().map { i in
+            var r: [String: Any] = ["id": i.id, "name": i.name, "kind": i.kind.rawValue, "size": i.size,
+                                    "created": i.created.timeIntervalSince1970]
+            if i.kind == .text { r["preview"] = files.inbox.previewText(i.id) ?? "" }
+            return r
+        }
+        json(fd, 200, "OK", ["items": rows])
+    }
+
+    private func handleInboxItem(_ fd: Int32, _ id: String) {
+        guard let (item, url) = files.inbox.item(id) else { plain(fd, 404, "Not Found", "Not found"); return }
+        sendFile(fd, url, name: item.name)
+    }
+
+    private func handleInboxDelete(_ fd: Int32, _ id: String) {
+        files.inbox.delete(id) ? json(fd, 200, "OK", ["ok": true]) : plain(fd, 404, "Not Found", "Not found")
+    }
+
+    /// Stream a file the phone is allowed to see. Raster images get their image type; EVERYTHING else (SVG, HTML, PDF …)
+    /// is an octet-stream attachment, and every file response adds `Content-Security-Policy: sandbox`, so nothing served
+    /// from here can run script in this origin.
+    func sendFile(_ fd: Int32, _ url: URL, name: String) {
+        let ifd = Darwin.open(url.path, O_RDONLY)
+        guard ifd >= 0 else { plain(fd, 404, "Not Found", "Not found"); return }
+        defer { close(ifd) }
+        var st = stat()
+        guard fstat(ifd, &st) == 0 else { plain(fd, 404, "Not Found", "Not found"); return }
+        var extra = ["Content-Security-Policy": "sandbox"]
+        let image = DropName.imageContentType(forName: name)
+        if image == nil { extra["Content-Disposition"] = DropName.attachment(name) }
+        guard send(fd, HTTPResponse.head(status: 200, reason: "OK", headers: extra, length: Int(st.st_size),
+                                         contentType: image ?? "application/octet-stream")) else { return }
+        var buf = [UInt8](repeating: 0, count: 64 * 1024)
+        var left = Int(st.st_size)
+        while left > 0 {
+            let n = read(ifd, &buf, min(buf.count, left))
+            if n <= 0 { return }
+            if !send(fd, Array(buf[0..<n])) { return }
+            left -= n
+        }
     }
 
     /// First WebSocket message must be text `{"auth":"<token>"}` within 5 s, else close 4401 and no PTY bytes flow.
@@ -246,7 +400,7 @@ final class RemoteServer: @unchecked Sendable {
         let first = pending.removeFirst()
         guard first.op == .text,
               let tok = (try? JSONSerialization.jsonObject(with: Data(first.payload)) as? [String: Any])?["auth"] as? String,
-              let dev = devices.validate(tok) else { return nil }
+              let dev = devices.validate(tok), dev.scope == .full else { return nil }
         return dev
     }
 

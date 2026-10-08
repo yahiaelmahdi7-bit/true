@@ -235,6 +235,8 @@ final class ScreenshotWatcher {
         apply(result)
     }
 
+    func refresh() async { await reload() }
+
     private func reload() async {
         let store = store
         apply(await Task.detached { store.load().shots }.value)
