@@ -30,6 +30,8 @@ async function loadList() {
     if (r.status === 401) { unpair(); return; }
     if (!r.ok) throw new Error(String(r.status));
     const data = await r.json();
+    // Plain terminal panes (not agent seats) only exist in /api/tabs; the Hub model leaves them out.
+    try { const t = await api('/api/tabs'); if (t.ok) data.tabs = (await t.json()).tabs || []; } catch (e) { /* hub still renders */ }
     listFails = 0; banner('');
     renderHub(data);
   } catch (e) {
@@ -54,6 +56,26 @@ function renderHub(data) {
       b.appendChild(box);
       b.appendChild(el('span', 'chip ' + (r.statusKey || 'idle'), r.status));
       b.onclick = () => rowTap(r);
+      sec.appendChild(b);
+    }
+    host.appendChild(sec);
+  }
+  const seen = new Set();
+  for (const g of data.projects || []) for (const r of g.rows || []) if (r.pane) seen.add(r.pane);
+  for (const t of data.tabs || []) {
+    const free = (t.panes || []).filter((p) => p.live && !seen.has(p.id));
+    if (!free.length) continue;
+    const sec = el('section', 'tab');
+    sec.appendChild(el('h2', null, 'Panes · ' + t.title));
+    for (const p of free) {
+      n++;
+      const b = el('button', 'row2');
+      const box = el('span', 't');
+      box.append(el('span', 'n', p.title), el('span', 'c', p.cwd || ''));
+      b.appendChild(box);
+      const key = p.needsYou ? 'needsYou' : p.busy ? 'working' : 'idle';
+      b.appendChild(el('span', 'chip ' + key, p.needsYou ? 'Needs you' : p.busy ? 'Working' : 'Idle'));
+      b.onclick = () => openPane(p.id, p.title);
       sec.appendChild(b);
     }
     host.appendChild(sec);
