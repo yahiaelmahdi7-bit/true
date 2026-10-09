@@ -18,26 +18,3 @@ struct RootTabs: View {
         }
     }
 }
-
-/// The floating + : a toolbar item (a .bottomBar item is hidden behind the TabView's tab bar), which the system draws as glass.
-struct StartWorkButton: ToolbarContent {
-    @Environment(AppModel.self) private var model
-    var body: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            Button { model.showComposer = true } label: { Label("Start work", systemImage: "plus") }
-        }
-    }
-}
-
-struct ToastView: View {
-    @Environment(AppModel.self) private var model
-    var body: some View {
-        if let t = model.toast {
-            Text(t).font(.subheadline.weight(.medium)).padding(.horizontal, 16).padding(.vertical, 10)
-                .glassEffect(.regular, in: .capsule)
-                .padding(.top, 8)
-                .transition(.move(edge: .top).combined(with: .opacity))
-                .animation(.default, value: model.toast)
-        }
-    }
-}

@@ -2,7 +2,9 @@ import SwiftUI
 
 struct HubView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var builder: HubRow?
+    @Namespace private var ns
 
     var body: some View {
         @Bindable var model = model
@@ -23,14 +25,26 @@ struct HubView: View {
                         }
                     } else { list(hub) }
                 } else {
-                    List { ForEach(0..<6, id: \.self) { _ in RowView(row: .placeholder) } }.redacted(reason: .placeholder)
+                    List {
+                        ForEach(0..<2, id: \.self) { _ in
+                            Section { ForEach(0..<3, id: \.self) { _ in RowView(row: .placeholder) } }
+                        }
+                    }
+                    .redacted(reason: .placeholder).allowsHitTesting(false)
                 }
             }
             .navigationTitle("Hub")
-            .navigationDestination(item: $model.openPane) { PaneView(route: $0) }
+            .navigationSubtitle(model.hub?.summary ?? "")
+            .navigationDestination(item: $model.openPane) { route in
+                PaneView(route: route).navigationTransition(.zoom(sourceID: route.id, in: ns))
+            }
             .toolbar {
                 if model.failCount > 0 && !model.offline {
-                    ToolbarItem(placement: .principal) { Label("Reconnecting…", systemImage: "arrow.triangle.2.circlepath").font(.caption) }
+                    ToolbarItem(placement: .principal) {
+                        Label("Reconnecting", systemImage: "arrow.triangle.2.circlepath").font(.caption.weight(.medium))
+                            .symbolEffect(.rotate, options: .repeating, isActive: !reduceMotion)
+                            .padding(.horizontal, 10).padding(.vertical, 4).glassEffect(.regular, in: .capsule)
+                    }
                 }
                 StartWorkButton()
             }
@@ -46,14 +60,23 @@ struct HubView: View {
         }
     }
 
+    private func isHot(_ r: HubRow) -> Bool { r.statusKey == "needsYou" || r.statusKey == "failed" }
+
     private func list(_ hub: HubSnapshot) -> some View {
-        List {
+        let hot = hub.projects.flatMap(\.rows).filter(isHot)
+        return List {
+            if hub.needsYou > 0 || !hot.isEmpty {
+                Section("Needs you") { ForEach(hot) { rowLink($0) } }
+            }
             ForEach(hub.projects.indices, id: \.self) { i in
                 let p = hub.projects[i]
-                Section {
-                    ForEach(p.rows) { row in rowLink(row) }
-                } header: {
-                    HStack { Text(p.title); Spacer(); Text(p.summary).foregroundStyle(.secondary).textCase(nil) }
+                let rows = p.rows.filter { !isHot($0) }
+                if !rows.isEmpty {
+                    Section {
+                        ForEach(rows) { rowLink($0) }
+                    } header: {
+                        HStack { Text(p.title); Spacer(); Text(p.summary).foregroundStyle(.secondary).textCase(nil) }
+                    }
                 }
             }
         }
@@ -61,49 +84,86 @@ struct HubView: View {
         .refreshable { await model.refresh() }
     }
 
+    private func toggleCommand(_ row: HubRow) -> String { row.statusKey == "asleep" ? "wake \(row.name)" : "sleep \(row.name)" }
+
     @ViewBuilder private func rowLink(_ row: HubRow) -> some View {
         if row.kind == "seat", let pane = row.pane {
             NavigationLink(value: PaneRoute(id: pane, title: row.name)) { RowView(row: row) }
+                .matchedTransitionSource(id: pane, in: ns)
                 .swipeActions(edge: .trailing) {
-                    if row.statusKey == "asleep" { Button("Wake") { Task { await model.command("wake \(row.name)") } } }
-                    else { Button("Sleep") { Task { await model.command("sleep \(row.name)") } }.tint(.gray) }
+                    if row.statusKey == "asleep" {
+                        Button { Task { await model.command(toggleCommand(row)) } } label: { Label("Wake", systemImage: "sunrise") }
+                    } else {
+                        Button { Task { await model.command(toggleCommand(row)) } } label: { Label("Sleep", systemImage: "moon.zzz") }.tint(.gray)
+                    }
+                }
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    Button { model.openPane = PaneRoute(id: pane, title: row.name) } label: { Label("Open", systemImage: "terminal") }
+                }
+                .contextMenu {
+                    Button { model.openPane = PaneRoute(id: pane, title: row.name) } label: { Label("Open", systemImage: "terminal") }
+                    Button { Task { await model.command(toggleCommand(row)) } } label: {
+                        row.statusKey == "asleep" ? Label("Wake", systemImage: "sunrise") : Label("Sleep", systemImage: "moon.zzz")
+                    }
+                    copyButtons(row)
                 }
         } else if row.kind == "background" {
             Button { builder = row } label: { RowView(row: row) }.buttonStyle(.plain)
                 .swipeActions(edge: .trailing) {
                     if row.acked == false, let id = row.builderId {
-                        Button("Ack") { Task { try? await model.session?.ackBuilder(id: id); await model.refresh() } }
+                        Button { ack(id) } label: { Label("Ack", systemImage: "checkmark") }
                     }
+                }
+                .contextMenu {
+                    Button { builder = row } label: { Label("Open", systemImage: "hammer") }
+                    if row.acked == false, let id = row.builderId { Button { ack(id) } label: { Label("Ack", systemImage: "checkmark") } }
+                    copyButtons(row)
                 }
         } else { RowView(row: row) }
     }
+
+    @ViewBuilder private func copyButtons(_ row: HubRow) -> some View {
+        Button { UIPasteboard.general.string = row.name; model.show("Copied name") } label: { Label("Copy name", systemImage: "doc.on.doc") }
+        if let cwd = row.cwd { Button { UIPasteboard.general.string = cwd; model.show("Copied path") } label: { Label("Copy path", systemImage: "folder") } }
+    }
+
+    private func ack(_ id: String) { Task { try? await model.session?.ackBuilder(id: id); await model.refresh() } }
 }
 
 extension HubRow {
     static let placeholder = HubRow(kind: "seat", id: "x", name: "placeholder-name", status: "Working", statusKey: "working", cwd: "~/Projects/placeholder")
 }
 
+/// Hub/Needs-you row: a TileRow with the status (dot + word, elapsed under it for Working).
 struct RowView: View {
     let row: HubRow
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var hot: Bool { row.statusKey == "needsYou" || row.statusKey == "failed" }
-    private var symbol: String { row.kind == "seat" ? "terminal" : row.kind == "background" ? "hammer" : "rectangle.on.rectangle" }
+    private var failedBuilder: Bool { row.kind == "background" && row.statusKey == "failed" }
+    private var symbol: String {
+        failedBuilder ? "exclamationmark.circle.fill" : row.kind == "seat" ? "terminal" : row.kind == "background" ? "hammer" : "rectangle.on.rectangle"
+    }
+    private var detail: String? { row.kind == "background" ? (row.branch ?? row.cwd) : row.cwd }
+    private var tint: AnyShapeStyle {
+        hot ? AnyShapeStyle(.attention) : row.statusKey == "working" ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary)
+    }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol).font(.title3).foregroundStyle(.secondary)
-                .frame(width: 44, height: 44).background(.fill.quaternary, in: .rect(cornerRadius: 10))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.name).font(.body.weight(.semibold)).lineLimit(1)
-                if let cwd = row.cwd { Text(cwd).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
+        TileRow(symbol: symbol, title: row.name, detail: detail,
+                symbolStyle: failedBuilder ? AnyShapeStyle(.attention) : AnyShapeStyle(.secondary)) {
+            VStack(alignment: .trailing, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: "circle.fill").font(.system(size: 8))
+                        .symbolEffect(.pulse, options: .repeating, isActive: row.statusKey == "working" && !reduceMotion)
+                    Text(row.status).font(.subheadline).lineLimit(1).fixedSize()
+                }
+                .foregroundStyle(tint)
+                if row.statusKey == "working", let e = row.elapsed, !e.isEmpty {
+                    Text(e).font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
+                }
             }
-            Spacer(minLength: 8)
-            HStack(spacing: 6) {
-                Circle().frame(width: 8, height: 8)
-                Text(row.status).font(.subheadline).lineLimit(1).fixedSize()
-            }
-            .foregroundStyle(hot ? Color.attention : Color.secondary)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityValue(row.status)
     }
 }
 
