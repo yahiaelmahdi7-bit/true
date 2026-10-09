@@ -1,0 +1,167 @@
+import Testing
+import Foundation
+@testable import TrueRemoteClient
+
+final class StubTransport: RemoteTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var queue: [(Int, Data, [String: String])]
+    private(set) var requests: [URLRequest] = []
+
+    init(_ responses: (Int, String, [String: String])...) {
+        queue = responses.map { ($0.0, Data($0.1.utf8), $0.2) }
+    }
+
+    private func next(_ req: URLRequest) -> (Int, Data, [String: String]) {
+        lock.lock(); defer { lock.unlock() }
+        requests.append(req)
+        return queue.count > 1 ? queue.removeFirst() : queue[0]
+    }
+
+    func send(_ req: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        let (status, data, headers) = next(req)
+        return (data, HTTPURLResponse(url: req.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!)
+    }
+}
+
+// Lifted from scripts/remote-mock.py hub() (normal state), trimmed to two projects.
+let sampleHub = """
+{"summary":"1 working · 1 needs you · 1 done","projects":[
+ {"title":"true","summary":"1 working · 1 needs you","rows":[
+  {"kind":"seat","id":"lead-true","name":"lead-true","status":"Working","statusKey":"working","pane":"11111111-1111-1111-1111-111111111111","cwd":"~/Projects/true","elapsed":"12m"},
+  {"kind":"seat","id":"helper-1-true","name":"helper-1-true","status":"Needs you","statusKey":"needsYou","pane":"22222222-2222-2222-2222-222222222222","cwd":"~/Projects/true/Sources","elapsed":"3m"},
+  {"kind":"background","id":"builder run-26","name":"builder run-26","status":"Done","statusKey":"done","builderId":"run-26","acked":false,"cwd":"~/Projects/true.builders","elapsed":"41m","branch":null}]},
+ {"title":"axon","summary":"1 failed","rows":[
+  {"kind":"other","id":"zsh in Ghostty","name":"zsh in Ghostty","status":"Working","statusKey":"working","cwd":"~/Projects/axon","elapsed":"1h 2m"}]}]}
+"""
+
+private let base = URL(string: "https://mac.tail1234.ts.net:8444")!
+private func session(_ t: StubTransport, token: String? = "tok", store: InMemoryTokenStore? = nil) -> (RemoteSession, InMemoryTokenStore) {
+    let s = store ?? InMemoryTokenStore(token: token)
+    return (RemoteSession(baseURL: base, store: s, transport: t), s)
+}
+
+@Suite struct RemoteSessionTests {
+    @Test func bearerHeaderAndNoCookie() async throws {
+        let t = StubTransport((200, sampleHub, [:]))
+        let (s, _) = session(t)
+        _ = try await s.hub()
+        let req = try #require(t.requests.first)
+        #expect(req.value(forHTTPHeaderField: "Authorization") == "Bearer tok")
+        #expect(req.value(forHTTPHeaderField: "Cache-Control") == "no-store")
+        #expect(req.value(forHTTPHeaderField: "Cookie") == nil)
+        #expect(req.httpShouldHandleCookies == false)
+        #expect(req.url?.absoluteString == "https://mac.tail1234.ts.net:8444/api/hub")
+    }
+
+    @Test func postsCarryExactOrigin() async throws {
+        let t = StubTransport((200, #"{"ok":true}"#, [:]))
+        let (s, _) = session(t)
+        try await s.clip(text: "hi")
+        #expect(t.requests[0].value(forHTTPHeaderField: "Origin") == "https://mac.tail1234.ts.net:8444")
+    }
+
+    @Test func unauthorizedClearsToken() async {
+        let t = StubTransport((401, "Not paired", [:]))
+        let (s, store) = session(t)
+        await #expect(throws: RemoteError.unauthorized) { try await s.hub() }
+        #expect(store.load() == nil)
+    }
+
+    @Test func routeNotFoundIsExpired() async {
+        let t = StubTransport((404, "Route expired", [:]))
+        let (s, store) = session(t)
+        await #expect(throws: RemoteError.routeExpired) { try await s.setSlot(routeId: "r1", slot: "kind", value: "x") }
+        await #expect(throws: RemoteError.routeExpired) { try await s.run(routeId: "r1") }
+        #expect(store.load() == "tok")
+    }
+
+    @Test func rateLimitParsesRetryAfter() async {
+        let t = StubTransport((429, "Slow down", ["Retry-After": "60"]))
+        let (s, _) = session(t)
+        await #expect(throws: RemoteError.rateLimited(retryAfter: 60)) { try await s.route(text: "hi") }
+    }
+
+    @Test func forbiddenAndOtherStatuses() async {
+        let (s, _) = session(StubTransport((403, "Forbidden", [:])))
+        await #expect(throws: RemoteError.refused) { try await s.recent() }
+        let (s2, _) = session(StubTransport((500, "", [:])))
+        await #expect(throws: RemoteError.http(500)) { try await s2.recent() }
+    }
+
+    @Test func runConfirmIsNotAnError() async throws {
+        let t = StubTransport((409, #"{"needsConfirm":true,"reason":"dangerous_text"}"#, [:]))
+        let (s, _) = session(t)
+        let r = try await s.run(routeId: "r1", background: false, confirmed: false)
+        #expect(r.needsConfirm == true && r.reason == "dangerous_text")
+        let body = try #require(t.requests[0].httpBody)
+        let o = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(o["routeId"] as? String == "r1" && o["confirm"] as? Bool == false)
+    }
+
+    @Test func pairStoresToken() async throws {
+        let t = StubTransport((200, #"{"token":"abc123"}"#, [:]))
+        let (s, store) = session(t, token: nil)
+        try await s.pair(code: " 123456 ")
+        #expect(store.load() == "abc123")
+        #expect(t.requests[0].value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(String(decoding: t.requests[0].httpBody ?? Data(), as: UTF8.self).contains("123456"))
+    }
+
+    @Test func pairWrongCodeKeepsStoreEmpty() async {
+        let t = StubTransport((401, #"{"error":"That code didn't work."}"#, [:]))
+        let (s, store) = session(t, token: nil)
+        await #expect(throws: RemoteError.pairingFailed("That code didn't work.")) { try await s.pair(code: "000000") }
+        #expect(store.load() == nil)
+    }
+
+    @Test func unpairedRequestThrowsWithoutNetwork() async {
+        let t = StubTransport((200, "{}", [:]))
+        let (s, _) = session(t, token: nil)
+        await #expect(throws: RemoteError.unauthorized) { try await s.hub() }
+        #expect(t.requests.isEmpty)
+    }
+}
+
+@Suite struct RemoteModelTests {
+    @Test func hubSnapshotDecodesMockPayload() throws {
+        let h = try JSONDecoder().decode(HubSnapshot.self, from: Data(sampleHub.utf8))
+        #expect(h.projects.count == 2 && h.projects[0].rows.count == 3)
+        #expect(h.projects[0].rows[1].statusKey == "needsYou")
+        #expect(h.projects[0].rows[2].builderId == "run-26" && h.projects[0].rows[2].branch == nil)
+        #expect(h.needsYouIDs == ["helper-1-true"])
+    }
+
+    @Test func routeResponseDecodesWhereKey() throws {
+        let json = #"{"routeId":"r0","route":{"text":"t","kind":"agentTask","kindLabel":"Claude task","project":"true","target":"newPane","where":"New pane","model":"opus","effort":"high","uncertain":["project"],"twoChoice":false,"dangerous":false,"typedOnly":false,"runnable":true},"alternatives":["shellCommand"],"candidates":{"kind":[{"value":"agentTask","label":"Claude task"}]}}"#
+        let r = try JSONDecoder().decode(RouteResponse.self, from: Data(json.utf8))
+        #expect(r.route.whereLabel == "New pane" && r.uncertain == ["project"] && r.runnable && !r.dangerous)
+        #expect(r.candidates["kind"]?.first?.label == "Claude task")
+    }
+}
+
+@Suite struct HubPollerTests {
+    private func snap(_ ids: [String]) -> HubSnapshot {
+        let rows = ids.map { HubRow(kind: "seat", id: $0, name: $0, status: "Needs you", statusKey: "needsYou") }
+        let d = try! JSONEncoder().encode(rows)
+        let json = "{\"projects\":[{\"title\":\"p\",\"rows\":" + String(decoding: d, as: UTF8.self) + "}]}"
+        return try! JSONDecoder().decode(HubSnapshot.self, from: Data(json.utf8))
+    }
+
+    @Test func needsYouRoseTrueOnNewAsk() {
+        #expect(HubPoller.needsYouRose(from: snap(["a"]), to: snap(["a", "b"])))
+        #expect(HubPoller.needsYouRose(from: snap(["a"]), to: snap(["b"])))
+    }
+
+    @Test func needsYouRoseFalseWhenSameFewerOrFirst() {
+        #expect(!HubPoller.needsYouRose(from: snap(["a"]), to: snap(["a"])))
+        #expect(!HubPoller.needsYouRose(from: snap(["a", "b"]), to: snap(["a"])))
+        #expect(!HubPoller.needsYouRose(from: nil, to: snap(["a"])))
+    }
+
+    @Test func backoffDoublesToCap() {
+        var d: Duration? = nil
+        var seen: [Duration] = []
+        for _ in 0..<6 { d = HubPoller.nextBackoff(after: d); seen.append(d!) }
+        #expect(seen == [.seconds(2), .seconds(4), .seconds(8), .seconds(16), .seconds(30), .seconds(30)])
+    }
+}
