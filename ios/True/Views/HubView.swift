@@ -9,8 +9,11 @@ struct HubView: View {
         NavigationStack {
             Group {
                 if model.offline {
-                    ContentUnavailableView("Mac asleep or offline", systemImage: "wifi.slash", description: Text("Retrying. Wake the Mac or check Tailscale."))
-                        .foregroundStyle(.attention)
+                    ContentUnavailableView {
+                        Label("Mac asleep or offline", systemImage: "wifi.slash").foregroundStyle(.attention)
+                    } description: {
+                        Text("Retrying. Wake the Mac or check Tailscale.")
+                    }
                 } else if let hub = model.hub {
                     if hub.projects.isEmpty {
                         ContentUnavailableView {
