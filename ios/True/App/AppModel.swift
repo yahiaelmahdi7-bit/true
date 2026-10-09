@@ -4,7 +4,11 @@ import Observation
 
 extension ShapeStyle where Self == Color {
     /// The ONE accent: Needs you / Failed / unread / danger / offline only.
-    static var attention: Color { Color("Attention") }
+    /// Warm amber #D97A1F light / #E8A23C dark (mirrors the Attention asset; built in code so it can never resolve to clear).
+    static var attention: Color {
+        Color(uiColor: UIColor { $0.userInterfaceStyle == .dark
+            ? UIColor(red: 0.910, green: 0.635, blue: 0.235, alpha: 1) : UIColor(red: 0.851, green: 0.478, blue: 0.122, alpha: 1) })
+    }
 }
 
 struct PaneRoute: Hashable, Identifiable { let id: String; let title: String }
@@ -59,7 +63,7 @@ final class AppModel {
             SharedConfig.baseURL = url
             session = s; paired = true; hub = nil; failCount = 0
             startPolling()
-            Background.requestAuthorization()
+            if UserDefaults.standard.string(forKey: "autoPair") == nil { Background.requestAuthorization() }
             return nil
         } catch RemoteError.pairingFailed(let m) { return m
         } catch RemoteError.rateLimited { return "Too many tries — wait a minute."

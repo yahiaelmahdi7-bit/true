@@ -91,9 +91,10 @@ struct RowView: View {
                 if let cwd = row.cwd { Text(cwd).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
             }
             Spacer(minLength: 8)
-            Label {
-                Text(row.status).font(.subheadline)
-            } icon: { Circle().frame(width: 8, height: 8) }
+            HStack(spacing: 6) {
+                Circle().frame(width: 8, height: 8)
+                Text(row.status).font(.subheadline).lineLimit(1).fixedSize()
+            }
             .foregroundStyle(hot ? Color.attention : Color.secondary)
         }
         .accessibilityElement(children: .combine)

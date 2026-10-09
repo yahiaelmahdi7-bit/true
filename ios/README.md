@@ -41,3 +41,6 @@ Colour: system semantic colours plus one asset colour `Attention` (amber) for Ne
 ## Not done / needs a device
 Background refresh cadence, Keychain access-group sharing and the Share Extension need a signed device build to verify.
 Screenshot Delete (Shots context menu) is absent: the client has no delete-shot call.
+
+## Build note
+SwiftTerm ships a build-tool plugin; pass `-skipPackagePluginValidation` to command-line `xcodebuild` (Xcode asks once to trust it).
