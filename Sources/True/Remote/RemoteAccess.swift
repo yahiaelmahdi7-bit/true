@@ -137,6 +137,17 @@ final class RemoteAccess {
         }
     }
 
+    /// What the QR encodes: the address and (while one is live) the pairing code, as a `true://pair` link the phone parses.
+    nonisolated static func pairLink(host: String, code: String?) -> String {
+        var c = URLComponents()
+        c.scheme = "true"; c.host = "pair"
+        var items = [URLQueryItem(name: "host", value: host)]
+        if let code { items.append(URLQueryItem(name: "code", value: code)) }
+        c.queryItems = items
+        // ':' is legal inside a query value; leave it readable so the QR stays small.
+        return (c.string ?? "true://pair").replacingOccurrences(of: "%3A", with: ":")
+    }
+
     static func qr(_ text: String, side: CGFloat = 180) -> NSImage? {
         let f = CIFilter.qrCodeGenerator()
         f.message = Data(text.utf8); f.correctionLevel = "M"
@@ -194,9 +205,12 @@ struct RemoteAccessView: View {
                 Divider()
                 if let url = remote.url {
                     Text(url).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-                    if let img = RemoteAccess.qr(url) {
+                    if let dns = remote.dnsName,
+                       let img = RemoteAccess.qr(RemoteAccess.pairLink(host: "\(dns):\(RemoteAccess.httpsPort)", code: remote.code)) {
                         Image(nsImage: img).interpolation(.none).frame(width: 180, height: 180)
-                            .accessibilityLabel("QR code of the Remote Access address")
+                            .accessibilityLabel("QR code with the Remote Access address and pairing code")
+                        Text("Scan with True on your iPhone — it fills the address and code for you.")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 } else {
                     Text(remote.tailscaleNote ?? "Looking up this Mac's tailnet name…").foregroundStyle(.secondary)

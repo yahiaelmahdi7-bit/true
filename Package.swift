@@ -30,7 +30,7 @@ let package = Package(
         ),
         .testTarget(
             name: "TrueTests",
-            dependencies: ["True"],
+            dependencies: ["True", "TrueRemoteClient"],
             path: "Tests/TrueTests",
             swiftSettings: [
                 .unsafeFlags(["-Xfrontend", "-disable-dynamic-actor-isolation"]),
