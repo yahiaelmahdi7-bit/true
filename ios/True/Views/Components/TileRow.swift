@@ -45,7 +45,7 @@ struct TileRow<Trailing: View>: View {
 
 extension TileRow where Trailing == EmptyView {
     init(symbol: String, title: String, detail: String? = nil, titleStyle: AnyShapeStyle = AnyShapeStyle(.primary),
-         symbolStyle: AnyShapeStyle = AnyShapeStyle(.secondary)) {
-        self.init(symbol: symbol, title: title, detail: detail, titleStyle: titleStyle, symbolStyle: symbolStyle, trailing: { EmptyView() })
+         symbolStyle: AnyShapeStyle = AnyShapeStyle(.secondary), truncation: Text.TruncationMode = .middle) {
+        self.init(symbol: symbol, title: title, detail: detail, titleStyle: titleStyle, symbolStyle: symbolStyle, truncation: truncation, trailing: { EmptyView() })
     }
 }
