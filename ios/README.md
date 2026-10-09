@@ -30,7 +30,7 @@ add pinning in a dedicated delegate (pass that `URLSession` to `RemoteSession`/`
 `products: [.library(name: "TrueRemoteClient", targets: ["TrueRemoteClient"])]` in `Package.swift`, then depend on it from `project.yml`.
 
 ## Launch arguments (screenshots / dev)
-`-baseURL http://localhost:8899 -autoPair 123456` pair against the mock · `-uiState composer|builder|shots|send|pane` jump to a screen ·
+`-baseURL http://localhost:8899 -autoPair 123456` pair against the mock · `-uiState composer|composer-routed|builder|shots|viewer|send|pane` jump to a screen ·
 `-composerText "…"` prefill · `-composerRoute 1` route on open.
 Mock: `MOCK_PORT=8899 MOCK_STATE=normal|empty|offline python3 scripts/remote-mock.py` (it has no WebSocket; `-uiState pane` feeds demo text, DEBUG only).
 
@@ -44,3 +44,9 @@ Screenshot Delete (Shots context menu) is absent: the client has no delete-shot 
 
 ## Build note
 SwiftTerm ships a build-tool plugin; pass `-skipPackagePluginValidation` to command-line `xcodebuild` (Xcode asks once to trust it).
+
+## App icon
+Layers live in `ios/Design/Icon/` (`background.svg` warm near-black, `foreground.svg` amber prompt chevron + 60 % cursor block). The shipped
+`AppIcon-1024.png` is rendered from the same geometry: `swift ios/Design/Icon/render.swift ios/True/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`.
+Icon Composer (two minutes): open Icon Composer, drag `background.svg` then `foreground.svg` in as two layers, leave Liquid Glass defaults, export
+`AppIcon.icon` into `ios/True/`, and select it as the app icon in the target. This gives the iOS 26 tinted/clear/dark variants.
