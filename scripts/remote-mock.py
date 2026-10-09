@@ -12,7 +12,7 @@ ROUTES, CONFIRMED = {}, set()
 def row(kind, name, status, key, **kw): return dict(kind=kind, id=name, name=name, status=status, statusKey=key, **kw)
 
 def hub():
-    if STATE == "empty": return dict(summary="Nothing running", projects=[])
+    if STATE == "empty": return dict(summary="", projects=[])  # matches the Mac: blank when idle
     return dict(summary="1 working · 1 needs you · 1 done", projects=[
         dict(title="true", summary="1 working · 1 needs you", rows=[
             row("seat", "lead-true", "Working", "working", pane="11111111-1111-1111-1111-111111111111", cwd="~/Projects/true", elapsed="12m"),
