@@ -21,7 +21,6 @@ targets:
     sources:
       - True
       - path: ../Sources/TrueRemoteClient
-        group: TrueRemoteClient
     dependencies:
       - package: SwiftTerm
       - target: TrueShare
@@ -46,7 +45,6 @@ targets:
     sources:
       - TrueShare
       - path: ../Sources/TrueRemoteClient
-        group: TrueRemoteClient
       - True/Services/KeychainTokenStore.swift
       - True/Services/SharedConfig.swift
     settings:

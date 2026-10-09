@@ -85,6 +85,7 @@ final class PaneController: NSObject, TerminalViewDelegate {
                 case .gone: status = "This pane was closed on the Mac."; try? await Task.sleep(for: .seconds(1.2)); onGone(); return
                 case .closed(let err):
                     if case .unauthorized = err { await model.unpair(); return }
+                    _ = try? await session.tabs()   // like app.js: a 401 here clears the token and the poller returns to pairing
                     status = "Reconnecting…"
                 }
             }
