@@ -43,8 +43,8 @@ final class AppModel {
             }
         }
         if let s = uiState {
-            selectedTab = s == "shots" ? "shots" : s == "send" ? "send" : "hub"
-            showComposer = s == "composer"
+            selectedTab = s.hasPrefix("shots") || s == "viewer" ? "shots" : s == "send" ? "send" : "hub"
+            showComposer = s == "composer" || s == "composer-routed"
         }
     }
 

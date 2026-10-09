@@ -97,7 +97,10 @@ struct ShotsView: View {
     }
 
     private func load() async {
-        do { shots = try await model.session?.shots(); failed = false }
+        do {
+            shots = try await model.session?.shots(); failed = false
+            if model.uiState == "viewer", selected == nil { selected = shots?.first }
+        }
         catch { await model.handle(error); failed = true; if shots == nil { shots = [] } }
     }
 

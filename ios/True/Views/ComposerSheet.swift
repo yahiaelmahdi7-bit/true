@@ -72,7 +72,7 @@ struct ComposerSheet: View {
         .task {
             focused = true
             recent = (try? await model.session?.recent()) ?? []
-            if UserDefaults.standard.bool(forKey: "composerRoute") { await doRoute() }
+            if UserDefaults.standard.bool(forKey: "composerRoute") || model.uiState == "composer-routed" { if text.isEmpty { text = "fix the failing login test in true" }; await doRoute() }
         }
     }
 
