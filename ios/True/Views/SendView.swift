@@ -36,6 +36,12 @@ struct SendView: View {
     @State private var preview: URL?
     @State private var pending: String?
     @State private var sent = 0
+    @AppStorage("autoClipboard") private var autoClipboard = true
+
+    /// The Mac's shared clipboard item, else the newest text item.
+    private var macClip: InboxItem? {
+        inbox?.first { $0.source == "clipboardShare" } ?? inbox?.first { $0.kind == "text" }
+    }
 
     private func symbol(_ item: InboxItem) -> String {
         if item.kind == "text" { return "doc.on.clipboard" }
@@ -49,7 +55,26 @@ struct SendView: View {
         NavigationStack {
             Form {
                 Section {
-                    ForEach(inbox ?? []) { item in
+                    if let macClip {
+                        TileRow(symbol: "doc.on.clipboard", title: macClip.preview ?? "Clipboard",
+                                detail: macClip.created.map { "Copied on your Mac \(Date(timeIntervalSince1970: $0).formatted(.relative(presentation: .named)))" } ?? "From your Mac") {
+                            if pending == macClip.id { ProgressView() }
+                            else { Button("Copy") { Task { await take(macClip) } }.buttonStyle(.borderless) }
+                        }
+                        .lineLimit(2)
+                    } else if inbox != nil {
+                        TileRow(symbol: "doc.on.clipboard", title: "Nothing from your Mac yet",
+                                detail: "Turn on sharing in Remote Access on the Mac, or use Send Clipboard to Phone there.")
+                    }
+                    Button { Task { await pasteFromPhone() } } label: {
+                        TileRow(symbol: "iphone.and.arrow.forward", title: "Send phone clipboard", detail: "Puts what you copied here on the Mac") { if pending == "paste" { ProgressView() } }
+                    }.tint(.primary)
+                    Toggle("Copy Mac clipboard automatically", isOn: $autoClipboard)
+                } header: { Text("Clipboard") } footer: {
+                    Text("When True opens, the newest text copied on your Mac goes straight to this phone's clipboard.")
+                }
+                Section {
+                    ForEach((inbox ?? []).filter { $0.id != macClip?.id }) { item in
                         TileRow(symbol: symbol(item), title: item.kind == "text" ? "Clipboard" : item.name,
                                 detail: item.preview ?? ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file)) {
                             if pending == item.id { ProgressView() }
@@ -60,7 +85,7 @@ struct SendView: View {
                         .swipeActions { Button("Delete", role: .destructive) { Task { try? await model.session?.deleteInboxItem(id: item.id); await load() } } }
                     }
                 } header: { Text("From your Mac") } footer: {
-                    if let inbox, inbox.isEmpty { Text("Copy something on the Mac or drop a file in True to see it here.") }
+                    if let inbox, inbox.isEmpty { Text("Drop a file in True on the Mac to see it here.") }
                 }
                 Section("To your Mac") {
                     PhotosPicker(selection: $photo, matching: .images) {
@@ -69,11 +94,8 @@ struct SendView: View {
                     Button { importing = true } label: {
                         TileRow(symbol: "doc.badge.plus", title: "File") { if pending == "file" { ProgressView() } }
                     }.tint(.primary)
-                    Button { Task { await pasteFromPhone() } } label: {
-                        TileRow(symbol: "doc.on.clipboard", title: "Paste", detail: "Send what's on this phone's clipboard") { if pending == "paste" { ProgressView() } }
-                    }.tint(.primary)
                 }
-                Section("Clipboard") {
+                Section("Type for your Mac") {
                     TextField("Text for your Mac's clipboard", text: $clip, axis: .vertical).lineLimit(2...5)
                     HStack {
                         Spacer()
@@ -92,7 +114,7 @@ struct SendView: View {
     }
 
     private func load() async {
-        do { inbox = try await model.session?.inbox() } catch { await model.handle(error); if inbox == nil { inbox = [] } }
+        do { inbox = try await model.session?.inbox(); await model.applyMacClipboard(inbox) } catch { await model.handle(error); if inbox == nil { inbox = [] } }
     }
 
     private func fileURL(_ item: InboxItem) async -> URL? {

@@ -109,6 +109,26 @@ final class AppModel {
         }
     }
 
+    /// Mac → phone clipboard: if the Mac shared a newer copy, put it on this phone's pasteboard (opt-out in Send).
+    /// Writing the pasteboard shows no system banner; only reading does. An item older than 10 minutes that we
+    /// have never applied before (first run after pairing) is remembered, not applied.
+    func applyMacClipboard(_ known: [InboxItem]? = nil) async {
+        let d = UserDefaults.standard
+        guard d.object(forKey: "autoClipboard") as? Bool ?? true, let session else { return }
+        var all = known
+        if all == nil { all = try? await session.inbox() }
+        guard let items = all,
+              let item = items.first(where: { $0.source == "clipboardShare" }), item.kind == "text" else { return }
+        let last = d.string(forKey: "lastAppliedClipId")
+        guard item.id != last else { return }
+        let stale = item.created.map { Date().timeIntervalSince1970 - $0 > 600 } ?? false
+        if last == nil && stale { d.set(item.id, forKey: "lastAppliedClipId"); return }
+        guard let data = try? await session.inboxData(id: item.id) else { return }
+        UIPasteboard.general.string = String(decoding: data, as: UTF8.self)
+        d.set(item.id, forKey: "lastAppliedClipId")
+        show("Clipboard from your Mac")
+    }
+
     func refresh() async {
         guard let session else { return }
         do { hub = try await session.hub(); failCount = 0 } catch { await handle(error); failCount += 1 }

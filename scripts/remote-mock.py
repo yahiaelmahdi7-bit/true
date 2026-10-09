@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Dev-only mock of True's phone server, so Resources/Remote/* can be opened in a desktop browser at phone size.
 MOCK_STATE=normal|empty|offline|pairing (default normal), MOCK_PORT (default 8899). Pair code: 123456. No WebSocket."""
-import json, mimetypes, os, pathlib, re, struct, zlib
+import json, mimetypes, os, pathlib, re, struct, time, zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent / "Resources" / "Remote"
@@ -99,7 +99,7 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/shots": return self.send(200, dict(shots=[] if empty else [dict(id="20261009-10%04d-abcd" % i, created="2026-10-09T10:%02d:00Z" % i, kind="screen", w=64, h=64) for i in range(7)]))
         if p.startswith("/api/shots/"): return self.send(200, png(rgb=(60 + 25 * (hash(p) % 6), 70, 80)), "image/png")
         if p == "/api/inbox":
-            return self.send(200, dict(items=[] if empty else [dict(id="a" * 16, kind="text", name="Clipboard", preview="npm run build && npm test -- --watch=false", size=44),
+            return self.send(200, dict(items=[] if empty else [dict(id="a" * 16, kind="text", name="Clipboard", preview="npm run build && npm test -- --watch=false", size=44, source="clipboardShare", created=time.time() - 120),
                                                                 dict(id="b" * 16, kind="file", name="Quarterly-report-final-v3.pdf", size=1843200)]))
         if p.startswith("/api/inbox/"): return self.send(200, b"npm run build", "text/plain")
         if p in ("/api/drop", "/api/clip"): return self.send(200, dict(ok=True))

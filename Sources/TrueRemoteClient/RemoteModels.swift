@@ -94,6 +94,8 @@ public struct InboxItem: Codable, Equatable, Sendable, Identifiable {
     public var size: Int
     public var created: Double?
     public var preview: String?
+    /// "clipboardShare" on the one item the Mac auto-shares from its clipboard.
+    public var source: String?
 }
 
 public struct ShotsResponse: Codable, Equatable, Sendable { public var shots: [Shot] }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootTabs: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         @Bindable var model = model
@@ -11,6 +12,7 @@ struct RootTabs: View {
             Tab("Shots", systemImage: "photo.on.rectangle", value: "shots") { ShotsView() }
             Tab("Send", systemImage: "arrow.up.arrow.down", value: "send") { SendView() }
         }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { Task { await model.applyMacClipboard() } } }
         .sheet(isPresented: $model.showComposer) {
             ComposerSheet()
         }
