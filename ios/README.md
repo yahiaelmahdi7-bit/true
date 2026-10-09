@@ -30,13 +30,21 @@ add pinning in a dedicated delegate (pass that `URLSession` to `RemoteSession`/`
 `products: [.library(name: "TrueRemoteClient", targets: ["TrueRemoteClient"])]` in `Package.swift`, then depend on it from `project.yml`.
 
 ## Launch arguments (screenshots / dev)
-`-baseURL http://localhost:8899 -autoPair 123456` pair against the mock · `-uiState composer|composer-routed|builder|shots|viewer|send|pane` jump to a screen ·
+`-baseURL http://localhost:8899 -autoPair 123456` pair against the mock · `-uiState composer|composer-routed|builder|shots|viewer|send|pane|pane-select|pair-scan` jump to a screen ·
 `-composerText "…"` prefill · `-composerRoute 1` route on open.
 Mock: `MOCK_PORT=8899 MOCK_STATE=normal|empty|offline python3 scripts/remote-mock.py` (it has no WebSocket; `-uiState pane` feeds demo text, DEBUG only).
 
 ## Layout
 `True/App` lifecycle + `AppModel` · `True/Views` screens · `True/Services` Keychain, shared config, background refresh · `TrueShare` share extension.
 Colour: system semantic colours plus one asset colour `Attention` (amber) for Needs you / Failed / unread / danger / offline.
+
+## Pairing by QR, terminal selection, shared clipboard (run 29)
+- **QR pairing.** The Mac's pairing QR encodes `true://pair?host=…&code=…` (shared `PairLink` parser in `TrueRemoteClient`). The Scan row in Pair opens `ScanSheet`
+  (VisionKit); `true://pair` deep links work too. Camera string: `NSCameraUsageDescription` in `project.yml`. The simulator has no camera, so `-uiState pair-scan` shows the unavailable state.
+- **Terminal selection.** Long-press uses SwiftTerm's own gesture and system edit menu; `SelectableTerminalView` reports selection changes so the Copy key enables while text is selected.
+  The pane menu has Select text and Copy everything. `-uiState pane-select` pre-selects a span for screenshots. Not verified interactively (no Simulator GUI in the headless run).
+- **Clipboard sharing.** Mac: toggle "Share my Mac's copies with paired phones" in Remote Access (default off). It pushes one replaceable inbox item (`source`, `created`); there is no clipboard read route.
+  Phone: Send tab top section shows that item with Copy, "Send phone clipboard" is one tap, and "Copy Mac clipboard automatically" (default on) applies the newest Mac copy when True opens.
 
 ## Not done / needs a device
 Background refresh cadence, Keychain access-group sharing and the Share Extension need a signed device build to verify.

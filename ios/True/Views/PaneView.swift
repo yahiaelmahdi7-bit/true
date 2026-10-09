@@ -177,7 +177,8 @@ final class PaneController: NSObject, TerminalViewDelegate {
             _ = terminal.becomeFirstResponder()
             if model.uiState == "pane-select" {   // screenshot state: what a long-press on the last line selects
                 try? await Task.sleep(for: .seconds(1))
-                selectText()
+                _ = terminal.becomeFirstResponder()
+                terminal.setSelectionRange(start: Position(col: 2, row: 1), end: Position(col: 16, row: 1))
             }
             return
         }

@@ -9,6 +9,7 @@ struct TileRow<Trailing: View>: View {
     var titleStyle: AnyShapeStyle = AnyShapeStyle(.primary)
     var symbolStyle: AnyShapeStyle = AnyShapeStyle(.secondary)
     var truncation: Text.TruncationMode = .middle
+    var titleLines = 1
     @ViewBuilder var trailing: Trailing
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -34,7 +35,7 @@ struct TileRow<Trailing: View>: View {
     private var text: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.body.weight(.semibold)).foregroundStyle(titleStyle)
-                .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : titleLines)
             if let detail {
                 Text(detail).font(.subheadline).foregroundStyle(.secondary)
                     .lineLimit(typeSize.isAccessibilitySize ? 3 : 1).truncationMode(truncation)

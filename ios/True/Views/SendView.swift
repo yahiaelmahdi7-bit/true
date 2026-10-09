@@ -57,14 +57,14 @@ struct SendView: View {
                 Section {
                     if let macClip {
                         TileRow(symbol: "doc.on.clipboard", title: macClip.preview ?? "Clipboard",
-                                detail: macClip.created.map { "Copied on your Mac \(Date(timeIntervalSince1970: $0).formatted(.relative(presentation: .named)))" } ?? "From your Mac") {
+                                detail: macClip.created.map { "Mac · \(Date(timeIntervalSince1970: $0).formatted(.relative(presentation: .named)))" } ?? "From your Mac", titleLines: 2) {
                             if pending == macClip.id { ProgressView() }
                             else { Button("Copy") { Task { await take(macClip) } }.buttonStyle(.borderless) }
                         }
                         .lineLimit(2)
                     } else if inbox != nil {
                         TileRow(symbol: "doc.on.clipboard", title: "Nothing from your Mac yet",
-                                detail: "Turn on sharing in Remote Access on the Mac, or use Send Clipboard to Phone there.")
+                                detail: "Turn on sharing in Remote Access.")
                     }
                     Button { Task { await pasteFromPhone() } } label: {
                         TileRow(symbol: "iphone.and.arrow.forward", title: "Send phone clipboard", detail: "Puts what you copied here on the Mac") { if pending == "paste" { ProgressView() } }
