@@ -44,7 +44,7 @@ final class RemoteAccess {
         if on { start(); refreshTailnet(); newCode() } else { stop() }
     }
 
-    private func start() {
+    private func start(attempt: Int = 0) {
         if server == nil {
             let cache = loginCache
             server = RemoteServer(backend: RemoteBackendLive(), codes: codes, devices: deviceStore) {
@@ -54,6 +54,14 @@ final class RemoteAccess {
         }
         listening = server?.start() ?? false
         devices = deviceStore.all
+        // The previous copy of the app may still hold 127.0.0.1:8801 for a moment after a restart; retry
+        // rather than leave the phone with a dead page until the toggle is flipped by hand.
+        if !listening, enabled, attempt < 15 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                guard let self, self.enabled, !self.listening else { return }
+                self.start(attempt: attempt + 1)
+            }
+        }
     }
 
     private func stop() {

@@ -13,7 +13,7 @@ function api(path) { return fetch(path, { cache: 'no-store', headers: { Authoriz
 function unpair() {
   localStorage.removeItem(TOKEN_KEY); view = 'pair'; paneId = null;
   clearTimeout(retryTimer); if (ws) { ws.onclose = null; ws.close(); ws = null; }
-  for (const id of ['list', 'term', 'shots', 'send', 'viewer', 'sheet']) $(id).hidden = true;
+  for (const id of ['list', 'termlist', 'term', 'shots', 'send', 'viewer', 'sheet']) $(id).hidden = true;
   $('nav').hidden = true; document.body.classList.remove('hasnav'); $('pair').hidden = false; banner('');
 }
 
@@ -30,8 +30,6 @@ async function loadList() {
     if (r.status === 401) { unpair(); return; }
     if (!r.ok) throw new Error(String(r.status));
     const data = await r.json();
-    // Plain terminal panes (not agent seats) only exist in /api/tabs; the Hub model leaves them out.
-    try { const t = await api('/api/tabs'); if (t.ok) data.tabs = (await t.json()).tabs || []; } catch (e) { /* hub still renders */ }
     listFails = 0; banner('');
     renderHub(data);
   } catch (e) {
@@ -56,26 +54,6 @@ function renderHub(data) {
       b.appendChild(box);
       b.appendChild(el('span', 'chip ' + (r.statusKey || 'idle'), r.status));
       b.onclick = () => rowTap(r);
-      sec.appendChild(b);
-    }
-    host.appendChild(sec);
-  }
-  const seen = new Set();
-  for (const g of data.projects || []) for (const r of g.rows || []) if (r.pane) seen.add(r.pane);
-  for (const t of data.tabs || []) {
-    const free = (t.panes || []).filter((p) => p.live && !seen.has(p.id));
-    if (!free.length) continue;
-    const sec = el('section', 'tab');
-    sec.appendChild(el('h2', null, 'Panes · ' + t.title));
-    for (const p of free) {
-      n++;
-      const b = el('button', 'row2');
-      const box = el('span', 't');
-      box.append(el('span', 'n', p.title), el('span', 'c', p.cwd || ''));
-      b.appendChild(box);
-      const key = p.needsYou ? 'needsYou' : p.busy ? 'working' : 'idle';
-      b.appendChild(el('span', 'chip ' + key, p.needsYou ? 'Needs you' : p.busy ? 'Working' : 'Idle'));
-      b.onclick = () => openPane(p.id, p.title);
       sec.appendChild(b);
     }
     host.appendChild(sec);
@@ -275,7 +253,7 @@ function applyScale() {
 
 function openPane(id, title) {
   paneId = id; view = 'term'; location.hash = 'p=' + id;
-  $('list').hidden = true; showNav(false); $('term').hidden = false; $('paneTitle').textContent = title || 'Pane';
+  retTab = tab; for (const id of Object.values(SECTIONS)) $(id).hidden = true; showNav(false); $('term').hidden = false; $('paneTitle').textContent = title || 'Pane';
   ensureTerm(); term.reset(); retry = 0; wsEverOpen = false; banner('');
   connect();
 }
@@ -283,7 +261,7 @@ function openPane(id, title) {
 function closePane() {
   view = 'list'; paneId = null; history.replaceState(null, '', location.pathname);
   clearTimeout(retryTimer); if (ws) { ws.onclose = null; ws.close(); ws = null; }
-  $('term').hidden = true; showNav(true); setTab('panes'); banner('');
+  $('term').hidden = true; showNav(true); setTab(retTab); banner('');
 }
 
 function connect() {
@@ -330,7 +308,7 @@ window.addEventListener('online', () => { if (view === 'term') { retry = 0; conn
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;
   if (view === 'term' && (!ws || ws.readyState > 1)) { retry = 0; connect(); }
-  else if (view === 'send') loadInbox(); else if (view === 'shots') loadShots(); else loadList();
+  else if (view === 'terms') loadTerms(); else if (view === 'send') loadInbox(); else if (view === 'shots') loadShots(); else loadList();
 });
 
 $('pairForm').onsubmit = async (e) => {
@@ -354,9 +332,38 @@ function start() {
 
 
 // ---------- phone <-> Mac drop: tabs, Shots, Send ----------
-let tab = 'panes';
-const SECTIONS = { panes: 'list', shots: 'shots', send: 'send' };
+let tab = 'panes', retTab = 'panes';
+const SECTIONS = { panes: 'list', terms: 'termlist', shots: 'shots', send: 'send' };
 let inboxTimer = null, seenInbox = new Set(), shotCache = new Map(), viewerShot = null, inboxLoaded = false;
+
+// Every live terminal pane on the Mac (GET /api/tabs), grouped by Mac tab. Tap one to watch and type into it.
+async function loadTerms() {
+  if (view !== 'terms' || document.hidden) return;
+  try {
+    const r = await api('/api/tabs');
+    if (r.status === 401) { unpair(); return; }
+    if (!r.ok) throw new Error(String(r.status));
+    const tabs = (await r.json()).tabs || [];
+    listFails = 0; banner('');
+    const host = $('termTabs'); host.textContent = ''; let n = 0;
+    for (const t of tabs) {
+      const live = (t.panes || []).filter((p) => p.live);
+      if (!live.length) continue;
+      const sec = el('section', 'tab');
+      sec.appendChild(el('h2', null, t.title));
+      for (const p of live) {
+        n++;
+        const b = el('button', 'row2'), box = el('span', 't');
+        box.append(el('span', 'n', p.title), el('span', 'c', p.cwd || ''));
+        b.append(box, el('span', 'chip ' + (p.needsYou ? 'needsYou' : p.busy ? 'working' : 'idle'), p.needsYou ? 'Needs you' : p.busy ? 'Working' : 'Idle'));
+        b.onclick = () => openPane(p.id, p.title);
+        sec.appendChild(b);
+      }
+      host.appendChild(sec);
+    }
+    $('termEmpty').hidden = n > 0;
+  } catch (e) { if (++listFails >= 2) banner('Mac asleep or offline — retrying…'); }
+}
 
 function showNav(on) { $('nav').hidden = !on; document.body.classList.toggle('hasnav', on); }
 function setTab(name) {
@@ -365,6 +372,7 @@ function setTab(name) {
   document.querySelectorAll('#nav button').forEach((b) => { if (b.dataset.tab === name) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
   clearInterval(inboxTimer); inboxTimer = null;
   if (name === 'panes') loadList();
+  if (name === 'terms') loadTerms();
   if (name === 'shots') loadShots();
   if (name === 'send') { $('dot').hidden = true; loadInbox(); inboxTimer = setInterval(loadInbox, 5000); }
 }
