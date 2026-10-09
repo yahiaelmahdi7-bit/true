@@ -73,27 +73,50 @@ final class PaneController: NSObject, TerminalViewDelegate {
         terminal.inputAccessoryView = makeAccessory()
     }
 
-    private func makeAccessory() -> UIToolbar {
-        let bar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
-        func key(_ title: String, _ label: String, _ bytes: [UInt8]) -> UIBarButtonItem {
-            let b = UIBarButtonItem(title: title, primaryAction: UIAction { [weak self] _ in self?.send(bytes) })
-            b.accessibilityLabel = label; b.width = 44
+    /// Key row above the keyboard. A scrolling row of glass buttons, not a UIToolbar: iOS 26 gives
+    /// every bar item a minimum-width capsule plus spacing, and seven of them overflow a phone.
+    private func makeAccessory() -> UIView {
+        let host = UIInputView(frame: CGRect(x: 0, y: 0, width: 320, height: 56), inputViewStyle: .keyboard)
+        let scroll = UIScrollView()
+        scroll.showsHorizontalScrollIndicator = false
+        scroll.contentInset = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
+        let row = UIStackView()
+        row.axis = .horizontal; row.spacing = 8; row.alignment = .center
+        func button(_ title: String?, _ symbol: String?, _ label: String, _ action: @escaping (PaneController) -> Void) -> UIButton {
+            var cfg = UIButton.Configuration.glass()
+            cfg.title = title
+            if let symbol { cfg.image = UIImage(systemName: symbol) }
+            cfg.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 14)
+            let b = UIButton(configuration: cfg, primaryAction: UIAction { [weak self] _ in if let self { action(self) } })
+            b.accessibilityLabel = label
+            b.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+            b.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
             return b
         }
-        func symbol(_ name: String, _ label: String, _ action: @escaping (PaneController) -> Void) -> UIBarButtonItem {
-            let b = UIBarButtonItem(image: UIImage(systemName: name), primaryAction: UIAction { [weak self] _ in if let self { action(self) } })
-            b.accessibilityLabel = label; b.width = 44
-            return b
-        }
-        let flex = UIBarButtonItem.flexibleSpace()
-        bar.items = [
-            key("esc", "Escape", [0x1b]), flex, key("tab", "Tab", [0x09]), flex, key("⌃C", "Control C", [0x03]), flex,
-            symbol("arrow.up", "Up") { $0.send([0x1b, 0x5b, 0x41]) }, flex,
-            symbol("arrow.down", "Down") { $0.send([0x1b, 0x5b, 0x42]) }, flex,
-            symbol("return", "Return") { $0.send([0x0d]) }, flex,
-            symbol("doc.on.clipboard", "Paste") { if let s = UIPasteboard.general.string { $0.send(Array(s.utf8)) } },
-        ]
-        return bar
+        [
+            button("esc", nil, "Escape") { $0.send([0x1b]) },
+            button("tab", nil, "Tab") { $0.send([0x09]) },
+            button("⌃C", nil, "Control C") { $0.send([0x03]) },
+            button(nil, "arrow.up", "Up") { $0.send([0x1b, 0x5b, 0x41]) },
+            button(nil, "arrow.down", "Down") { $0.send([0x1b, 0x5b, 0x42]) },
+            button(nil, "return", "Return") { $0.send([0x0d]) },
+            button(nil, "doc.on.clipboard", "Paste") { if let s = UIPasteboard.general.string { $0.send(Array(s.utf8)) } },
+        ].forEach(row.addArrangedSubview)
+        host.addSubview(scroll); scroll.addSubview(row)
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        row.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            scroll.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: host.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            row.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
+            row.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+            row.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+            row.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor),
+        ])
+        return host
     }
 
     private func send(_ bytes: [UInt8]) {

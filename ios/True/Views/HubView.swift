@@ -42,6 +42,7 @@ struct HubView: View {
                 if model.failCount > 0 && !model.offline {
                     ToolbarItem(placement: .principal) {
                         Label("Reconnecting", systemImage: "arrow.triangle.2.circlepath").font(.caption.weight(.medium))
+                            .labelStyle(.titleAndIcon)
                             .symbolEffect(.rotate, options: .repeating, isActive: !reduceMotion)
                             .padding(.horizontal, 10).padding(.vertical, 4).glassEffect(.regular, in: .capsule)
                     }
