@@ -11,12 +11,14 @@ import Observation
 final class RemoteAccess {
     static let shared = RemoteAccess()
     static let enabledKey = "remote.enabled"
+    static let shareClipboardKey = "remote.shareClipboard"
     nonisolated static let loginOverrideKey = "remote.allowedLogin"
     nonisolated static let tailscale = "/opt/homebrew/bin/tailscale"
     static let httpsPort = RemoteAuth.httpsPort   // what Claude exposes with `tailscale serve --https=8444 http://127.0.0.1:8801`
 
     private(set) var enabled = UserDefaults.standard.bool(forKey: RemoteAccess.enabledKey)
     private(set) var listening = false
+    private(set) var shareClipboard = UserDefaults.standard.bool(forKey: RemoteAccess.shareClipboardKey)   // default off
     private(set) var code: String?
     private(set) var codeExpiry: Date?
     private(set) var devices: [PairedDevice] = []
@@ -36,12 +38,24 @@ final class RemoteAccess {
     }
 
     /// Launch side effect, justified: it only runs if the user turned Remote Access on (default off).
-    func startIfEnabled() { if enabled { start() } }
+    func startIfEnabled() { if enabled { start() }; syncClipboardShare() }
+
+    func setShareClipboard(_ on: Bool) {
+        shareClipboard = on
+        UserDefaults.standard.set(on, forKey: Self.shareClipboardKey)
+        syncClipboardShare()
+    }
+
+    /// The pasteboard timer runs only while Remote Access is on AND the user opted in.
+    private func syncClipboardShare() {
+        if enabled && shareClipboard { ClipboardShare.shared.start() } else { ClipboardShare.shared.stop() }
+    }
 
     func setEnabled(_ on: Bool) {
         enabled = on
         UserDefaults.standard.set(on, forKey: Self.enabledKey)
         if on { start(); refreshTailnet(); newCode() } else { stop() }
+        syncClipboardShare()
     }
 
     private func start() {
@@ -239,6 +253,12 @@ struct RemoteAccessView: View {
                         Button("Revoke", role: .destructive) { remote.revoke(d) }
                     }
                 }
+                Divider()
+                Toggle("Share my Mac's copies with paired phones", isOn: Binding(get: { remote.shareClipboard },
+                                                                                set: { remote.setShareClipboard($0) }))
+                    .toggleStyle(.switch)
+                Text("Text you copy on this Mac appears on the phone's Send tab (and lands on its clipboard if the phone allows). Passwords and concealed copies are never shared.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Divider()
                 HStack {
                     Text("Allowed login").font(.callout)
