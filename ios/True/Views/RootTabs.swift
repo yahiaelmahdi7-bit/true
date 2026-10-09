@@ -13,8 +13,6 @@ struct RootTabs: View {
         }
         .sheet(isPresented: $model.showComposer) {
             ComposerSheet()
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
         }
     }
 }

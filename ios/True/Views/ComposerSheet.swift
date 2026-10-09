@@ -20,6 +20,7 @@ struct ComposerSheet: View {
     @State private var recent: [String] = []
     @State private var confirmReason: String?
     @FocusState private var focused: Bool
+    @State private var detent: PresentationDetent = .medium
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -69,6 +70,9 @@ struct ComposerSheet: View {
                 Button("Cancel", role: .cancel) {}
             } message: { Text(confirmWhy[confirmReason ?? ""] ?? "This looks destructive (\((confirmReason ?? "risky").replacingOccurrences(of: "_", with: " ")))") }
         }
+        .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDragIndicator(.visible)
+        .onChange(of: route != nil) { _, has in if has { detent = .large } }   // the plan needs the room
         .task {
             focused = true
             recent = (try? await model.session?.recent()) ?? []
@@ -154,7 +158,7 @@ struct ComposerSheet: View {
         let t = text.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
         guard !t.isEmpty, let s = model.session else { return }
         busy = true; message = nil; defer { busy = false }
-        do { route = try await s.route(text: t) } catch { await fail(error) }
+        do { route = try await s.route(text: t); focused = false } catch { await fail(error) }   // plan + Run bar need the room the keyboard took
     }
 
     private func setSlot(_ key: String, _ value: String) async {
