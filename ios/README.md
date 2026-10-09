@@ -34,6 +34,11 @@ add pinning in a dedicated delegate (pass that `URLSession` to `RemoteSession`/`
 `-composerText "…"` prefill · `-composerRoute 1` route on open.
 Mock: `MOCK_PORT=8899 MOCK_STATE=normal|empty|offline python3 scripts/remote-mock.py` (it has no WebSocket; `-uiState pane` feeds demo text, DEBUG only).
 
+UI test (`TrueUITests`, proves long-press → Select All → Copy on the terminal): start the mock, then
+`xcodebuild test -project True.xcodeproj -scheme True -destination "id=<sim>" -only-testing:TrueUITests CODE_SIGNING_ALLOWED=NO -skipPackagePluginValidation TEST_RUNNER_SHOT_DIR=$PWD/../.out/run29`
+(`TEST_RUNNER_` is stripped by xcodebuild; the runner sees `SHOT_DIR` and writes `pane-menu-dark.png` / `pane-selection-live-dark.png`).
+Verify the copy from the host, never inside the runner (iOS pops a paste-permission alert): `xcrun simctl pbpaste <sim> | grep "tests passed"`.
+
 ## Layout
 `True/App` lifecycle + `AppModel` · `True/Views` screens · `True/Services` Keychain, shared config, background refresh · `TrueShare` share extension.
 Colour: system semantic colours plus one asset colour `Attention` (amber) for Needs you / Failed / unread / danger / offline.

@@ -60,7 +60,19 @@ targets:
         SKIP_INSTALL: YES
         TARGETED_DEVICE_FAMILY: "1"
     # shares KeychainTokenStore + SharedConfig with the app
+  TrueUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [TrueUITests]
+    dependencies:
+      - target: "True"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.prismlens.true.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
 schemes:
   "True":
-    build: { targets: { "True": all } }
+    build: { targets: { "True": all, TrueUITests: [test] } }
     run: { config: Debug }
+    test: { targets: [TrueUITests] }

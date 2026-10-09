@@ -69,7 +69,7 @@ struct SendView: View {
                     Button { Task { await pasteFromPhone() } } label: {
                         TileRow(symbol: "iphone.and.arrow.forward", title: "Send phone clipboard", detail: "Puts what you copied here on the Mac") { if pending == "paste" { ProgressView() } }
                     }.tint(.primary)
-                    Toggle("Copy Mac clipboard automatically", isOn: $autoClipboard)
+                    Toggle("Copy Mac clipboard automatically", isOn: $autoClipboard).tint(.accentColor)
                 } header: { Text("Clipboard") } footer: {
                     Text("When True opens, the newest text copied on your Mac goes straight to this phone's clipboard.")
                 }
