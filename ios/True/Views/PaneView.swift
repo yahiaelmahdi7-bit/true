@@ -24,6 +24,8 @@ struct PaneView: View {
                         Button { Task { await model.command(asleep ? "wake \(route.title)" : "sleep \(route.title)") } } label: {
                             asleep ? Label("Wake", systemImage: "sunrise") : Label("Sleep", systemImage: "moon.zzz")
                         }
+                        Button { controller.selectText() } label: { Label("Select text", systemImage: "text.cursor") }
+                        Button { controller.copyEverything() } label: { Label("Copy everything", systemImage: "doc.on.doc") }
                         Button { UIPasteboard.general.string = route.title; model.show("Copied name") } label: { Label("Copy name", systemImage: "doc.on.doc") }
                         if let cwd = row?.cwd { Button { UIPasteboard.general.string = cwd; model.show("Copied path") } label: { Label("Copy path", systemImage: "folder") } }
                     } label: { Label("Pane actions", systemImage: "ellipsis.circle") }
@@ -45,6 +47,7 @@ struct PaneView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
+            .onAppear { controller.onCopied = { model.show("Copied") } }
             .task { await controller.run(model: model, paneId: route.id) { dismiss() } }
             .onDisappear { Task { await controller.stop() } }
     }
@@ -52,20 +55,41 @@ struct PaneView: View {
 
 struct TerminalRepresentable: UIViewRepresentable {
     let controller: PaneController
-    func makeUIView(context: Context) -> TerminalView { controller.terminal }
-    func updateUIView(_ uiView: TerminalView, context: Context) {}
+    func makeUIView(context: Context) -> SelectableTerminalView { controller.terminal }
+    func updateUIView(_ uiView: SelectableTerminalView, context: Context) {}
+}
+
+/// SwiftTerm already owns long-press → word select → drag handles → Copy (its `longPress` shows the
+/// system edit menu and `select`/`selectAll` turn on the selection pan). We keep that gesture and only
+/// report selection changes so the SwiftUI side can show a Copy key; nothing here patches SwiftTerm.
+final class SelectableTerminalView: TerminalView {
+    var onSelectionChange: ((Bool) -> Void)?
+
+    override func selectionChanged(source: Terminal) {
+        super.selectionChanged(source: source)
+        let active = hasActiveSelection
+        DispatchQueue.main.async { [weak self] in self?.onSelectionChange?(active) }
+    }
 }
 
 @MainActor @Observable
 final class PaneController: NSObject, TerminalViewDelegate {
-    let terminal: TerminalView
+    let terminal: SelectableTerminalView
     var status: String?
+    var hasSelection = false
+    var onCopied: (() -> Void)?
     private var socket: PaneSocket?
-    private var accessory: UIToolbar?
+    private var copyKey: UIButton?
 
     override init() {
-        terminal = TerminalView(frame: .zero)
+        terminal = SelectableTerminalView(frame: .zero)
         super.init()
+        terminal.onSelectionChange = { [weak self] active in
+            guard let self else { return }
+            if active && !self.hasSelection { UISelectionFeedbackGenerator().selectionChanged() }
+            self.hasSelection = active
+            self.copyKey?.isEnabled = active
+        }
         terminal.terminalDelegate = self
         terminal.nativeBackgroundColor = .black
         terminal.nativeForegroundColor = .white
@@ -93,6 +117,9 @@ final class PaneController: NSObject, TerminalViewDelegate {
             b.widthAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
             return b
         }
+        let copy = button(nil, "doc.on.doc", "Copy selection") { $0.copySelection() }
+        copy.isEnabled = false
+        copyKey = copy
         [
             button("esc", nil, "Escape") { $0.send([0x1b]) },
             button("tab", nil, "Tab") { $0.send([0x09]) },
@@ -100,6 +127,7 @@ final class PaneController: NSObject, TerminalViewDelegate {
             button(nil, "arrow.up", "Up") { $0.send([0x1b, 0x5b, 0x41]) },
             button(nil, "arrow.down", "Down") { $0.send([0x1b, 0x5b, 0x42]) },
             button(nil, "return", "Return") { $0.send([0x0d]) },
+            copy,
             button(nil, "doc.on.clipboard", "Paste") { if let s = UIPasteboard.general.string { $0.send(Array(s.utf8)) } },
         ].forEach(row.addArrangedSubview)
         host.addSubview(scroll); scroll.addSubview(row)
@@ -119,6 +147,23 @@ final class PaneController: NSObject, TerminalViewDelegate {
         return host
     }
 
+    /// Copies the active selection to the iPhone pasteboard and clears it.
+    func copySelection() {
+        guard terminal.hasActiveSelection else { return }
+        terminal.copy(self)
+        onCopied?()
+    }
+
+    func selectText() { _ = terminal.becomeFirstResponder(); terminal.selectAll(nil) }
+
+    func copyEverything() {
+        terminal.selectAll(nil)
+        guard let text = terminal.getSelection(), !text.isEmpty else { terminal.clearSelection(); return }
+        terminal.clearSelection()
+        UIPasteboard.general.string = text
+        onCopied?()
+    }
+
     private func send(_ bytes: [UInt8]) {
         guard let socket else { return }
         let data = Data(bytes)
@@ -127,9 +172,13 @@ final class PaneController: NSObject, TerminalViewDelegate {
 
     func run(model: AppModel, paneId: String, onGone: @escaping () -> Void) async {
         #if DEBUG
-        if model.uiState == "pane" {
+        if (model.uiState ?? "").hasPrefix("pane") {
             terminal.feed(text: "\u{1b}[1mlead-true\u{1b}[0m ~/Projects/true $ swift test\r\n\u{1b}[32m✔\u{1b}[0m 214 tests passed\r\n\u{1b}[33m?\u{1b}[0m Apply the patch to Sources/True/Remote? (y/n) ")
             _ = terminal.becomeFirstResponder()
+            if model.uiState == "pane-select" {   // screenshot state: what a long-press on the last line selects
+                try? await Task.sleep(for: .seconds(1))
+                selectText()
+            }
             return
         }
         #endif

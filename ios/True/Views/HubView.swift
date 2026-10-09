@@ -51,7 +51,7 @@ struct HubView: View {
             }
             .sheet(item: $builder) { BuilderSheet(row: $0) }
             .onAppear {
-                if model.uiState == "pane", model.openPane == nil {
+                if (model.uiState ?? "").hasPrefix("pane"), model.openPane == nil {
                     Task { try? await Task.sleep(for: .seconds(1)); model.openPane = PaneRoute(id: "demo", title: "lead-true") }
                 }
                 if model.uiState == "builder", builder == nil {
