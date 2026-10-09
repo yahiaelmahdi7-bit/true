@@ -23,6 +23,8 @@ final class AppModel {
     var openPane: PaneRoute?
     var showComposer = false
     var selectedTab = "hub"
+    /// A `true://pair` link without a code (Mac had none live): PairView prefills the address from it.
+    var pendingPairLink: PairLink?
     private var pollTask: Task<Void, Never>?
     private let store = KeychainTokenStore()
 
@@ -131,6 +133,13 @@ final class AppModel {
     }
 
     func handle(url: URL) {
+        if url.scheme == "true", url.host == "pair" {
+            guard let link = PairLink(url: url) else { show("That's not a True pairing code"); return }
+            if paired { show("Already paired with your Mac"); return }
+            guard let code = link.code else { pendingPairLink = link; return }
+            Task { if let err = await pair(address: link.address, code: code) { show(err) } }
+            return
+        }
         guard url.scheme == "true", url.host == "pane" else { return }
         let id = url.lastPathComponent
         if !id.isEmpty, id != "/" { selectedTab = "hub"; openPane = PaneRoute(id: id, title: "Pane") }

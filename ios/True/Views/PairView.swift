@@ -7,16 +7,25 @@ struct PairView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var paired = 0
+    @State private var scanning = false
     @FocusState private var codeFocused: Bool
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
+                    Button { scanning = true } label: {
+                        TileRow(symbol: "qrcode.viewfinder", title: "Scan the code on your Mac", detail: "Fills the address and code for you") {
+                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                    }.tint(.primary)
+                }
+
+                Section {
                     TileRow(symbol: "macbook.and.iphone", title: "Open True on your Mac", detail: "Choose Remote Access")
                     TileRow(symbol: "network", title: "Enter its address", detail: "Shown under Remote Access")
                     TileRow(symbol: "number", title: "Type the 6-digit code", detail: "It refreshes every few minutes")
-                } header: { Text("Three steps") }
+                } header: { Text("Or do it by hand") }
 
                 Section("Mac address") {
                     TextField("your-mac.tailnet.ts.net:8444", text: $address)
@@ -59,9 +68,21 @@ struct PairView: View {
                 .disabled(code.count < 6 || address.isEmpty || busy)
                 .padding(.horizontal, 20).padding(.bottom, 8)
             }
+            .sheet(isPresented: $scanning) { ScanSheet { link in apply(link) } }
+            .task {
+                if let l = model.pendingPairLink { address = l.address; model.pendingPairLink = nil }
+                #if DEBUG
+                if model.uiState == "pair-scan" { scanning = true }
+                #endif
+            }
             .sensoryFeedback(.success, trigger: paired)
             .sensoryFeedback(.error, trigger: error)
         }
+    }
+
+    private func apply(_ link: PairLink) {
+        address = link.address
+        if let c = link.code { code = c; Task { await pair() } }
     }
 
     private func pair() async {

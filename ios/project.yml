@@ -37,6 +37,7 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_CFBundleDisplayName: "True"
+        INFOPLIST_KEY_NSCameraUsageDescription: "True uses the camera only to scan the pairing code shown on your Mac."
         TARGETED_DEVICE_FAMILY: "1"
       configs:
         Debug:
