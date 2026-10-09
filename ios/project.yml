@@ -10,6 +10,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: "0.1"
     CURRENT_PROJECT_VERSION: "1"
+    ENABLE_DEBUG_DYLIB: NO
 packages:
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm
@@ -19,7 +20,8 @@ targets:
     type: application
     platform: iOS
     sources:
-      - True
+      - path: "True"
+        excludes: ["Info*.plist"]
       - path: ../Sources/TrueRemoteClient
     dependencies:
       - package: SwiftTerm
