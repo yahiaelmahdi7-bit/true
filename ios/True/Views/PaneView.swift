@@ -6,14 +6,45 @@ struct PaneView: View {
     @Environment(\.dismiss) private var dismiss
     let route: PaneRoute
     @State private var controller = PaneController()
+    @State private var keyboardUp = false
+
+    private var row: HubRow? { model.hub?.projects.flatMap(\.rows).first { $0.pane == route.id } }
+    private var asleep: Bool { row?.statusKey == "asleep" }
 
     var body: some View {
         TerminalRepresentable(controller: controller)
             .background(Color.black)
             .ignoresSafeArea(.container, edges: .bottom)
             .navigationTitle(route.title).navigationBarTitleDisplayMode(.inline)
+            .navigationSubtitle(row?.status ?? "")
             .toolbarVisibility(.hidden, for: .tabBar)
-            .overlay(alignment: .bottom) { if let s = controller.status { Text(s).font(.footnote).padding(8).glassEffect().padding() } }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button { Task { await model.command(asleep ? "wake \(route.title)" : "sleep \(route.title)") } } label: {
+                            asleep ? Label("Wake", systemImage: "sunrise") : Label("Sleep", systemImage: "moon.zzz")
+                        }
+                        Button { UIPasteboard.general.string = route.title; model.show("Copied name") } label: { Label("Copy name", systemImage: "doc.on.doc") }
+                        if let cwd = row?.cwd { Button { UIPasteboard.general.string = cwd; model.show("Copied path") } label: { Label("Copy path", systemImage: "folder") } }
+                    } label: { Label("Pane actions", systemImage: "ellipsis.circle") }
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if let s = controller.status {
+                    Label(s, systemImage: s.hasPrefix("Reconnecting") ? "arrow.triangle.2.circlepath" : "xmark.circle")
+                        .font(.footnote.weight(.medium)).padding(.horizontal, 14).padding(.vertical, 8)
+                        .glassEffect(.regular, in: .capsule).padding(.bottom, 12)
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if !keyboardUp {
+                    Button { _ = controller.terminal.becomeFirstResponder() } label: { Label("Show keyboard", systemImage: "keyboard").labelStyle(.iconOnly).frame(width: 44, height: 44) }
+                        .buttonStyle(.glass).buttonBorderShape(.circle)
+                        .frame(maxWidth: .infinity, alignment: .trailing).padding(.horizontal)
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
             .task { await controller.run(model: model, paneId: route.id) { dismiss() } }
             .onDisappear { Task { await controller.stop() } }
     }
@@ -44,14 +75,24 @@ final class PaneController: NSObject, TerminalViewDelegate {
 
     private func makeAccessory() -> UIToolbar {
         let bar = UIToolbar(frame: CGRect(x: 0, y: 0, width: 320, height: 44))
-        func key(_ title: String, _ bytes: [UInt8]) -> UIBarButtonItem {
-            UIBarButtonItem(title: title, primaryAction: UIAction { [weak self] _ in self?.send(bytes) })
+        func key(_ title: String, _ label: String, _ bytes: [UInt8]) -> UIBarButtonItem {
+            let b = UIBarButtonItem(title: title, primaryAction: UIAction { [weak self] _ in self?.send(bytes) })
+            b.accessibilityLabel = label; b.width = 44
+            return b
         }
-        let paste = UIBarButtonItem(image: UIImage(systemName: "doc.on.clipboard"), primaryAction: UIAction { [weak self] _ in
-            if let s = UIPasteboard.general.string { self?.send(Array(s.utf8)) }
-        })
+        func symbol(_ name: String, _ label: String, _ action: @escaping (PaneController) -> Void) -> UIBarButtonItem {
+            let b = UIBarButtonItem(image: UIImage(systemName: name), primaryAction: UIAction { [weak self] _ in if let self { action(self) } })
+            b.accessibilityLabel = label; b.width = 44
+            return b
+        }
         let flex = UIBarButtonItem.flexibleSpace()
-        bar.items = [key("esc", [0x1b]), flex, key("tab", [0x09]), flex, key("⌃C", [0x03]), flex, key("↑", [0x1b, 0x5b, 0x41]), flex, key("↓", [0x1b, 0x5b, 0x42]), flex, paste]
+        bar.items = [
+            key("esc", "Escape", [0x1b]), flex, key("tab", "Tab", [0x09]), flex, key("⌃C", "Control C", [0x03]), flex,
+            symbol("arrow.up", "Up") { $0.send([0x1b, 0x5b, 0x41]) }, flex,
+            symbol("arrow.down", "Down") { $0.send([0x1b, 0x5b, 0x42]) }, flex,
+            symbol("return", "Return") { $0.send([0x0d]) }, flex,
+            symbol("doc.on.clipboard", "Paste") { if let s = UIPasteboard.general.string { $0.send(Array(s.utf8)) } },
+        ]
         return bar
     }
 
@@ -81,12 +122,12 @@ final class PaneController: NSObject, TerminalViewDelegate {
                 case .output(let d): backoff = nil; terminal.feed(byteArray: [UInt8](d)[...])
                 case .snapshot(let c, let r):
                     terminal.resize(cols: c, rows: r)
-                    terminal.font = UIFont.monospacedSystemFont(ofSize: max(6, min(14, terminal.bounds.width / (CGFloat(c) * 0.6))), weight: .regular)
+                    terminal.font = UIFont.monospacedSystemFont(ofSize: max(9, min(14, terminal.bounds.width / (CGFloat(c) * 0.6))), weight: .regular)
                 case .gone: status = "This pane was closed on the Mac."; try? await Task.sleep(for: .seconds(1.2)); onGone(); return
                 case .closed(let err):
                     if case .unauthorized = err { await model.unpair(); return }
                     _ = try? await session.tabs()   // like app.js: a 401 here clears the token and the poller returns to pairing
-                    status = "Reconnecting…"
+                    status = "Reconnecting"
                 }
             }
             if Task.isCancelled { return }
