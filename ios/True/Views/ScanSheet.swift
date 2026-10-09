@@ -28,7 +28,7 @@ struct ScanSheet: View {
             .sensoryFeedback(.success, trigger: scanned)
         }
         .presentationDetents([.large])
-        .task { if AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined { denied = !(await AVCaptureDevice.requestAccess(for: .video)) } }
+        .task { if DataScannerViewController.isSupported, AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined { denied = !(await AVCaptureDevice.requestAccess(for: .video)) } }
     }
 
     private var unavailable: some View {
