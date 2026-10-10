@@ -126,7 +126,23 @@ final class AppModel {
         pollTask = Task { [weak self] in
             var last: HubSnapshot?
             var backoff: Duration?
+            var lastTick = Date()
+            var lastBackground: Bool?
             while !Task.isCancelled {
+                let gap = Date().timeIntervalSince(lastTick)
+                let bg = UIApplication.shared.applicationState == .background
+                let duty = DutyKeepAlive.shared
+                let fails = self?.failCount ?? 0
+                if duty.active {
+                    await session.setDutyHeader("gap=\(Int(gap))s,bg=\(bg ? 1 : 0),eng=\(duty.engineRunning ? 1 : 0),fail=\(fails)")
+                    if gap > 20 { DutyDiag.note("poll gap \(Int(gap))s bg=\(bg ? 1 : 0) eng=\(duty.engineRunning ? 1 : 0) fail=\(fails)") }
+                    if let lb = lastBackground, lb != bg { DutyDiag.note("app state \(bg ? "background" : "foreground")") }
+                    lastBackground = bg
+                } else {
+                    await session.setDutyHeader(nil)
+                    lastBackground = nil
+                }
+                defer { lastTick = Date() }
                 do {
                     let snap = try await session.hub()
                     guard let self else { return }
@@ -142,6 +158,7 @@ final class AppModel {
                 } catch is CancellationError { return
                 } catch {
                     backoff = HubPoller.nextBackoff(after: backoff)
+                    if DutyKeepAlive.shared.active { DutyDiag.note("poll error: \(error.localizedDescription); backoff \(backoff.map { "\($0)" } ?? "min")") }
                     self?.failCount += 1
                     try? await Task.sleep(for: backoff ?? HubPoller.minBackoff)
                 }

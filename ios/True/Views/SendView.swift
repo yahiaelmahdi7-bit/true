@@ -93,6 +93,7 @@ struct SendView: View {
                 }
                 Section {
                     Toggle("Stay on duty", isOn: $onDuty).tint(.accentColor)
+                    if onDuty { NavigationLink("Duty log") { DutyLogView() } }
                 } header: { Text("Lock screen") } footer: {
                     Text("True stays awake in the background so a pane that needs you reaches your lock screen within seconds. Uses some battery.")
                 }
@@ -193,5 +194,23 @@ struct SendView: View {
         pending = key; defer { pending = nil }
         do { _ = try await model.session?.drop(data, filename: name); model.show("Sent to your Mac"); sent += 1 }
         catch { await model.handle(error); model.show("Couldn't send") }
+    }
+}
+
+/// The on-duty diagnostics ring buffer, newest first.
+private struct DutyLogView: View {
+    @State private var lines = DutyDiag.lines
+
+    var body: some View {
+        List(Array(lines.enumerated()), id: \.offset) { _, line in
+            Text(line).font(.caption.monospaced())
+        }
+        .navigationTitle("Duty log").navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button("Copy") { UIPasteboard.general.string = lines.joined(separator: "\n") }
+                Button("Clear") { DutyDiag.clear(); lines = [] }
+            }
+        }
     }
 }

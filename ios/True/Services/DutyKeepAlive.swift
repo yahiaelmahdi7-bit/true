@@ -18,6 +18,7 @@ final class DutyKeepAlive {
     private(set) var active = false
     private var engine: AVAudioEngine?
     private var observers: [NSObjectProtocol] = []
+    var engineRunning: Bool { engine?.isRunning == true }
 
     func start() {
         guard !active else { return }
@@ -25,24 +26,29 @@ final class DutyKeepAlive {
         do {
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
-        } catch { return }
-        guard run() else { return }
+        } catch { DutyDiag.note("start failed: session \(error.localizedDescription)"); return }
+        guard run() else { DutyDiag.note("start failed: engine"); return }
+        DutyDiag.note("start ok")
         active = true
         let nc = NotificationCenter.default
         observers = [
             nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] n in
                 let raw = n.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
                 let type = raw.flatMap(AVAudioSession.InterruptionType.init(rawValue:))
-                MainActor.assumeIsolated { if type == .ended { self?.resume() } }
+                MainActor.assumeIsolated {
+                    DutyDiag.note("interruption \(type == .began ? "began" : type == .ended ? "ended" : "raw=\(raw.map(String.init) ?? "nil")")")
+                    if type == .ended { self?.resume() }
+                }
             },
-            nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.resume() }
+            nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] n in
+                let reason = (n.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).map(String.init) ?? "nil"
+                MainActor.assumeIsolated { DutyDiag.note("routeChange reason=\(reason)"); self?.resume() }
             },
             nc.addObserver(forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.resume() }
+                MainActor.assumeIsolated { DutyDiag.note("configChange"); self?.resume() }
             },
             nc.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.engine = nil; self?.resume() }
+                MainActor.assumeIsolated { DutyDiag.note("mediaReset"); self?.engine = nil; self?.resume() }
             },
         ]
     }
@@ -51,14 +57,18 @@ final class DutyKeepAlive {
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         engine?.stop(); engine = nil
+        if active { DutyDiag.note("stop") }
         active = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     private func resume() {
         guard active else { return }
-        try? AVAudioSession.sharedInstance().setActive(true)
-        if engine?.isRunning != true { _ = run() }
+        var sessionErr = "none"
+        do { try AVAudioSession.sharedInstance().setActive(true) } catch { sessionErr = error.localizedDescription }
+        let wasRunning = engine?.isRunning == true
+        let restarted = wasRunning ? false : run()
+        DutyDiag.note("resume: setActive err=\(sessionErr) engineWasRunning=\(wasRunning) restarted=\(restarted)")
     }
 
     /// Build (or rebuild) the engine with a source node that renders silence.

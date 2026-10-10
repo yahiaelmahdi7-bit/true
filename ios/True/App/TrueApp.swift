@@ -54,7 +54,10 @@ struct TrueApp: App {
             .onChange(of: onDuty) { _, _ in syncDuty() }
             .onChange(of: model.paired) { _, _ in syncDuty() }
             .onChange(of: model.paired) { _, _ in syncScreenshots() }
-            .onChange(of: scenePhase) { _, p in if p == .active { syncScreenshots() } }
+            .onChange(of: scenePhase) { _, p in
+                if onDuty { DutyDiag.note("scene \(p)") }
+                if p == .active { syncScreenshots() }
+            }
             .overlay(alignment: .top) { ToastView() .environment(model) }
         }
     }
