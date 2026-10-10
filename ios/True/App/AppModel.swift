@@ -20,7 +20,11 @@ final class AppModel {
     var hub: HubSnapshot?
     var failCount = 0
     var toast: String?
-    var openPane: PaneRoute?
+    var openPane: PaneRoute? {
+        didSet { if let id = openPane?.id, id != "demo" { UserDefaults.standard.set(id, forKey: "lastPaneId") } }
+    }
+    /// The lock-screen "Message a session" control opened True: show the pane picker.
+    var showPanePicker = false
     /// Pane composer state, in memory only: unsent drafts and the Compose/Keys choice per pane id.
     var paneDrafts: [String: String] = [:]
     var paneKeysMode: [String: Bool] = [:]
@@ -217,6 +221,7 @@ final class AppModel {
             Task { if let err = await pair(address: link.address, code: code) { show(err) } }
             return
         }
+        if url.scheme == "true", url.host == "compose" { selectedTab = "hub"; openPane = nil; showPanePicker = true; return }
         guard url.scheme == "true", url.host == "pane" else { return }
         let id = url.lastPathComponent
         let compose = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "compose" && $0.value == "1" } ?? false

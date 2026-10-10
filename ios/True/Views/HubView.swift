@@ -38,6 +38,7 @@ struct HubView: View {
             .navigationDestination(item: $model.openPane) { route in
                 PaneView(route: route).navigationTransition(.zoom(sourceID: route.id, in: ns))
             }
+            .panePickerSheet()
             .toolbar {
                 if model.failCount > 0 && !model.offline {
                     ToolbarItem(placement: .principal) {

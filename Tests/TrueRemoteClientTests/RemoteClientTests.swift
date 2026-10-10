@@ -361,3 +361,24 @@ private func session(_ t: StubTransport, token: String? = "tok", store: InMemory
         #expect(LockScreenAnswer.followUp(for: .landed) == nil)
     }
 }
+
+@Suite struct PanePickerTests {
+    private func row(_ id: String, pane: String?, key: String = "working") -> HubRow {
+        HubRow(kind: "seat", id: id, name: id, status: key, statusKey: key, pane: pane)
+    }
+
+    @Test func lastOpenedPaneComesFirst() {
+        let rows = [row("a", pane: "pa", key: "needsYou"), row("b", pane: "pb"), row("c", pane: "pc")]
+        #expect(PanePicker.order(rows: rows, lastPaneId: "pc").map(\.id) == ["c", "a", "b"])
+    }
+
+    @Test func needsYouBeforeWorking() {
+        let rows = [row("a", pane: "pa"), row("b", pane: "pb", key: "needsYou"), row("c", pane: "pc")]
+        #expect(PanePicker.order(rows: rows, lastPaneId: nil).map(\.id) == ["b", "a", "c"])
+    }
+
+    @Test func rowsWithoutPaneAreDropped() {
+        let rows = [row("a", pane: nil), row("b", pane: "pb")]
+        #expect(PanePicker.order(rows: rows, lastPaneId: nil).map(\.id) == ["b"])
+    }
+}
