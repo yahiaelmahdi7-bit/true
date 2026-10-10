@@ -49,7 +49,7 @@ final class AppModel {
             }
         }
         if let s = uiState {
-            selectedTab = s.hasPrefix("shots") || s == "viewer" ? "shots" : s == "send" ? "send" : "hub"
+            selectedTab = s.hasPrefix("shots") || s == "viewer" ? "shots" : s == "send" ? "send" : s.hasPrefix("panes") ? "panes" : "hub"
             showComposer = s == "composer" || s == "composer-routed"
         }
     }

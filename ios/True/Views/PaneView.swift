@@ -21,8 +21,10 @@ struct PaneView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Button { Task { await model.command(asleep ? "wake \(route.title)" : "sleep \(route.title)") } } label: {
-                            asleep ? Label("Wake", systemImage: "sunrise") : Label("Sleep", systemImage: "moon.zzz")
+                        if row != nil {
+                            Button { Task { await model.command(asleep ? "wake \(route.title)" : "sleep \(route.title)") } } label: {
+                                asleep ? Label("Wake", systemImage: "sunrise") : Label("Sleep", systemImage: "moon.zzz")
+                            }
                         }
                         Button { controller.selectText() } label: { Label("Select text", systemImage: "text.cursor") }
                         Button { controller.copyEverything() } label: { Label("Copy everything", systemImage: "doc.on.doc") }
