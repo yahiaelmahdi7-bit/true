@@ -107,6 +107,16 @@ final class NovaInstantRunner {
         }
     }
     func cancelAll() { chain?.cancel() }
+    /// A tell matched after local acts already ran: undo them the way "no" does.
+    func undoAll() {
+        let prev = chain
+        chain = Task { [weak self] in
+            await prev?.value
+            guard let self else { return }
+            let all = self.undos; self.undos = [:]
+            for (_, u) in all { await u(); self.onUndo?() }
+        }
+    }
 
     private func execute(_ step: NovaInstantSession.Step) async {
         switch step.kind {

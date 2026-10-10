@@ -23,6 +23,10 @@ final class WakeListener: ObservableObject {
     var onUtterance: ((String) -> Void)?
     /// Run 26b: EVERY partial/final (full running transcript, isFinal, spoken-word end in seconds since the stream
     /// started). The engine reads the live stream through a take instead of handing off to a recorder.
+    /// Bumped by `begin()`: a new recognition stream, whose transcript restarts from zero.
+    private(set) var generation = 0
+    /// Wall-clock start of each word of the last partial (stream start + segment timestamp).
+    private(set) var segmentStarts: [Date] = []
     var onPartial: ((String, Bool, TimeInterval?) -> Void)?
     /// Run 26b "Live stream": when true a wake trigger does NOT stand down / release the mic — it only calls `onWake`.
     var streamTakes = false
@@ -244,10 +248,12 @@ final class WakeListener: ObservableObject {
         task = recognizer.recognitionTask(with: req) { @Sendable [weak self] result, error in
             let text = result?.bestTranscription.formattedString
             let lastEnd = result?.bestTranscription.segments.last.map { $0.timestamp + $0.duration }
+            let starts = result?.bestTranscription.segments.map(\.timestamp) ?? []
             let isFinal = result?.isFinal ?? false
             let failed = error != nil
-            Task { @MainActor in self?.handle(text: text, isFinal: isFinal, failed: failed, lastWordEnd: lastEnd) }
+            Task { @MainActor in self?.handle(text: text, isFinal: isFinal, failed: failed, lastWordEnd: lastEnd, starts: starts) }
         }
+        generation += 1
         listening = true
         status = .listening
         backoff = Self.minBackoff   // the mic opened — earn back the fast retry
@@ -300,7 +306,8 @@ final class WakeListener: ObservableObject {
         scheduleWatchdog()
     }
 
-    private func handle(text: String?, isFinal: Bool, failed: Bool, lastWordEnd: TimeInterval? = nil) {
+    private func handle(text: String?, isFinal: Bool, failed: Bool, lastWordEnd: TimeInterval? = nil, starts: [TimeInterval] = []) {
+        segmentStarts = starts.map { streamStartedAt.addingTimeInterval($0) }
         if let text, !text.isEmpty { onPartial?(text, isFinal, lastWordEnd) }
         // Debug, not info: partials arrive several times a second while anyone talks.
         if let text, !text.isEmpty, !heardWords {

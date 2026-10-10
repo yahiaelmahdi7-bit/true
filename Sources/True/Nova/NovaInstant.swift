@@ -229,6 +229,7 @@ struct NovaInstantSession {
     private var live: [(id: Int, verb: InstantVerb, at: Date)] = []
     private var waiting: (key: String, since: Date)?
     private(set) var unhandled = ""
+    private(set) var tellMatched = false
     var handled: [String] { dispatched.keys.sorted().compactMap { dispatched[$0]?.verb.spoken } }
 
     init(apps: AppIndex, panes: [String], prefixWait: TimeInterval = 0.25) {
@@ -247,6 +248,7 @@ struct NovaInstantSession {
     mutating func feed(_ words: String, now: Date) -> [Step] {
         var steps: [Step] = []
         var rest: [String] = []
+        if NovaTell.parse(words, roster: panes) != nil { tellMatched = true; unhandled = ""; return [] }   // his words are for the agent, not for local acts
         let cs = NovaInstant.clauses(words)
         for (i, c) in cs.enumerated() {
             let isLast = i == cs.count - 1
@@ -294,6 +296,13 @@ struct NovaInstantSession {
 /// Run 26e: "tell the CTO to review the PR" -> the rest of HIS utterance goes verbatim to the agent.
 enum NovaTell {
     struct Tell: Equatable { let target: String; let text: String }
+    /// A tell types into a live agent session only: an awake pane whose status is unknown/failed, or that fell back to a
+    /// plain login shell (`AgentLaunch.shellCommand` prints the marker), gets nothing. An asleep seat is woken by the send.
+    static func deliverable(awake: Bool, status: AgentStatus, screen: String) -> Bool {
+        guard awake else { return true }
+        if status == .asleep || status == .failed { return false }
+        return !screen.contains("'claude' was not found on PATH")
+    }
     static let verbs: Set<String> = ["tell", "ask", "message"]
 
     /// "tell/ask/message <agent> [to] <rest>": longest agent phrase wins; two agents behind one phrase = ambiguous = nil.

@@ -70,6 +70,7 @@ enum NovaGate {
             let text = str("text")
             if text.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) { return .refuse("control characters in the message") }
             if DenyList.isHit(text) { return .refuse("blocked by the deny-list: \(DenyList.hits(text).joined(separator: ", "))") }
+            if let c = text.trimmingCharacters(in: .whitespacesAndNewlines).first, "/!#".contains(c) { return .park("send to \(str("target")) (starts with \(c), Claude Code would run it as a command or note): \(text)") }
             return paneBusy ? .park("interrupt busy agent \(str("target")): \(text)") : .allow
         case "send_to_pane": return origin == .local && !paneBusy ? .allow : .park("\(paneBusy ? "interrupt busy agent " : "send to ")\(str("target")): \(str("text"))")
         case "relay": return .park("relay \(str("from")) → \(str("to"))\(paneBusy ? " (busy)" : "")")

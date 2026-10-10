@@ -74,3 +74,12 @@ Tests: `Tests/TrueTests/NovaSecurityTests.swift`, one per finding ID.
 - **Origin tag, enforced in code:** `NovaGate.Origin.user` is set only by `NovaHands.runUser`, called only from the engine's tell lane. The model tool path is hard-coded `.model` and cannot pass `.user`. Only `send_to_pane` honours `.user`; `relay`, `spawn_agent`, `open_url` and every model send park as before.
 - **Still enforced for `.user` sends:** addressed only (ambient never sends); Nova-speaking gate + tail; target pane mid-turn parks; any `DenyList` hit in the text is refused with the reason; control characters refused; the target must match the roster uniquely (else the normal path, where C2 parks); final end of turn only (eager start never sends); at most one send per turn.
 - **Residual risk (accepted by Yahia 2026-10-10):** audio that says "Nova, tell <exact agent name> …" can send a message to an agent that runs without permission prompts.
+
+## Run 26f — review fixes for 26d/26e (2026-10-10)
+
+- **Own-voice residue:** the live-turn floor now resets only when `WakeListener.begin()` starts a new stream (generation), not when a revision has fewer tokens. Words the recognizer timestamps inside Nova's speech window (+400 ms tail) are spent even if delivered late.
+- **Tell vs instant lane:** once a tell matches the addressed command, the turn is no longer fed to the instant session; acts that already ran are undone like "no".
+- **One door:** `PaneDelivery` strips C0 (except tab/newline), DEL and C1 for EVERY origin, so a message can't close the bracketed paste (`ESC[201~`) or send `ESC[Z`.
+- **Claude Code prefixes:** a tell whose text starts (after trimming) with `/`, `!` or `#` parks with a card — it would run a slash command, a shell command or write a memory note.
+- **Live agent only:** a tell to an awake pane whose status is unknown/failed, or that fell back to a plain login shell (`claude` missing), types nothing and speaks "<agent> isn't running". An asleep seat is still woken by the send; the shell-fallback check is made before the send, so a seat that falls back during that wake is not caught.
+- Unchanged by design: tells still send at the existing end of turn (a mid-sentence pause can send half a sentence — accepted by Yahia 2026-10-10).

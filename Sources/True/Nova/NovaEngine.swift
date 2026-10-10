@@ -51,10 +51,19 @@ final class NovaEngine: ObservableObject {
     private var brainTask: Task<Void, Never>?
     private let approvals = NovaApprovals()
     private var speechEndedAt = Date.distantPast
+    /// When Nova's own voice was playing: late-delivered words timestamped inside it are spent (Run 26f).
+    private var speechWindows: [(start: Date, end: Date)] = []
+    private var tellUndone = false
+    private func speech_trim() { if speechWindows.count > 20 { speechWindows.removeFirst(speechWindows.count - 20) } }
     private var eagerHeld = false
     private var announcedNoKey = false
     private var recent: [String] = []
-    private lazy var speech = NovaSpeechQueue(onSpeakingChanged: { [weak self] s in if !s { self?.speechEndedAt = Date() }; self?.speaking = s })
+    private lazy var speech = NovaSpeechQueue(onSpeakingChanged: { [weak self] s in
+        guard let self else { return }
+        if s { self.speechWindows.append((Date(), .distantFuture)) }
+        else { self.speechEndedAt = Date(); if let i = self.speechWindows.indices.last { self.speechWindows[i].end = Date() } }
+        self.speech_trim()
+        self.speaking = s })
     private lazy var hands = NovaHands(approve: { [weak self] what in await self?.approve(what) ?? false },
                                        cancelled: { Task.isCancelled })
     /// Eager (mid-speech) hands: read-only tools only; anything that changes something is held for the final run (M1).
@@ -107,7 +116,8 @@ final class NovaEngine: ObservableObject {
         let gated = NovaApproval.micGated(speaking: speaking, sinceSpeechEnd: Date().timeIntervalSince(speechEndedAt))
         if gated, speaking, NovaLiveTurn.isBargeIn(text) { interrupt() }   // only "stop" gets through while Nova talks
         // gated words are consumed (P1): a "nova" Nova said itself can never address a later command
-        guard let words = live.ingest(text, gated: gated, novaSpeaking: speaking) else { return }
+        live.spend(upTo: NovaLiveTurn.spentCount(segmentStarts: wake.segmentStarts, windows: speechWindows, tail: NovaApproval.micTail))
+        guard let words = live.ingest(text, gated: gated, novaSpeaking: speaking, generation: wake.generation) else { return }
         if !turnActive { beginTurn() }
         if !utterSeen { utterSeen = true; utterCard = approvals.current?.id }   // the card showing when this utterance STARTED
         lastWordEnd = wordEnd
@@ -130,7 +140,7 @@ final class NovaEngine: ObservableObject {
 
     private func beginTurn() {
         guard !turnActive else { return }
-        turnActive = true; turnStart = Date(); lastChange = Date(); lastCommand = ""; lastWordEnd = nil; tellTurn.reset()
+        turnActive = true; turnStart = Date(); lastChange = Date(); lastCommand = ""; lastWordEnd = nil; tellTurn.reset(); tellUndone = false
         state = .listening; transcript = ""; lines = []; directDone = []
         eagerHeld = false; hands.resetTurn(); eagerHands.resetTurn()
         eager = NovaEagerTurn(); eagerTask?.cancel(); eagerTask = nil
@@ -155,6 +165,7 @@ final class NovaEngine: ObservableObject {
         guard var s = session else { return }
         let steps = s.feed(text, now: now); session = s
         if !steps.isEmpty { runner.enqueue(steps) }
+        if s.tellMatched, !s.handled.isEmpty, !tellUndone { tellUndone = true; runner.undoAll() }   // local acts ran before the tell matched
         steerEager(now)
     }
 
@@ -205,6 +216,15 @@ final class NovaEngine: ObservableObject {
     private func verbatimSend(finalAt: Date) async -> Bool {
         let gated = NovaApproval.micGated(speaking: speaking, sinceSpeechEnd: Date().timeIntervalSince(speechEndedAt))
         guard let t = tellTurn.finalize(lastCommand, roster: AgentRegistry.shared.crew.map(\.name), addressed: true, gated: gated, final: true) else { return false }
+        let live = await MainActor.run { () -> Bool in
+            let r = AgentRegistry.shared
+            let screen = r.panes[t.target].flatMap { TerminalRegistry.shared.view(for: $0)?.screenText() } ?? ""
+            return NovaTell.deliverable(awake: r.isAwake(t.target), status: r.statusOf(t.target), screen: screen)
+        }
+        guard live else {
+            lines.append(.init(text: "\(t.target) isn't running", ok: false, tool: "tell")); state = .done
+            say("\(t.target) isn't running"); flushRecord(path: "tell"); return true
+        }
         let clauseToActMs = Int(Date().timeIntervalSince(finalAt) * 1000)
         NSSound(named: "Pop")?.play()
         let r = await hands.runUser(name: "send_to_pane", input: ["target": t.target, "text": t.text])

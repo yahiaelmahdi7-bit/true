@@ -5,8 +5,24 @@ import Foundation
 struct NovaLiveTurn {
     /// Tokens at or before this index are spent (a finished turn, or ambient chatter): the wake name must come after.
     private(set) var floor = 0
+    /// Recognition-stream generation (`WakeListener.begin()` bumps it). Only a NEW stream resets the floor: a revision that
+    /// merges tokens ("no va" -> "nova") inside one stream must never bring Nova's own spent words back.
+    private var gen = 0
     /// Hotkey held: the command starts at this token index (no name needed).
     private(set) var hotkeyBase: Int?
+
+    /// Words the recognizer timestamped inside Nova's own speech (+ tail) are spent even when delivered late.
+    mutating func spend(upTo n: Int) {
+        if hotkeyBase != nil { hotkeyBase = max(hotkeyBase ?? 0, n) } else { floor = max(floor, n) }
+    }
+    static func spentCount(segmentStarts: [Date], windows: [(start: Date, end: Date)], tail: TimeInterval) -> Int {
+        var n = 0
+        for (i, t) in segmentStarts.enumerated() where windows.contains(where: { t >= $0.start && t <= $0.end.addingTimeInterval(tail) }) { n = i + 1 }
+        return n
+    }
+    private mutating func sync(_ generation: Int) {
+        if generation != gen { gen = generation; floor = 0; hotkeyBase = nil }   // a new stream restarted the transcript
+    }
 
     static func tokens(_ text: String) -> [String] {
         text.split(whereSeparator: \.isWhitespace).map(String.init)
@@ -21,9 +37,9 @@ struct NovaLiveTurn {
 
     /// The addressed command words in this partial, or nil when nothing is addressed to Nova (ambient speech), or
     /// when Nova itself is speaking (self-speech is never a command; only "stop" barges in — see `isBargeIn`).
-    mutating func command(in text: String, novaSpeaking: Bool) -> [String]? {
+    mutating func command(in text: String, novaSpeaking: Bool, generation: Int = 0) -> [String]? {
         let toks = Self.tokens(text)
-        if toks.count < floor { floor = 0; hotkeyBase = nil }       // the recognition stream restarted
+        sync(generation)
         if novaSpeaking { return nil }
         if let b = hotkeyBase { return Array(toks.dropFirst(min(b, toks.count))) }
         guard let i = NovaAddress.indexAfterLastName(in: Self.norm(toks)), i > floor else { return nil }
@@ -31,14 +47,15 @@ struct NovaLiveTurn {
     }
 
     /// Engine entry point for every partial. `gated` = Nova speaking or in its echo tail.
-    mutating func ingest(_ text: String, gated: Bool, novaSpeaking: Bool) -> [String]? {
+    mutating func ingest(_ text: String, gated: Bool, novaSpeaking: Bool, generation: Int = 0) -> [String]? {
+        sync(generation)
         if gated {
             // Nova's own words (and the echo tail) are spent: a "nova" in them must never address a later command (P1).
             let n = Self.tokens(text).count
             if hotkeyBase != nil { hotkeyBase = n } else { floor = n }
             return nil
         }
-        return command(in: text, novaSpeaking: novaSpeaking)
+        return command(in: text, novaSpeaking: novaSpeaking, generation: generation)
     }
 
     /// "stop" in the last two words while Nova is talking.
