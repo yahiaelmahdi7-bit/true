@@ -223,6 +223,14 @@ private func session(_ t: StubTransport, token: String? = "tok", store: InMemory
         let new = try JSONDecoder().decode(RemotePane.self, from: Data((base + #","claude":true}"#).utf8))
         #expect(new.claude)
     }
+
+    @Test func paneDecodesIdentityWithAndWithoutKeys() throws {
+        let base = #"{"id":"1","title":"t","cwd":"/","agent":null,"needsYou":false,"busy":false,"live":true"#
+        let old = try JSONDecoder().decode(RemotePane.self, from: Data((base + "}").utf8))
+        #expect(old.repo == nil && old.branch == nil && old.sessionID == nil && old.topic == nil && !old.worktree)
+        let new = try JSONDecoder().decode(RemotePane.self, from: Data((base + #","repo":"true","branch":"dev","worktree":true,"sessionID":"S","topic":"Fix it"}"#).utf8))
+        #expect(new.repo == "true" && new.branch == "dev" && new.worktree && new.sessionID == "S" && new.topic == "Fix it")
+    }
 }
 
 @Suite struct ComposerReactionTests {

@@ -237,11 +237,22 @@ public struct RemotePane: Codable, Equatable, Sendable, Identifiable {
     public var live: Bool
     /// The pane runs Claude Code / a seat (Approve/Deny mean something). Older Macs omit it.
     public var claude: Bool
+    /// Which repo / branch / session the pane is on. Older Macs omit all of these.
+    public var repo: String?
+    public var branch: String?
+    public var worktree: Bool
+    public var sessionID: String?
+    /// One line on what the session is doing (handoff heading, else the opening prompt).
+    public var topic: String?
 
-    private enum CodingKeys: String, CodingKey { case id, title, cwd, agent, needsYou, busy, live, claude }
-    public init(id: String, title: String, cwd: String, agent: String?, needsYou: Bool, busy: Bool, live: Bool, claude: Bool = false) {
+    private enum CodingKeys: String, CodingKey {
+        case id, title, cwd, agent, needsYou, busy, live, claude, repo, branch, worktree, sessionID, topic
+    }
+    public init(id: String, title: String, cwd: String, agent: String?, needsYou: Bool, busy: Bool, live: Bool, claude: Bool = false,
+                repo: String? = nil, branch: String? = nil, worktree: Bool = false, sessionID: String? = nil, topic: String? = nil) {
         self.id = id; self.title = title; self.cwd = cwd; self.agent = agent
         self.needsYou = needsYou; self.busy = busy; self.live = live; self.claude = claude
+        self.repo = repo; self.branch = branch; self.worktree = worktree; self.sessionID = sessionID; self.topic = topic
     }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
@@ -253,6 +264,11 @@ public struct RemotePane: Codable, Equatable, Sendable, Identifiable {
         busy = try c.decode(Bool.self, forKey: .busy)
         live = try c.decode(Bool.self, forKey: .live)
         claude = try c.decodeIfPresent(Bool.self, forKey: .claude) ?? (agent != nil)
+        repo = try c.decodeIfPresent(String.self, forKey: .repo)
+        branch = try c.decodeIfPresent(String.self, forKey: .branch)
+        worktree = try c.decodeIfPresent(Bool.self, forKey: .worktree) ?? false
+        sessionID = try c.decodeIfPresent(String.self, forKey: .sessionID)
+        topic = try c.decodeIfPresent(String.self, forKey: .topic)
     }
 }
 
