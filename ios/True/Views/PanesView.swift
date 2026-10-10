@@ -42,12 +42,19 @@ struct PanesView: View {
             ForEach(tabs.filter { !$0.panes.isEmpty }) { tab in
                 Section {
                     ForEach(tab.panes) { pane in
-                        NavigationLink(value: PaneRoute(id: pane.id, title: pane.title)) { PaneRowView(pane: pane) }
+                        NavigationLink(value: PaneRoute(id: pane.id, title: pane.repo ?? pane.title)) { PaneRowView(pane: pane) }
                             .matchedTransitionSource(id: pane.id, in: ns)
                     }
                 } header: {
                     HStack {
                         Text(tab.title)
+                        let waiting = tab.panes.filter(\.needsYou).count
+                        if waiting > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "circle.fill").font(.system(size: 6))
+                                Text("\(waiting)")
+                            }.font(.caption).foregroundStyle(.attention).textCase(nil)
+                        }
                         if tab.selected { Text("Front").font(.caption).foregroundStyle(.secondary).textCase(nil) }
                     }
                 }
@@ -82,17 +89,49 @@ private struct PaneRowView: View {
 
     private var cwd: String {
         let home = "/Users/"
+        if pane.cwd.isEmpty { return "No directory" }
         guard pane.cwd.hasPrefix(home) else { return pane.cwd }
         let rest = pane.cwd.dropFirst(home.count)
         guard let slash = rest.firstIndex(of: "/") else { return "~" }
         return "~" + rest[slash...]
     }
 
+    private var worktreeBadge: some View {
+        Text("worktree").font(.caption2).foregroundStyle(.secondary)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(.thinMaterial, in: Capsule())
+    }
+
+    /// `repo · branch` (+ worktree capsule). Without a repo there is nothing to say beyond the title.
+    private func repoLine(primary: Bool) -> some View {
+        HStack(spacing: 6) {
+            Text(pane.repo ?? pane.title).font(primary ? .body : .subheadline)
+                .foregroundStyle(primary ? .primary : .secondary).lineLimit(1).layoutPriority(1)
+            if let branch = pane.branch {
+                Text("· \(branch)").font(.subheadline).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            if pane.worktree { worktreeBadge.layoutPriority(1) }
+        }
+    }
+
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(pane.title).font(.body).lineLimit(1)
-                Text(cwd).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                if let agent = pane.agent {
+                    Text(agent).font(.body).lineLimit(1)
+                    repoLine(primary: false)
+                    if let topic = pane.topic {
+                        Text(topic).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                    }
+                } else {
+                    repoLine(primary: true)
+                    if let topic = pane.topic {
+                        Text(topic).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                    } else {
+                        Text(cwd).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                    }
+                }
             }
             Spacer()
             if pane.needsYou {
