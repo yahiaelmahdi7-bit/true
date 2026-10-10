@@ -24,4 +24,10 @@ enum SharedConfig {
         get { Set(defaults.stringArray(forKey: "notifiedIDs") ?? []) }
         set { defaults.set(Array(newValue), forKey: "notifiedIDs") }
     }
+
+    /// Newest screenshot already sent to the Mac; nil = auto screenshots never armed (or switched off).
+    static var screenshotLastSynced: Date? {
+        get { defaults.object(forKey: "screenshotLastSynced") as? Date }
+        set { defaults.set(newValue, forKey: "screenshotLastSynced") }
+    }
 }

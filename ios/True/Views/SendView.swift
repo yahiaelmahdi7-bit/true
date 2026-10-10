@@ -37,6 +37,7 @@ struct SendView: View {
     @State private var pending: String?
     @State private var sent = 0
     @AppStorage("autoClipboard") private var autoClipboard = true
+    @AppStorage("autoScreenshots") private var autoScreenshots = false
 
     /// The Mac's shared clipboard item, else the newest text item.
     private var macClip: InboxItem? {
@@ -49,6 +50,17 @@ struct SendView: View {
         if ["png", "jpg", "jpeg", "heic", "gif", "webp"].contains(ext) { return "photo" }
         if ["zip", "gz", "tar", "tgz"].contains(ext) { return "zipper" }
         return "doc"
+    }
+
+    /// Turning it on asks for Photos access; if that is refused the switch falls back to off.
+    private var screenshotBinding: Binding<Bool> {
+        Binding(get: { autoScreenshots }, set: { on in
+            guard on else { autoScreenshots = false; return }
+            Task {
+                if await ScreenshotSync.requestAccess() { autoScreenshots = true }
+                else { autoScreenshots = false; model.show("Allow Photos access in Settings") }
+            }
+        })
     }
 
     var body: some View {
@@ -72,6 +84,11 @@ struct SendView: View {
                     Toggle("Copy Mac clipboard automatically", isOn: $autoClipboard).tint(.accentColor)
                 } header: { Text("Clipboard") } footer: {
                     Text("When True opens, the newest text copied on your Mac goes straight to this phone's clipboard.")
+                }
+                Section {
+                    Toggle("Send phone screenshots automatically", isOn: screenshotBinding).tint(.accentColor)
+                } header: { Text("Screenshots") } footer: {
+                    Text("While True is open, screenshots you take on this phone go straight to your Mac's screenshot tray.")
                 }
                 Section {
                     ForEach((inbox ?? []).filter { $0.id != macClip?.id }) { item in
