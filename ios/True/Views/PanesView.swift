@@ -92,8 +92,14 @@ private struct PaneRowView: View {
         if pane.cwd.isEmpty { return "No directory" }
         guard pane.cwd.hasPrefix(home) else { return pane.cwd }
         let rest = pane.cwd.dropFirst(home.count)
-        guard let slash = rest.firstIndex(of: "/") else { return "~" }
+        guard let slash = rest.firstIndex(of: "/") else { return "Home" }
         return "~" + rest[slash...]
+    }
+
+    /// No repo to name the pane by: say what the session is on, or at least where it is.
+    private var fallbackTitle: String {
+        if pane.repo == nil, let topic = pane.topic { return topic }
+        return pane.title == "~" ? "Home" : pane.title
     }
 
     private var worktreeBadge: some View {
@@ -105,7 +111,7 @@ private struct PaneRowView: View {
     /// `repo · branch` (+ worktree capsule). Without a repo there is nothing to say beyond the title.
     private func repoLine(primary: Bool) -> some View {
         HStack(spacing: 6) {
-            Text(pane.repo ?? pane.title).font(primary ? .body : .subheadline)
+            Text(pane.repo ?? fallbackTitle).font(primary ? .body : .subheadline)
                 .foregroundStyle(primary ? .primary : .secondary).lineLimit(1).layoutPriority(1)
             if let branch = pane.branch {
                 Text("· \(branch)").font(.subheadline).foregroundStyle(.secondary)
@@ -126,7 +132,7 @@ private struct PaneRowView: View {
                     }
                 } else {
                     repoLine(primary: true)
-                    if let topic = pane.topic {
+                    if let topic = pane.topic, pane.repo != nil {
                         Text(topic).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
                     } else {
                         Text(cwd).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
