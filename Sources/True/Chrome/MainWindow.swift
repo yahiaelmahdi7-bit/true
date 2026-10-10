@@ -9,7 +9,11 @@ enum MainWindow {
     /// Weak: the registry never keeps a closed window alive.
     private(set) static weak var current: NSWindow?
 
-    static func register(_ window: NSWindow) { current = window }
+    static func register(_ window: NSWindow) {
+        current = window
+        // 8-bit colour: the full-window backing buffers were half-float (8 B/px, ~78 MB each at 4112×2482).
+        window.depthLimit = .twentyfourBitRGB
+    }
 
     /// One window across every monitor: the union of the screens' usable areas. macOS only draws a
     /// window on more than one display when System Settings ▸ Desktop & Dock ▸ "Displays have separate
