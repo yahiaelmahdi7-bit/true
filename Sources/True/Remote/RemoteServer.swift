@@ -26,7 +26,7 @@ final class RemoteServer: @unchecked Sendable {
     private let allowedLogin: @Sendable () -> String?
     private let dnsName: @Sendable () -> String?
     private let wsAuthTimeout: TimeInterval
-    private let files: RemoteFiles
+    let files: RemoteFiles
     private let dropDeadline: TimeInterval
     let commands: RemoteCommands
     let bar: RemoteBar

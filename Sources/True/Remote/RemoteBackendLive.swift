@@ -52,7 +52,7 @@ struct RemoteBackendLive: RemoteBackend {
         }
     }
 
-    func paneInput(pane: UUID, intent: PaneInputIntent, text: String) -> String? {
+    func paneInput(pane: UUID, intent: PaneInputIntent, text: String, attachments: [String]) -> String? {
         final class Box: @unchecked Sendable { var outcome = "unverified"; var known = true }
         let box = Box(), done = DispatchSemaphore(value: 0)
         DispatchQueue.main.async {
@@ -62,14 +62,14 @@ struct RemoteBackendLive: RemoteBackend {
                 let isClaude = reg.name(for: pane) != nil || reg.latest[pane] != nil
                 if intent == .prompt, !isClaude {
                     // A plain shell: nothing to verify against. Type, then Return, both through the one door.
-                    PaneDelivery.write(text, intent: .stage, to: pane) { _ in
+                    PaneDelivery.write(text, intent: .stage, attachments: attachments, to: pane) { _ in
                         PaneDelivery.write("", intent: .submitOnly, to: pane) { _ in
                             box.outcome = PaneDelivery.Outcome.unverified.wire; done.signal()
                         }
                     }
                     return
                 }
-                PaneDelivery.write(text, intent: intent.deliveryIntent, to: pane) { o in
+                PaneDelivery.write(text, intent: intent.deliveryIntent, attachments: attachments, to: pane) { o in
                     box.outcome = o.wire; done.signal()
                 }
             }

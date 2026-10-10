@@ -340,11 +340,11 @@ private func tempFile() -> URL {
         func tabsJSON() -> Data { Data(#"{"tabs":[]}"#.utf8) }
         func snapshot(pane: UUID) -> (cols: Int, rows: Int, bytes: [UInt8])? { pane == self.pane ? (80, 24, [0x41]) : nil }
         func input(pane: UUID, bytes: [UInt8]) -> Bool { true }
-        final class Log: @unchecked Sendable { var calls: [(PaneInputIntent, String)] = [] }
+        final class Log: @unchecked Sendable { var calls: [(PaneInputIntent, String)] = []; var attachments: [[String]] = [] }
         let log = Log()
-        func paneInput(pane: UUID, intent: PaneInputIntent, text: String) -> String? {
+        func paneInput(pane: UUID, intent: PaneInputIntent, text: String, attachments: [String]) -> String? {
             guard pane == self.pane else { return nil }
-            log.calls.append((intent, text))
+            log.calls.append((intent, text)); log.attachments.append(attachments)
             return intent == .approve ? PaneDelivery.Outcome.promptGone.wire : PaneDelivery.Outcome.landed.wire
         }
     }
@@ -415,6 +415,46 @@ private func tempFile() -> URL {
             #expect(post(id, #"{"intent":"prompt","text":"\#(big)"}"#).status == 200)
             #expect(http(18871, "POST", "/api/pane/\(id)/input", origin: Self.origin, body: #"{"intent":"prompt","text":"x"}"#).status == 401)
         }
+    }
+
+    @Test func paneInputAttachResolvesAndGuards() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("true-attach-\(UUID().uuidString)")
+        let downloads = root.appendingPathComponent("Downloads")
+        try FileManager.default.createDirectory(at: downloads, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tray = TrayStore(root: root.appendingPathComponent("tray"), trash: { _ in nil })
+        let src = root.appendingPathComponent("a.png")
+        try Data(RemoteDropEndToEndTests.png()).write(to: src)
+        let shot = try #require(tray.ingest(src))
+        let doc = downloads.appendingPathComponent("notes.txt")
+        try Data("hi".utf8).write(to: doc)
+        let secret = root.appendingPathComponent("x")
+        try Data("s".utf8).write(to: secret)
+        let files = RemoteFiles(tray: { tray }, inbox: RemoteInbox(root: root.appendingPathComponent("inbox")),
+                                downloads: downloads, tmpDir: root.appendingPathComponent("tmp"))
+        let devices = DeviceStore(url: root.appendingPathComponent("d.json"))
+        let tok = devices.pair(label: "t"); let be = FakeBackend()
+        let s = RemoteServer(backend: be, codes: PairingCodes(), devices: devices, allowedLogin: { "me@x" },
+                             dnsName: { Self.dns }, files: files, wsAuthTimeout: 0.7)
+        #expect(s.start(port: 18872)); defer { s.stop() }
+        func post(_ body: String) -> Int {
+            http(18872, "POST", "/api/pane/\(be.pane.uuidString)/input", origin: Self.origin, bearer: tok, body: body).status
+        }
+        #expect(post(#"{"intent":"prompt","text":"look","attach":[{"id":"\#(shot.id)"},{"name":"notes.txt"}]}"#) == 200)
+        let got = try #require(be.log.attachments.last)
+        #expect(got.count == 2 && got[0].hasSuffix(shot.file.split(separator: "/").last.map(String.init) ?? "?"))
+        #expect(got[1].hasSuffix("/Downloads/notes.txt") || got[1].contains("notes.txt"))
+        #expect(post(#"{"intent":"prompt","text":"","attach":[{"id":"\#(shot.id)"}]}"#) == 200)
+        #expect(post(#"{"intent":"prompt","text":"x","attach":[{"id":"nope"}]}"#) == 404)
+        #expect(post(#"{"intent":"prompt","text":"x","attach":[{"name":"missing.txt"}]}"#) == 404)
+        #expect(post(#"{"intent":"prompt","text":"x","attach":[{"name":"../x"}]}"#) == 404)   // sanitized to "x" inside Downloads: absent
+        let nine = Array(repeating: #"{"name":"notes.txt"}"#, count: 9).joined(separator: ",")
+        #expect(post(#"{"intent":"prompt","text":"x","attach":[\#(nine)]}"#) == 400)
+        #expect(post(#"{"intent":"prompt","text":"x","attach":[{"id":"a","name":"b"}]}"#) == 400)
+        #expect(post(#"{"intent":"prompt","text":"x","attach":[{}]}"#) == 400)
+        #expect(post(#"{"intent":"prompt","text":""}"#) == 400)
+        #expect(post(#"{"intent":"prompt","text":"hello"}"#) == 200)
+        #expect(be.log.attachments.last == [])
     }
 
     @Test func paneInputIntentMapping() {

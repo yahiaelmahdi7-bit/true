@@ -77,11 +77,12 @@ protocol RemoteBackend: Sendable {
     func snapshot(pane: UUID) -> (cols: Int, rows: Int, bytes: [UInt8])?
     func input(pane: UUID, bytes: [UInt8]) -> Bool
     /// One whole prompt (or control) through PaneDelivery. Returns the `PaneDelivery.Outcome` raw value, nil for an unknown pane.
-    func paneInput(pane: UUID, intent: PaneInputIntent, text: String) -> String?
+    /// `attachments` are resolved file paths, pasted ahead of the text.
+    func paneInput(pane: UUID, intent: PaneInputIntent, text: String, attachments: [String]) -> String?
 }
 
 extension RemoteBackend {
-    func paneInput(pane: UUID, intent: PaneInputIntent, text: String) -> String? { nil }
+    func paneInput(pane: UUID, intent: PaneInputIntent, text: String, attachments: [String]) -> String? { nil }
 }
 
 /// What the phone composer may ask for. Wire names are the raw values.

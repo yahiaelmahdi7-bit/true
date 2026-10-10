@@ -94,11 +94,18 @@ enum PaneDelivery {
         }
     }
 
+    /// Let the TUI absorb a paste (and draw its `[Image #N]` chip) before the next keystrokes.
+    private static let attachSettleNanos: UInt64 = 150_000_000
+
     // MARK: The protocol
 
     /// Deliver `text` to `paneID` under an explicit `intent`, calling back with what really
     /// happened. The callback fires exactly once.
-    static func write(_ text: String, intent: Intent, to paneID: UUID,
+    ///
+    /// `attachments` are file paths pasted first (bracketed, exactly like dropping a tray shot on the
+    /// terminal) so Claude Code turns them into `[Image #N]`, then the text follows. Only for
+    /// prompt / stage / control; ignored for submitOnly / answer.
+    static func write(_ text: String, intent: Intent, attachments: [String] = [], to paneID: UUID,
                       onOutcome: ((Outcome) -> Void)? = nil) {
         if case .answer(let approve) = intent {
             // Never wakes an asleep seat: a sleeping seat cannot be showing a dialog.
@@ -125,8 +132,20 @@ enum PaneDelivery {
             return
         }
 
+        let attach = !attachments.isEmpty && (intent == .stage || intent == .prompt || intent == .control)
+        if attach { typeBody(TerminalDrop.pasteText(forPaths: attachments), into: view) }
+
         switch intent {
         case .stage:
+            if attach, text.isEmpty { onOutcome?(.staged); return }
+            if attach {
+                Task {
+                    try? await Task.sleep(nanoseconds: attachSettleNanos)
+                    view.send(txt: text)
+                    onOutcome?(.staged)
+                }
+                return
+            }
             view.send(txt: text)
             onOutcome?(.staged)
 
@@ -141,13 +160,15 @@ enum PaneDelivery {
 
         case .prompt, .control:
             let body = flatten(text)
-            guard !body.isEmpty else { onOutcome?(.staged); return }
-            typeBody(body, into: view)
+            guard !body.isEmpty || attach else { onOutcome?(.staged); return }
             Task {
+                if attach { try? await Task.sleep(nanoseconds: attachSettleNanos) }
+                if !body.isEmpty { typeBody(body, into: view) }
                 await settle(paneID: paneID)
-                let outcome = await submitAndVerify(paneID: paneID, probe: probe(for: body),
-                                                    allowRetry: true)
-                onOutcome?(outcome)
+                // Attachment-only: nothing typed to probe for, so press Return and say so honestly.
+                let outcome = await submitAndVerify(paneID: paneID, probe: body.isEmpty ? "" : probe(for: body),
+                                                    allowRetry: !body.isEmpty)
+                onOutcome?(body.isEmpty && outcome != .landed && outcome != .noPane ? .unverified : outcome)
             }
         }
     }
