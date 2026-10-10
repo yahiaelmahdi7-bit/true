@@ -25,6 +25,12 @@ enum SharedConfig {
         set { defaults.set(Array(newValue), forKey: "notifiedIDs") }
     }
 
+    /// Rows that were working at the last snapshot; a row leaving this set for idle/done is a finished turn.
+    static var workingIDs: Set<String> {
+        get { Set(defaults.stringArray(forKey: "workingIDs") ?? []) }
+        set { defaults.set(Array(newValue), forKey: "workingIDs") }
+    }
+
     /// Newest screenshot already sent to the Mac; nil = auto screenshots never armed (or switched off).
     static var screenshotLastSynced: Date? {
         get { defaults.object(forKey: "screenshotLastSynced") as? Date }

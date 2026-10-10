@@ -308,3 +308,45 @@ private func session(_ t: StubTransport, token: String? = "tok", store: InMemory
         #expect(AttachmentPlan.withinCap(bytes: 200_000_000) && !AttachmentPlan.withinCap(bytes: 200_000_001))
     }
 }
+
+@Suite struct NeedsYouNotifierTests {
+    func row(_ id: String, _ key: String, pane: String? = "P", question: String? = nil, tool: String? = nil, detail: String? = nil) -> HubRow {
+        HubRow(kind: "seat", id: id, name: id, status: key == "idle" ? "Idle" : "x", statusKey: key, pane: pane,
+               question: question, tool: tool, detail: detail)
+    }
+    func snap(_ rows: [HubRow]) -> HubSnapshot {
+        let json = try! JSONEncoder().encode(rows)
+        let data = Data(#"{"projects":[{"title":"p","rows":"#.utf8) + json + Data("}]}".utf8)
+        return try! JSONDecoder().decode(HubSnapshot.self, from: data)
+    }
+
+    @Test func planFiresNewAndClearsResolved() {
+        let s = snap([row("a", "needsYou"), row("b", "needsYou"), row("c", "working")])
+        let p = NeedsYouNotifier.plan(old: ["b", "gone"], new: s)
+        #expect(p.fire.map(\.id) == ["a"])
+        #expect(p.clear == ["gone"])
+        #expect(NeedsYouNotifier.plan(old: s.needsYouIDs, new: s).fire.isEmpty)
+    }
+
+    @Test func doneFiresOnceOnWorkingToIdle() {
+        let before = snap([row("a", "working"), row("b", "working"), row("c", "working"), row("d", "working", pane: nil)])
+        let after = snap([row("a", "idle"), row("b", "needsYou"), row("c", "failed"), row("d", "idle", pane: nil)])
+        let oldWorking = NeedsYouNotifier.workingIDs(before)
+        #expect(NeedsYouNotifier.donePlan(oldWorking: oldWorking, new: after).map(\.id) == ["a"])
+        #expect(NeedsYouNotifier.donePlan(oldWorking: NeedsYouNotifier.workingIDs(after), new: after).isEmpty)
+    }
+
+    @Test func bodyUsesQuestionThenToolDetail() {
+        #expect(NeedsYouNotifier.body(for: row("a", "needsYou", question: "Run it?", tool: "Bash", detail: "ls")) == "Run it?\nBash: ls")
+        #expect(NeedsYouNotifier.body(for: row("a", "needsYou", question: "Run it?")) == "Run it?")
+        #expect(NeedsYouNotifier.body(for: row("a", "needsYou")) == "Tap to open")
+    }
+
+    @Test func answersMapToIntentsAndTrimReplies() {
+        #expect(LockScreenAnswer.approve.intent == .approve && LockScreenAnswer.deny.intent == .deny)
+        #expect(LockScreenAnswer.reply(trimming: "  hi \n") == .reply("hi"))
+        #expect(LockScreenAnswer.reply(trimming: "  \n") == nil)
+        #expect(LockScreenAnswer.followUp(for: .promptGone) == "That prompt is gone")
+        #expect(LockScreenAnswer.followUp(for: .landed) == nil)
+    }
+}

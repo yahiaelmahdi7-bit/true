@@ -4,7 +4,7 @@
 <key>AppIdentifierPrefix</key><string>$(AppIdentifierPrefix)</string>
 <key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
 <key>BGTaskSchedulerPermittedIdentifiers</key><array><string>net.prismlens.true.refresh</string></array>
-<key>UIBackgroundModes</key><array><string>fetch</string></array>
+<key>UIBackgroundModes</key><array><string>fetch</string><string>audio</string></array>
 <key>NSPhotoLibraryAddUsageDescription</key><string>Save screenshots from your Mac to Photos.</string>
 <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>true</string></array></dict></array>
 </dict></plist>

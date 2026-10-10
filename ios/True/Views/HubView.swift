@@ -47,6 +47,14 @@ struct HubView: View {
                             .padding(.horizontal, 10).padding(.vertical, 4).glassEffect(.regular, in: .capsule)
                     }
                 }
+                if DutyKeepAlive.shared.active && model.failCount == 0 {
+                    ToolbarItem(placement: .principal) {
+                        Label("On duty", systemImage: "dot.radiowaves.left.and.right").font(.caption.weight(.medium))
+                            .foregroundStyle(.attention)
+                            .padding(.horizontal, 10).padding(.vertical, 4).glassEffect(.regular, in: .capsule)
+                            .accessibilityLabel("On duty, True stays awake for your lock screen")
+                    }
+                }
                 StartWorkButton()
             }
             .sheet(item: $builder) { BuilderSheet(row: $0) }

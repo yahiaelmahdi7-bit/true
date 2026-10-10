@@ -132,6 +132,7 @@ final class AppModel {
                     guard let self else { return }
                     if HubPoller.needsYouRose(from: last, to: snap) { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
                     last = snap; backoff = nil
+                    await Notifications.process(snap)
                     self.hub = snap; self.failCount = 0
                     try await Task.sleep(for: .seconds(10))
                 } catch RemoteError.unauthorized {

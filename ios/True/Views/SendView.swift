@@ -38,6 +38,7 @@ struct SendView: View {
     @State private var sent = 0
     @AppStorage("autoClipboard") private var autoClipboard = true
     @AppStorage("autoScreenshots") private var autoScreenshots = false
+    @AppStorage("onDuty") private var onDuty = false
 
     /// The Mac's shared clipboard item, else the newest text item.
     private var macClip: InboxItem? {
@@ -91,6 +92,11 @@ struct SendView: View {
                     Text("While True is open, screenshots you take on this phone go straight to your Mac's screenshot tray.")
                 }
                 Section {
+                    Toggle("Stay on duty", isOn: $onDuty).tint(.accentColor)
+                } header: { Text("Lock screen") } footer: {
+                    Text("True stays awake in the background so a pane that needs you reaches your lock screen within seconds. Uses some battery.")
+                }
+                Section {
                     ForEach((inbox ?? []).filter { $0.id != macClip?.id }) { item in
                         TileRow(symbol: symbol(item), title: item.kind == "text" ? "Clipboard" : item.name,
                                 detail: item.preview ?? ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file)) {
@@ -122,6 +128,7 @@ struct SendView: View {
             }
             .navigationTitle("Send")
             .toolbar { StartWorkButton() }
+            .onChange(of: onDuty) { _, on in if on { Background.requestAuthorization() } }
             .refreshable { await load() }
             .task { await load() }
             .sensoryFeedback(.success, trigger: sent)
