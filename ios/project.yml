@@ -23,9 +23,13 @@ targets:
       - path: "True"
         excludes: ["Info*.plist"]
       - path: ../Sources/TrueRemoteClient
+      - ../Sources/TrueActivity/PaneActivityAttributes.swift
+      - TrueActivity/PaneIntents.swift
     dependencies:
       - package: SwiftTerm
       - target: TrueShare
+        embed: true
+      - target: TrueActivity
         embed: true
     settings:
       base:
@@ -62,6 +66,23 @@ targets:
         SKIP_INSTALL: YES
         TARGETED_DEVICE_FAMILY: "1"
     # shares KeychainTokenStore + SharedConfig with the app
+  TrueActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - TrueActivity
+      - path: ../Sources/TrueRemoteClient
+      - ../Sources/TrueActivity/PaneActivityAttributes.swift
+      - True/Services/KeychainTokenStore.swift
+      - True/Services/SharedConfig.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.prismlens.true.activity
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: TrueActivity/Info.plist
+        INFOPLIST_KEY_CFBundleDisplayName: True
+        SKIP_INSTALL: YES
+        TARGETED_DEVICE_FAMILY: "1"
   TrueUITests:
     type: bundle.ui-testing
     platform: iOS
