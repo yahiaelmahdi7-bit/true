@@ -148,11 +148,11 @@ enum Inbox {
     }
 }
 
-/// `~/.true/agents/<name>/inbox.jsonl` — append-only, dir 0700, files 0600, compacted over 5 MB.
+/// `~/.true/agents/<name>/inbox.jsonl` — append-only, dir 0700, files 0600, compacted over 1 MB.
 struct InboxFile {
     let dir: URL
     var url: URL { dir.appendingPathComponent("inbox.jsonl") }
-    static let compactBytes = 5 * 1024 * 1024
+    static let compactBytes = 1024 * 1024
 
     static func home(agent: String, root: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".true/agents")) -> URL {
         root.appendingPathComponent(agent)

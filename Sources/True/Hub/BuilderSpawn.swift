@@ -92,6 +92,7 @@ enum BuilderSpawn {
     /// a wedged launch; the wait happens off the main actor.
     static let systemRunner: Runner = { argv in
         await Task.detached(priority: .utility) {
+            OffMain.assertOffMain()
             let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("true-spawn-\(UUID().uuidString).log")
             FileManager.default.createFile(atPath: tmp.path, contents: nil)
             defer { try? FileManager.default.removeItem(at: tmp) }

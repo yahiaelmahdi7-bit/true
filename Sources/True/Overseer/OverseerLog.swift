@@ -2,10 +2,10 @@ import Foundation
 import os
 
 /// `~/.true/overseer/verdicts.jsonl`: one line per judgment, the calibration set for the thresholds (and for
-/// Run 13). Directory 0700, file 0600, state already redacted. Over 5 MB the file becomes `verdicts.1.jsonl`
-/// (one old file kept). Plain file IO on the caller's thread; the store calls it off the main actor.
+/// Run 13). Directory 0700, file 0600, state already redacted. Over 1 MB the file rotates to `verdicts.jsonl.1`
+/// (two old files kept). Plain file IO on the caller's thread; the store calls it off the main actor.
 struct OverseerLog: Sendable {
-    static let maxBytes = 5 << 20
+    static let maxBytes = 1 << 20
     static let logger = Logger(subsystem: "net.prismlens.true", category: "overseer")
     static let standard = OverseerLog(dir: URL(fileURLWithPath: NSHomeDirectory() + "/.true/overseer"))
 
@@ -50,22 +50,11 @@ struct OverseerLog: Sendable {
         Self.logger.info("\(Self.line(r), privacy: .public)")
         let fm = FileManager.default
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        chmod(dir.path, 0o700)
         let obj = Self.json(r)
         guard JSONSerialization.isValidJSONObject(obj),
               var data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) else { return }
         data.append(10)
-        if let size = (try? fm.attributesOfItem(atPath: file.path))?[.size] as? Int, size > Self.maxBytes {
-            try? fm.removeItem(at: rotated)
-            try? fm.moveItem(at: file, to: rotated)
-        }
-        if !fm.fileExists(atPath: file.path) {
-            fm.createFile(atPath: file.path, contents: nil, attributes: [.posixPermissions: 0o600])
-        }
-        chmod(file.path, 0o600)
-        guard let h = try? FileHandle(forWritingTo: file) else { return }
-        defer { try? h.close() }
-        _ = try? h.seekToEnd()
-        try? h.write(contentsOf: data)
+        chmod(dir.path, 0o700)
+        JSONLog.append(data, to: file, maxBytes: Self.maxBytes, keep: 2)
     }
 }

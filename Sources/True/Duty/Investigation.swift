@@ -157,6 +157,7 @@ enum Investigation {
     /// The real runner: /usr/bin/env, stdin from a pipe, output to a temp file, a hard wall-clock guard.
     static let systemRunner: Runner = { argv, cwd, stdin, env in
         await Task.detached(priority: .utility) {
+            OffMain.assertOffMain()
             let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("true-watch-\(UUID().uuidString).out")
             FileManager.default.createFile(atPath: tmp.path, contents: nil)
             defer { try? FileManager.default.removeItem(at: tmp) }

@@ -51,8 +51,11 @@ final class WatcherStore {
         file = InboxFile(dir: InboxFile.home(agent: Duty.watcherName, root: deps.root))
         file.ensureDir()
         _ = file.compactIfNeeded(now: deps.now().timeIntervalSince1970)
-        items = file.items()
+        events = file.events()
+        items = Inbox.fold(events)
     }
+    /// The folded log lives in memory; `emit` appends one line and folds, it never re-reads the file.
+    private var events: [InboxEvent] = []
 
     var enabled: Bool { d.enabled() }
     private var now: Double { d.now().timeIntervalSince1970 }
@@ -62,7 +65,9 @@ final class WatcherStore {
 
     private func emit(_ e: InboxEvent) {
         file.append(e)
-        items = Inbox.fold(file.events())
+        events.append(e)
+        if file.compactIfNeeded(now: now) { events = file.events() }
+        items = Inbox.fold(events)
     }
 
     // MARK: logs + ledger
@@ -71,9 +76,20 @@ final class WatcherStore {
         guard let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]),
               let s = String(data: data, encoding: .utf8) else { return }
         let u = home.appendingPathComponent(name)
-        let line = Data((s + "\n").utf8)
-        if let h = try? FileHandle(forWritingTo: u) { defer { try? h.close() }; _ = try? h.seekToEnd(); try? h.write(contentsOf: line) }
-        else { try? line.write(to: u); try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: u.path) }
+        // Only the diagnostic logs rotate; ledger/lessons/state are read back for budgets and mutes.
+        let cap = Self.rotating.contains(name) ? Self.logCap : Int.max
+        JSONLog.append(Data((s + "\n").utf8), to: u, maxBytes: cap, keep: 2)
+        if name == "ledger.jsonl", var t = todayCache, t.day == (obj["day"] as? String) { Self.accumulate(&t.total, obj); todayCache = t }
+        if name == "lessons.jsonl" { lessonsCache = nil }
+    }
+    static let rotating: Set<String> = ["decisions.jsonl", "wake.jsonl"]
+    static let logCap = 1 << 20
+    private var todayCache: (day: String, total: Today)?
+    private var lessonsCache: [[String: Any]]?
+    /// Lessons change only through `appendLine`, so one read serves every `isMuted` until then.
+    private func lessons() -> [[String: Any]] {
+        if let c = lessonsCache { return c }
+        let l = readLines("lessons.jsonl"); lessonsCache = l; return l
     }
 
     private func readLines(_ name: String) -> [[String: Any]] {
@@ -91,17 +107,21 @@ final class WatcherStore {
     /// Today's spend, local day; a new day starts at zero by construction.
     func today() -> Today {
         let key = Self.day(d.now())
+        if let c = todayCache, c.day == key { return c.total }
         var t = Today()
-        for l in readLines("ledger.jsonl") where (l["day"] as? String) == key {
-            t.usd += (l["usd"] as? Double) ?? 0
-            t.runs += (l["runs"] as? Int) ?? 0
-            t.jev += (l["jev"] as? Int) ?? 0
-            t.fix += (l["fix"] as? Double) ?? 0
-            t.tokens += (l["tokens"] as? Int) ?? 0
-            t.peakContext = max(t.peakContext, (l["tokens"] as? Int) ?? 0)
-            if let r = l["repo"] as? String, ((l["runs"] as? Int) ?? 0) > 0 { t.perRepo[r, default: 0] += 1 }
-        }
+        for l in readLines("ledger.jsonl") where (l["day"] as? String) == key { Self.accumulate(&t, l) }
+        todayCache = (key, t)
         return t
+    }
+
+    private static func accumulate(_ t: inout Today, _ l: [String: Any]) {
+        t.usd += (l["usd"] as? Double) ?? 0
+        t.runs += (l["runs"] as? Int) ?? 0
+        t.jev += (l["jev"] as? Int) ?? 0
+        t.fix += (l["fix"] as? Double) ?? 0
+        t.tokens += (l["tokens"] as? Int) ?? 0
+        t.peakContext = max(t.peakContext, (l["tokens"] as? Int) ?? 0)
+        if let r = l["repo"] as? String, ((l["runs"] as? Int) ?? 0) > 0 { t.perRepo[r, default: 0] += 1 }
     }
 
     /// `fix` (the approved builder's ceiling) is kept apart from `usd`, so it never eats the investigation budget.
@@ -198,10 +218,16 @@ final class WatcherStore {
     }
 
     /// Code, not the model, gathers the git facts (spec §3 step 4).
-    private func gatherGitFacts(repo: String) -> String {
+    /// Every `git` call goes through here: the process runs and is waited on off the main actor.
+    private func git(_ argv: [String]) async -> String? {
+        let g = d.git
+        return await Task.detached(priority: .utility) { g(argv) }.value
+    }
+
+    private func gatherGitFacts(repo: String) async -> String {
         guard !repo.isEmpty else { return "" }
-        let log = d.git(["git", "-C", repo, "log", "--oneline", "-5"]) ?? ""
-        let st = d.git(["git", "-C", repo, "status", "--short", "-b"]) ?? ""
+        let log = await git(["git", "-C", repo, "log", "--oneline", "-5"]) ?? ""
+        let st = await git(["git", "-C", repo, "status", "--short", "-b"]) ?? ""
         return [log.isEmpty ? "" : "log:\n" + log, st.isEmpty ? "" : "status:\n" + st].filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
@@ -223,7 +249,7 @@ final class WatcherStore {
             HubStoreBuilders.dir(bid) }
         let sig = WatcherSignal(source: item.source, kind: item.kind, subject: item.subject, repo: item.repo, facts: [:],
                                 evidence: item.evidence, codeFact: false, title: item.title)
-        let gitFacts = gatherGitFacts(repo: item.repo)
+        let gitFacts = await gatherGitFacts(repo: item.repo)
         if !FileManager.default.fileExists(atPath: Investigation.hookPath) {
             burnHookMissing = true; decision("burn-hook-missing", ["item": id])
         } else { burnHookMissing = false }
@@ -334,7 +360,7 @@ final class WatcherStore {
     }
 
     private func isMuted(_ s: WatcherSignal) -> Bool {
-        readLines("lessons.jsonl").contains {
+        lessons().contains {
             ($0["source"] as? String) == s.source && ($0["kind"] as? String) == s.kind && ($0["repo"] as? String) == s.repo
                 && (($0["muteUntil"] as? Double) ?? 0) > now
         }
@@ -343,7 +369,7 @@ final class WatcherStore {
     // MARK: memory.md (≤ 60 lines, newest first, hand-editable Preferences)
 
     var hubChannel: HubChannel? { channel as? HubChannel }
-    var memoryLessonCount: Int { readLines("lessons.jsonl").count }
+    var memoryLessonCount: Int { lessons().count }
 
     func memory() -> String { (try? String(contentsOf: home.appendingPathComponent("memory.md"), encoding: .utf8)) ?? "" }
 
@@ -367,11 +393,16 @@ final class WatcherStore {
     // MARK: events from the app
 
     /// Called on WorkAwake's existing tick and on builder changes: scan builders, handle new signals, run done checks.
-    func checkStuck() {
-        guard enabled else { return }
-        let builders = HubStore.shared.builders
-        Task { @MainActor in await self.scan(builders: builders); await self.checkDone(builders: builders); await self.gitSweep(builders); self.digestIfDue() }
+    func checkStuck(builders given: [BuilderRecord]? = nil) {
+        guard enabled, checkTask == nil else { return }       // a check is still running: skip this tick
+        let builders = given ?? HubStore.shared.builders
+        checkTask = Task { @MainActor in
+            defer { self.checkTask = nil }
+            await self.scan(builders: builders); await self.checkDone(builders: builders); await self.gitSweep(builders); self.digestIfDue()
+        }
     }
+    /// The check in flight (tests await it).
+    private(set) var checkTask: Task<Void, Never>?
 
     func scan(builders: [BuilderRecord]) async {
         let handled = Set(items.map(\.fingerprint))
@@ -397,7 +428,9 @@ final class WatcherStore {
     }
 
     func scanGit(repo: String, builders: [BuilderRecord]) async {
-        for s in GitSignals.check(repo: repo, builders: builders, now: now, run: d.git) { await handle(s) }
+        let g = d.git, t = now
+        let sigs = await Task.detached(priority: .utility) { GitSignals.check(repo: repo, builders: builders, now: t, run: g) }.value
+        for s in sigs { await handle(s) }
     }
 
     func abandoned(pane: UUID, verdict: OverseerVerdict) {
@@ -425,9 +458,9 @@ final class WatcherStore {
         for item in items where (item.state == .open || item.state == .approved) && !item.lookedFixed {
             if item.source == "git" {
                 let parts = item.subject.split(separator: "@", maxSplits: 1).map(String.init)
-                guard parts.count == 2, let up = GitSignals.parseBranches(d.git(GitSignals.branchesArgv(repo: item.repo)) ?? "")
+                guard parts.count == 2, let up = GitSignals.parseBranches(await git(GitSignals.branchesArgv(repo: item.repo)) ?? "")
                         .first(where: { $0.branch == parts[1] })?.upstream else { continue }
-                if GitSignals.parseAhead(d.git(GitSignals.aheadArgv(repo: item.repo, upstream: up, branch: parts[1])) ?? "").isEmpty {
+                if GitSignals.parseAhead(await git(GitSignals.aheadArgv(repo: item.repo, upstream: up, branch: parts[1])) ?? "").isEmpty {
                     emit(InboxEvent(.resolved, id: item.id, at: now, reason: "Pushed")); decision("done-code", ["item": item.id])
                 }
             } else if item.state == .approved, let bid = item.builderID, let fb = builders.first(where: { $0.id == bid }), fb.state == .done {

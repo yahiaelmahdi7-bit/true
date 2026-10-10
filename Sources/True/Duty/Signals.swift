@@ -99,6 +99,7 @@ enum GitSignals {
 
     /// Off-main, 5 s timeout per call. nil on any failure.
     static let systemRunner: @Sendable ([String]) -> String? = { argv in
+        OffMain.assertOffMain()
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         p.arguments = argv
