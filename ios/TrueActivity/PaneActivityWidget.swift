@@ -23,7 +23,8 @@ struct PaneActivityWidget: Widget {
                 buttons(ctx)
             }
             .padding(16)
-            .widgetURL(URL(string: "true://pane/\(ctx.attributes.paneId)"))
+            // Tapping anywhere on the card lands in the pane with the composer up: the lock screen cannot take text itself.
+            .widgetURL(URL(string: "true://pane/\(ctx.attributes.paneId)?compose=1"))
             .activityBackgroundTint(Color.black.opacity(0.35))
         } dynamicIsland: { ctx in
             DynamicIsland {

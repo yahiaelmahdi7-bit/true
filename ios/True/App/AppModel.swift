@@ -130,6 +130,7 @@ final class AppModel {
             var lastBackground: Bool?
             while !Task.isCancelled {
                 let gap = Date().timeIntervalSince(lastTick)
+                lastTick = Date()   // measured loop-to-loop; a defer after the sleep always read ~0
                 let bg = UIApplication.shared.applicationState == .background
                 let duty = DutyKeepAlive.shared
                 let fails = self?.failCount ?? 0
@@ -142,7 +143,6 @@ final class AppModel {
                     await session.setDutyHeader(nil)
                     lastBackground = nil
                 }
-                defer { lastTick = Date() }
                 do {
                     let snap = try await session.hub()
                     guard let self else { return }
