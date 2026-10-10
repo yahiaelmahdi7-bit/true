@@ -51,6 +51,26 @@ Colour: system semantic colours plus one asset colour `Attention` (amber) for Ne
 - **Clipboard sharing.** Mac: toggle "Share my Mac's copies with paired phones" in Remote Access (default off). It pushes one replaceable inbox item (`source`, `created`); there is no clipboard read route.
   Phone: Send tab top section shows that item with Copy, "Send phone clipboard" is one tap, and "Copy Mac clipboard automatically" (default on) applies the newest Mac copy when True opens.
 
+## Nearby pairing over Bluetooth (run 30)
+
+The Mac (Remote Access on + "Show pairing card when a phone is nearby", default on) advertises a Bluetooth service.
+When the Pair screen is open, the phone scans for it, and if the Mac is within about the same room (RSSI >= -70 dBm)
+it reads the Mac's address and writes a hello (`<phone name>|<install id>`). The Mac then pops the pairing QR card
+top-right. Bluetooth carries discovery and the address only, never the code: pairing is still the HTTPS call with the
+6-digit code, so scanning or typing it remains the proof you are in front of the Mac.
+
+- Phone: `NearbyScanner.swift` (`NearbyScanning` protocol, `CoreBluetoothScanner`, `FakeNearbyScanner`). Scanning starts
+  when PairView appears and the app is active, stops when it disappears, backgrounds, or pairing succeeds. The Bluetooth
+  prompt appears only then, not at launch. The simulator has no Bluetooth, so it never creates a real scanner.
+- Mac: `NearbyAdvertiser.swift`, `NearbyPairCard.swift`. Anti-spam: one card per phone id per 5 minutes, and at least
+  5 seconds between any two cards. Card auto-hides after 60 s; on pairing it flips to "Paired" and a notify tells the phone.
+- Screenshots: `-uiState pair-nearby` (fake Mac in range) and `pair-nearby-bt-off` (Bluetooth line); `.out/run30/`.
+
+Hardware checklist (real iPhone + Mac): 1) Mac: Remote Access on, card toggle on; accept the Bluetooth prompt.
+2) iPhone: open True unpaired; accept the Bluetooth prompt when the Pair screen appears. 3) Within the room the card
+appears on the Mac and the phone shows "<Mac> is nearby". 4) Scan the Mac QR from the phone; both flip to paired.
+5) Walk to another room: no card. 6) Repeat quickly: no second card for 5 min. 7) Bluetooth off: the phone shows the hint line.
+
 ## Not done / needs a device
 Background refresh cadence, Keychain access-group sharing and the Share Extension need a signed device build to verify.
 Screenshot Delete (Shots context menu) is absent: the client has no delete-shot call.
