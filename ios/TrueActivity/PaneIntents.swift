@@ -33,7 +33,13 @@ enum PaneActivityAnswer {
         let session = RemoteSession(baseURL: url, store: KeychainTokenStore())
         do {
             let outcome = try await session.paneInput(id: pane, intent: answer.intent, text: answer.text)
-            if LockScreenAnswer.followUp(for: outcome) != nil { _ = await setStatus(before, pane: pane) }
+            switch outcome {
+            case .promptGone, .noPane:
+                // Nothing left to answer on the Mac: say so instead of offering Approve again.
+                _ = await setStatus("gone", pane: pane)
+            default:
+                if LockScreenAnswer.followUp(for: outcome) != nil { _ = await setStatus(before, pane: pane) }
+            }
         } catch { _ = await setStatus(before, pane: pane) }
     }
 
