@@ -340,6 +340,13 @@ private func tempFile() -> URL {
         func tabsJSON() -> Data { Data(#"{"tabs":[]}"#.utf8) }
         func snapshot(pane: UUID) -> (cols: Int, rows: Int, bytes: [UInt8])? { pane == self.pane ? (80, 24, [0x41]) : nil }
         func input(pane: UUID, bytes: [UInt8]) -> Bool { true }
+        final class Log: @unchecked Sendable { var calls: [(PaneInputIntent, String)] = [] }
+        let log = Log()
+        func paneInput(pane: UUID, intent: PaneInputIntent, text: String) -> String? {
+            guard pane == self.pane else { return nil }
+            log.calls.append((intent, text))
+            return intent == .approve ? PaneDelivery.Outcome.promptGone.wire : PaneDelivery.Outcome.landed.wire
+        }
     }
     static let dns = "mac.test.ts.net"
     static let origin = "https://\(dns):8444"
@@ -383,6 +390,39 @@ private func tempFile() -> URL {
         let parts = text.components(separatedBy: "\r\n\r\n")
         let status = Int(parts[0].split(separator: " ").dropFirst().first ?? "") ?? 0
         return (status, parts[0], parts.dropFirst().joined(separator: "\r\n\r\n"))
+    }
+
+    @Test func paneInputMapsIntentsAndPaths() throws {
+        try withServer(port: 18871) { _, _, devices, be in
+            let tok = devices.pair(label: "t")
+            func post(_ id: String, _ body: String) -> (status: Int, head: String, body: String) {
+                http(18871, "POST", "/api/pane/\(id)/input", origin: Self.origin, bearer: tok, body: body)
+            }
+            let id = be.pane.uuidString
+            let r = post(id, #"{"intent":"prompt","text":"hello there"}"#)
+            #expect(r.status == 200 && r.body.contains(#""outcome":"landed""#))
+            #expect(post(id, #"{"intent":"approve"}"#).body.contains("promptGone"))
+            #expect(post(id, #"{"intent":"submitOnly"}"#).status == 200)
+            for n in ["stage", "control", "deny"] { #expect(post(id, #"{"intent":"\#(n)","text":"x"}"#).status == 200) }
+            #expect(be.log.calls.map(\.0) == [.prompt, .approve, .submitOnly, .stage, .control, .deny])
+            #expect(be.log.calls[0].1 == "hello there")
+            #expect(post(UUID().uuidString, #"{"intent":"prompt","text":"x"}"#).status == 404)
+            #expect(post("not-a-uuid", #"{"intent":"prompt","text":"x"}"#).status == 404)
+            #expect(post(id, #"{"intent":"nuke","text":"x"}"#).status == 400)
+            #expect(post(id, "garbage").status == 400)
+            #expect(post(id, #"{"intent":"prompt","text":"  "}"#).status == 400)
+            let big = String(repeating: "a", count: 5000)           // past the 4 KB buffered cap, still one request
+            #expect(post(id, #"{"intent":"prompt","text":"\#(big)"}"#).status == 200)
+            #expect(http(18871, "POST", "/api/pane/\(id)/input", origin: Self.origin, body: #"{"intent":"prompt","text":"x"}"#).status == 401)
+        }
+    }
+
+    @Test func paneInputIntentMapping() {
+        #expect(PaneInputIntent.prompt.deliveryIntent == .prompt)
+        #expect(PaneInputIntent.approve.deliveryIntent == .answer(approve: true))
+        #expect(PaneInputIntent.deny.deliveryIntent == .answer(approve: false))
+        #expect(PaneInputIntent.submitOnly.deliveryIntent == .submitOnly)
+        #expect(PaneInputIntent.allCases.count == 6)
     }
 
     @Test func pairReturnsTokenInBodyAndNeverSetsCookie() throws {
