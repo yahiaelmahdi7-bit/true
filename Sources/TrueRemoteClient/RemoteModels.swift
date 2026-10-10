@@ -261,6 +261,28 @@ public enum InputOutcome: Equatable, Sendable {
     }
 }
 
+/// What the phone should do with an outcome. Pure, so the doctrine is testable off-device.
+public enum ComposerReaction: Equatable, Sendable {
+    case nothing
+    case toast(String)
+    /// Put the text back in the field and say why.
+    case restore(toast: String)
+    case popPane(toast: String)
+}
+
+extension InputOutcome {
+    public func reaction(for intent: PaneInputIntent) -> ComposerReaction {
+        switch self {
+        case .landed, .staged: return .nothing
+        case .unverified: return intent == .prompt ? .toast("Sent") : .nothing
+        case .stuckInComposer: return .restore(toast: "Didn't go through — try again or use Keys")
+        case .noPane: return .popPane(toast: "Pane is gone")
+        case .promptGone: return .toast("No prompt on screen")
+        case .unknown: return intent == .prompt ? .toast("Sent") : .nothing
+        }
+    }
+}
+
 /// What the composer may ask a pane to do; raw values are the wire names.
 public enum PaneInputIntent: String, Sendable, CaseIterable {
     case prompt, stage, control, submitOnly, approve, deny

@@ -7,9 +7,34 @@ struct PaneView: View {
     let route: PaneRoute
     @State private var controller = PaneController()
     @State private var keyboardUp = false
+    @State private var composer = PaneComposer()
+    @FocusState private var fieldFocused: Bool
 
     private var row: HubRow? { model.hub?.projects.flatMap(\.rows).first { $0.pane == route.id } }
     private var asleep: Bool { row?.statusKey == "asleep" }
+
+    // MARK: Composer
+    private var isClaude: Bool { composer.claude ?? (row != nil) }
+    /// Claude panes default to Compose, shells to Keys; a choice the user made sticks for the pane.
+    private var keysMode: Bool { model.paneKeysMode[route.id] ?? !isClaude }
+    private var draftBinding: Binding<String> {
+        Binding(get: { model.paneDrafts[route.id] ?? "" }, set: { model.paneDrafts[route.id] = $0 })
+    }
+
+    private func setKeys(_ keys: Bool) {
+        model.paneKeysMode[route.id] = keys
+        if keys { fieldFocused = false; _ = controller.terminal.becomeFirstResponder() }
+        else { _ = controller.terminal.resignFirstResponder() }
+    }
+
+    private func loadClaudeFlag() async {
+        guard let tabs = try? await model.session?.tabs() else { return }
+        composer.claude = tabs.tabs.flatMap(\.panes).first { $0.id.caseInsensitiveCompare(route.id) == .orderedSame }?.claude
+    }
+
+    private func send(_ intent: PaneInputIntent) {
+        composer.send(intent, paneId: route.id, draft: draftBinding, model: model) { dismiss() }
+    }
 
     var body: some View {
         TerminalRepresentable(controller: controller)
@@ -41,15 +66,26 @@ struct PaneView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                if !keyboardUp {
-                    Button { _ = controller.terminal.becomeFirstResponder() } label: { Label("Show keyboard", systemImage: "keyboard").labelStyle(.iconOnly).frame(width: 44, height: 44) }
-                        .buttonStyle(.glass).buttonBorderShape(.circle)
-                        .frame(maxWidth: .infinity, alignment: .trailing).padding(.horizontal)
+                if keysMode {
+                    HStack {
+                        Button { setKeys(false) } label: { Label("Compose a prompt", systemImage: "keyboard.chevron.compact.down").labelStyle(.iconOnly).frame(width: 44, height: 44) }
+                            .buttonStyle(.glass).buttonBorderShape(.circle)
+                        Spacer()
+                        if !keyboardUp {
+                            Button { _ = controller.terminal.becomeFirstResponder() } label: { Label("Show keyboard", systemImage: "keyboard").labelStyle(.iconOnly).frame(width: 44, height: 44) }
+                                .buttonStyle(.glass).buttonBorderShape(.circle)
+                        }
+                    }.padding(.horizontal)
+                } else {
+                    ComposerBar(draft: draftBinding, composer: composer, isClaude: isClaude, focused: $fieldFocused,
+                                onKeys: { setKeys(true) }, onSend: { send(.prompt) },
+                                onKey: { controller.sendKey($0) }, onIntent: { send($0) })
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
             .onAppear { controller.onCopied = { model.show("Copied") } }
+            .task { await loadClaudeFlag() }
             .task { await controller.run(model: model, paneId: route.id) { dismiss() } }
             .onDisappear { Task { await controller.stop() } }
     }
@@ -165,6 +201,9 @@ final class PaneController: NSObject, TerminalViewDelegate {
         UIPasteboard.general.string = text
         onCopied?()
     }
+
+    /// Raw keys from the SwiftUI key row (same bytes as the UIKit accessory row).
+    func sendKey(_ bytes: [UInt8]) { send(bytes) }
 
     private func send(_ bytes: [UInt8]) {
         guard let socket else { return }

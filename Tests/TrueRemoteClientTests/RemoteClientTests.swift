@@ -215,3 +215,15 @@ private func session(_ t: StubTransport, token: String? = "tok", store: InMemory
         #expect(new.claude)
     }
 }
+
+@Suite struct ComposerReactionTests {
+    @Test func outcomesMapToPhoneBehaviour() {
+        #expect(InputOutcome.landed.reaction(for: .prompt) == .nothing)
+        #expect(InputOutcome.unverified.reaction(for: .prompt) == .toast("Sent"))
+        #expect(InputOutcome.unverified.reaction(for: .submitOnly) == .nothing)
+        #expect(InputOutcome.stuckInComposer.reaction(for: .prompt) == .restore(toast: "Didn't go through — try again or use Keys"))
+        #expect(InputOutcome.noPane.reaction(for: .prompt) == .popPane(toast: "Pane is gone"))
+        #expect(InputOutcome.promptGone.reaction(for: .approve) == .toast("No prompt on screen"))
+        #expect(InputOutcome.unknown("x").reaction(for: .prompt) == .toast("Sent"))
+    }
+}
