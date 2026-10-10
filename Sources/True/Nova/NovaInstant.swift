@@ -170,11 +170,11 @@ enum NovaInstant {
 
         func target(_ q: [String]) -> String { q.filter { $0 != "the" }.joined(separator: " ") }
         if let first = core.first, ["quit", "exit"].contains(first), core.count > 1 {
-            if let h = apps.resolve(target(Array(core.dropFirst()))) { return .act(.quitApp(h.name), ambiguous: h.ambiguous) }
+            if let h = apps.resolve(target(Array(core.dropFirst()))), !NovaGate.isOwnApp(name: h.name) { return .act(.quitApp(h.name), ambiguous: h.ambiguous) }
             return .none
         }
         if core.first == "hide", core.count > 1 {
-            if let h = apps.resolve(target(Array(core.dropFirst()))) { return .act(.hideApp(h.name), ambiguous: h.ambiguous) }
+            if let h = apps.resolve(target(Array(core.dropFirst()))), !NovaGate.isOwnApp(name: h.name) { return .act(.hideApp(h.name), ambiguous: h.ambiguous) }
             return .none
         }
         if core.first == "focus", core.count > 1 {

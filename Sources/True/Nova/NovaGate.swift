@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// The GATE: deterministic code in front of every hand, whatever the model wants. Fixed word lists are RULES, not
@@ -12,41 +13,35 @@ enum GateVerdict: Equatable {
 enum NovaGate {
     static let parkSeconds: TimeInterval = 30
 
-    /// Read-only commands that run without asking. `git` is further limited to read subcommands.
-    static let shellAllow: Set<String> = ["ls", "cat", "head", "tail", "grep", "rg", "find", "pwd", "which", "wc", "du", "df",
-                                          "ps", "echo", "date", "whoami", "uname", "file", "stat", "sort", "uniq", "tree"]
-    static let gitRead: Set<String> = ["status", "log", "diff", "branch", "show", "remote", "rev-parse"]
-    private static let shellMeta = CharacterSet(charactersIn: ";&><`\n\\")
+    /// Where a tool call comes from. `.local` = the user's own words matched by the instant lane / reflex tables.
+    enum Origin { case model, local }
+    /// The app Nova lives in: it may never quit, hide or terminate it.
+    static let ownBundleIDs: Set<String> = ["net.prismlens.true"].union(Bundle.main.bundleIdentifier.map { [$0] } ?? [])
+    static func isOwnApp(name: String) -> Bool {
+        let n = name.lowercased().trimmingCharacters(in: .whitespaces)
+        var own: Set<String> = ["true", "true app", "true.app"]
+        if let b = Bundle.main.infoDictionary?["CFBundleName"] as? String { own.insert(b.lowercased()) }
+        return own.contains(n)
+    }
+    static func isOwnApp(_ app: NSRunningApplication) -> Bool {
+        if let id = app.bundleIdentifier, ownBundleIDs.contains(id) { return true }
+        return app.processIdentifier == ProcessInfo.processInfo.processIdentifier
+    }
 
-    static func shell(_ command: String) -> GateVerdict {
+    /// Free path = read-only and provably so (see `NovaShell`). DenyList first; everything else parks with the EXACT command.
+    static func shell(_ command: String, cwd: String = "") -> GateVerdict {
         let c = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !c.isEmpty else { return .refuse("empty command") }
         if DenyList.isHit(c) { return .refuse("blocked by the deny-list: \(DenyList.hits(c).joined(separator: ", "))") }
-        if c.unicodeScalars.contains(where: shellMeta.contains) || c.contains("$(") { return .park("shell command") }
-        for seg in c.split(separator: "|", omittingEmptySubsequences: false) {
-            let words = seg.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-            guard let first = words.first else { return .park("shell command") }
-            if first == "git" {
-                guard words.count > 1, gitRead.contains(words[1]) else { return .park("shell command") }
-            } else if !shellAllow.contains(first) { return .park("shell command") }
-            if first == "find", words.contains(where: { ["-exec", "-execdir", "-delete", "-ok"].contains($0) }) { return .park("shell command") }
+        switch NovaShell.plan(c, cwd: cwd) {
+        case .run: return .allow
+        case .park(let what): return .park(what)
+        case .refuse(let why): return .refuse(why)
         }
-        return .allow
     }
 
-    /// Files Nova must never read, whatever the model asks.
-    static func readableFile(_ path: String) -> GateVerdict {
-        let p = (path as NSString).expandingTildeInPath
-        let std = URL(fileURLWithPath: p).standardizedFileURL.path
-        let home = NSHomeDirectory()
-        let name = (std as NSString).lastPathComponent
-        if std.hasPrefix(home + "/.ssh") || std.hasPrefix(home + "/.true") || std.hasPrefix(home + "/.aws")
-            || std.contains("/Library/Keychains") || name == ".env" || name.hasPrefix(".env.")
-            || name.hasSuffix(".pem") || name.hasSuffix(".key") || name.hasPrefix("id_rsa") || name.hasPrefix("id_ed25519") {
-            return .refuse("that file holds secrets")
-        }
-        return .allow
-    }
+    /// Files Nova must never read, whatever the model asks (symlinks resolved, case-insensitive).
+    static func readableFile(_ path: String, home: String = NSHomeDirectory()) -> GateVerdict { NovaPaths.check(path, home: home) }
 
     /// A control about to be pressed or typed into.
     static func control(label: String, secure: Bool, typing: Bool) -> GateVerdict {
@@ -62,17 +57,23 @@ enum NovaGate {
     }
 
     /// One entry point per tool call. `paneBusy`/`hasUnsaved` are supplied by the caller (live state, not model text).
-    static func tool(_ name: String, _ input: [String: Any], paneBusy: Bool = false, hasUnsaved: Bool = false) -> GateVerdict {
+    /// Every model-initiated send/relay/spawn/open_url parks with the exact target and full text or URL.
+    static func tool(_ name: String, _ input: [String: Any], paneBusy: Bool = false, hasUnsaved: Bool = false, origin: Origin = .model) -> GateVerdict {
+        func str(_ k: String) -> String { input[k] as? String ?? "" }
         switch name {
-        case "run_shell": return shell(input["command"] as? String ?? "")
-        case "read_file": return readableFile(input["path"] as? String ?? "")
-        case "move_to_trash": return .park("move to trash")
-        case "send_to_pane": return paneBusy ? .park("interrupt a busy agent") : .allow
-        case "quit_app": return hasUnsaved ? .park("quit with unsaved changes") : .allow
-        case "press_keys": return keys(input["keys"] as? String ?? "")
-        case "click_row": return control(label: input["label"] as? String ?? "", secure: false, typing: false)
-        case "type_into_row": return control(label: input["label"] as? String ?? "", secure: input["secure"] as? Bool ?? false, typing: true)
-        case "spawn_agent": return .allow   // the Command bar's own danger confirm is surfaced as a park by the hand
+        case "run_shell": return shell(str("command"), cwd: str("cwd"))
+        case "read_file": return readableFile(str("path"))
+        case "move_to_trash": return .park("move to trash: " + str("path"))
+        case "send_to_pane": return origin == .local && !paneBusy ? .allow : .park("\(paneBusy ? "interrupt busy agent " : "send to ")\(str("target")): \(str("text"))")
+        case "relay": return .park("relay \(str("from")) → \(str("to"))\(paneBusy ? " (busy)" : "")")
+        case "spawn_agent": return .park("start an agent: " + str("text"))
+        case "open_url": return origin == .local ? .allow : .park("open URL: " + str("url"))
+        case "quit_app", "quit_graceful", "hide_app":
+            if isOwnApp(name: str("name")) { return .refuse("I can't quit or hide True itself") }
+            return name == "quit_app" ? .park("quit \(str("name"))\(hasUnsaved ? " (may have unsaved changes)" : "")") : .allow
+        case "press_keys": return keys(str("keys"))
+        case "click_row": return control(label: str("label"), secure: false, typing: false)
+        case "type_into_row": return control(label: str("label"), secure: input["secure"] as? Bool ?? false, typing: true)
         default: return .allow
         }
     }

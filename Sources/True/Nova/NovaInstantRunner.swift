@@ -33,10 +33,14 @@ enum NovaInstantTools {
                 return ("not running", false)
             }
         case "hide_app":
-            return await MainActor.run { running(n)?.hide(); return ("hid \(n)", false) }
+            return await MainActor.run {
+                if let a = running(n), NovaGate.isOwnApp(a) { return ("I can't hide True itself", true) }
+                running(n)?.hide(); return ("hid \(n)", false)
+            }
         case "quit_graceful":
             return await MainActor.run {
                 guard let app = running(n) else { return ("\(n) isn't running", true) }
+                if NovaGate.isOwnApp(app) { return ("I can't quit True itself", true) }
                 _ = app.terminate(); return ("asked \(n) to quit", false)
             }
         case "volume_delta":
@@ -105,7 +109,7 @@ final class NovaInstantRunner {
             let wordMs = w.end.map { Int(started.timeIntervalSince(w.streamStart.addingTimeInterval($0)) * 1000) }
             timings.append(.init(clauseToActMs: ms, wordToActMs: wordMs, verb: String(describing: verb).prefix(12).description))
             let (tool, input) = Self.tool(for: verb)
-            let r = await hands.run(name: tool, input: input, id: "instant")
+            let r = await hands.runLocal(name: tool, input: input)
             if let undo, !r.isError { undos[step.id] = undo }
             onResult?(verb, r.text, r.isError)
         }
@@ -146,7 +150,7 @@ final class NovaInstantRunner {
             return { await NovaInstantTools.setVolume(prior) }
         case .media(let m): guard m == "play_pause" else { return nil }
             let h = hands
-            return { _ = await h.run(name: "media_control", input: ["action": "play_pause"], id: "undo") }
+            return { _ = await h.runLocal(name: "media_control", input: ["action": "play_pause"]) }
         case .openSite: return restoreFront
         case .scroll, .screenshot: return nil
         }
