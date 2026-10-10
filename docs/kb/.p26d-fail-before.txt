@@ -1,0 +1,23 @@
+✘ Test p1_ownVoiceResidueNeverAddresses() recorded an issue at NovaSecurity26dTests.swift:22:9: Expectation failed: (live.ingest(heard, gated: false, novaSpeaking: false) → ["Go", "ahead?"]) == nil
+✘ Test p3_repeatedRefusalReportsRealOutcome() recorded an issue at NovaSecurity26dTests.swift:99:9: Expectation failed: (first.isError → true) && (second.isError → false)
+✘ Test p3_repeatedRefusalReportsRealOutcome() recorded an issue at NovaSecurity26dTests.swift:100:9: Expectation failed: (second.text → "already done this turn").hasPrefix("refused")
+✘ Test p3_spokenYesBoundToCardAndFinal() recorded an issue at NovaSecurity26dTests.swift:87:9: Expectation failed: (NovaApproval.resolution("nova go ahead", addressed: true, final: false, cardAtStart:
+✘ Test p3_spokenYesBoundToCardAndFinal() recorded an issue at NovaSecurity26dTests.swift:89:9: Expectation failed: (NovaApproval.resolution("nova go ahead", addressed: true, final: true, cardAtStart: 
+✘ Test p3_spokenYesBoundToCardAndFinal() recorded an issue at NovaSecurity26dTests.swift:90:9: Expectation failed: (NovaApproval.resolution("nova go ahead", addressed: true, final: true, cardAtStart: 
+✘ Test p2b_parkCardShowsCwd() recorded an issue at NovaSecurity26dTests.swift:42:81: Expectation failed: (w.contains("touch x") → true) && (w.contains(d) → false)
+✘ Test p2a_controlCharactersNeverReachProcess() recorded an issue at NovaSecurity26dTests.swift:29:9: Expectation failed: { if case .refuse = nul { return true }; return false }()
+✘ Test p3_recursiveRgExcludesSecretGlobs() recorded an issue at NovaSecurity26dTests.swift:61:13: Expectation failed: (args.contains("!.env") && args.contains("!*.pem") → false) && (args.contains("!id
+✘ Test p2c_gitFreeOnlyInKnownProjects() recorded an issue at NovaSecurity26dTests.swift:47:9: Expectation failed: isPark(NovaShell.plan("git status", cwd: other, projectRoots: [root], exists: any) → .
+✘ Test p3_hardLinkedFilesPark() recorded an issue at NovaSecurity26dTests.swift:82:9: Expectation failed: isParkV(NovaPaths.check(home + "/b.txt", home: home) → .allow)
+✘ Test p2c_gitFreeOnlyInKnownProjects() recorded an issue at NovaSecurity26dTests.swift:49:124: Expectation failed: (args → ["--no-pager", "-c", "core.fsmonitor=", "-c", "core.pager=cat", "-c", "core.
+✘ Test p2a_controlCharactersNeverReachProcess() recorded an issue at NovaSecurity26dTests.swift:30:9: Expectation failed: !(isRun(NovaShell.plan("cat x\u{1}y", cwd: d, exists: any) → .run(exe: "/bin/c
+✘ Test p2c_gitFreeOnlyInKnownProjects() recorded an issue at NovaSecurity26dTests.swift:49:124: Expectation failed: (args → ["--no-pager", "-c", "core.fsmonitor=", "-c", "core.pager=cat", "-c", "core.
+✘ Test p3_hiddenFilesUnderHomePark() recorded an issue at NovaSecurity26dTests.swift:72:9: Expectation failed: isParkV(NovaPaths.check(home + "/.config/zed/s.json", home: home, projectRoots: [proj]) →
+✘ Test p3_gitContentReadsPark() recorded an issue at NovaSecurity26dTests.swift:55:125: Expectation failed: !(isRun(p(c) → .run(exe: "/usr/bin/git", args: ["--no-pager", "-c", "core.fsmonitor=", "-c",
+✘ Test p2a_controlCharactersNeverReachProcess() recorded an issue at NovaSecurity26dTests.swift:31:9: Expectation failed: !(isRun(NovaShell.plan("cat x\u{7f}", cwd: d, exists: any) → .run(exe: "/bin/c
+✘ Test p2a_controlCharactersNeverReachProcess() recorded an issue at NovaSecurity26dTests.swift:32:97: Issue recorded
+✘ Test p3_gitContentReadsPark() recorded an issue at NovaSecurity26dTests.swift:55:125: Expectation failed: !(isRun(p(c) → .run(exe: "/usr/bin/git", args: ["--no-pager", "-c", "core.fsmonitor=", "-c",
+✘ Test p3_gitContentReadsPark() recorded an issue at NovaSecurity26dTests.swift:55:125: Expectation failed: !(isRun(p(c) → .run(exe: "/usr/bin/git", args: ["--no-pager", "-c", "core.fsmonitor=", "-c",
+✘ Test p3_gitContentReadsPark() recorded an issue at NovaSecurity26dTests.swift:55:125: Expectation failed: !(isRun(p(c) → .run(exe: "/usr/bin/git", args: ["--no-pager", "-c", "core.fsmonitor=", "-c",
+✘ Test p3_gitContentReadsPark() recorded an issue at NovaSecurity26dTests.swift:55:125: Expectation failed: !(isRun(p(c) → .run(exe: "/usr/bin/git", args: ["--no-pager", "-c", "core.fsmonitor=", "-c",
+✘ Test p2a_controlCharactersNeverReachProcess() recorded an issue at NovaSecurity26dTests.swift:33:75: Issue recorded

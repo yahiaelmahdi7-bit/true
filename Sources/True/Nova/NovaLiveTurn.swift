@@ -30,6 +30,12 @@ struct NovaLiveTurn {
         return Array(toks.dropFirst(i))
     }
 
+    /// Engine entry point for every partial. `gated` = Nova speaking or in its echo tail.
+    mutating func ingest(_ text: String, gated: Bool, novaSpeaking: Bool) -> [String]? {
+        if gated { return nil }
+        return command(in: text, novaSpeaking: novaSpeaking)
+    }
+
     /// "stop" in the last two words while Nova is talking.
     static func isBargeIn(_ text: String) -> Bool {
         norm(tokens(text)).suffix(2).contains("stop")

@@ -44,22 +44,52 @@ enum NovaPaths {
         let l = canon.lowercased() == "/" ? "" : canon.lowercased()
         return roots(home: home).contains { $0.hasPrefix(l + "/") }
     }
-    static func check(_ rawPath: String, base: String = NSHomeDirectory(), home: String = NSHomeDirectory()) -> GateVerdict {
+    /// Hard refuse = the secret set. Park = needs the user's go-ahead: hidden things under home (outside True project
+    /// `.claude` docs) and files with several hard links (a second name can hide a protected file).
+    static func check(_ rawPath: String, base: String = NSHomeDirectory(), home: String = NSHomeDirectory(), projectRoots: [String] = NovaShell.projectRoots) -> GateVerdict {
+        if rawPath.unicodeScalars.contains(where: { $0.value == 0 }) { return .refuse("bad path") }
         let path = rawPath == "~" ? home : (rawPath.hasPrefix("~/") ? home + String(rawPath.dropFirst()) : rawPath)   // ~ means THIS home
         guard let c = canonical(path, base: base) else { return .refuse("can't resolve that path") }
-        if isSecret(c, home: home) || isSecret(URL(fileURLWithPath: ((path as NSString).expandingTildeInPath as NSString).standardizingPath).path, home: home) {
-            return .refuse("that file holds secrets")
+        let lexical = URL(fileURLWithPath: ((path as NSString).expandingTildeInPath as NSString).standardizingPath).path
+        if isSecret(c, home: home) || isSecret(lexical, home: home) { return .refuse("that file holds secrets") }
+        if hidden(c, home: home, projectRoots: projectRoots) || hidden(lexical, home: home, projectRoots: projectRoots) {
+            return .park("read a hidden file or folder: \(c)")
         }
+        var st = stat()
+        if stat(c, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG, st.st_nlink > 1 { return .park("read a file with several hard links: \(c)") }
         return .allow
     }
+    /// A path component starting with "." under the home folder, except `.claude` inside a known True project.
+    static func hidden(_ p: String, home: String, projectRoots: [String]) -> Bool {
+        let l = p.lowercased()
+        for h in Set([home, real(home) ?? home]).map({ $0.lowercased() }) where l.hasPrefix(h + "/") {
+            let rel = l.dropFirst(h.count + 1).split(separator: "/").map(String.init)
+            for (n, comp) in rel.enumerated() where comp.hasPrefix(".") {
+                if comp == ".claude", projectRoots.contains(where: { r in
+                    let rr = (real(r) ?? r).lowercased(); return l.hasPrefix(rr + "/") && rr.count >= h.count + 1 }) { continue }
+                _ = n; return true
+            }
+        }
+        return false
+    }
     /// Open first, ask the kernel where the descriptor really is (F_GETPATH), check THAT, read from the same fd.
-    static func openChecked(_ path: String, home: String = NSHomeDirectory()) -> (fd: Int32?, verdict: GateVerdict) {
-        if case .refuse(let w) = check(path, home: home) { return (nil, .refuse(w)) }
+    static func openChecked(_ path: String, home: String = NSHomeDirectory(), approved: Bool = false) -> (fd: Int32?, verdict: GateVerdict) {
+        switch check(path, home: home) {
+        case .refuse(let w): return (nil, .refuse(w))
+        case .park(let w): if !approved { return (nil, .park(w)) }
+        case .allow: break
+        }
         let fd = open((path as NSString).expandingTildeInPath, O_RDONLY | O_NONBLOCK)
         guard fd >= 0 else { return (nil, .refuse("can't open that file")) }
         var buf = [CChar](repeating: 0, count: Int(MAXPATHLEN))
         guard fcntl(fd, F_GETPATH, &buf) == 0 else { close(fd); return (nil, .refuse("can't resolve that path")) }
-        if isSecret(String(cString: buf), home: home) { close(fd); return (nil, .refuse("that file holds secrets")) }
+        switch check(String(cString: buf), home: home) {
+        case .refuse(let w): close(fd); return (nil, .refuse(w))
+        case .park(let w): if !approved { close(fd); return (nil, .park(w)) }
+        case .allow: break
+        }
+        var st = stat()
+        if !approved, fstat(fd, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG, st.st_nlink > 1 { close(fd); return (nil, .park("read a file with several hard links")) }
         return (fd, .allow)
     }
 }
@@ -75,7 +105,11 @@ enum NovaShell {
     struct Spec { var exe: String; var short: Set<Character> = []; var long: Set<String> = []; var digits = false
                   var paths = true; var recursive = false; var maxPositional = 99 }
 
-    static let forbidden = CharacterSet(charactersIn: ";&|<>`$()=*?[]{}~!'\"\\#\n\r\t%^")
+    static let forbidden: CharacterSet = {
+        var c = CharacterSet(charactersIn: ";&|<>`$()=*?[]{}~!\'\"\\#%^")
+        c.insert(charactersIn: Unicode.Scalar(0)...Unicode.Scalar(0x1f)); c.insert(Unicode.Scalar(0x7f))   // all control characters
+        return c
+    }()
     static let table: [String: Spec] = [
         "ls": Spec(exe: "/bin/ls", short: Set("alhtrSF1dG")), "cat": Spec(exe: "/bin/cat", short: Set("nbs")),
         "head": Spec(exe: "/usr/bin/head", short: Set("nc"), digits: true), "tail": Spec(exe: "/usr/bin/tail", short: Set("nc"), digits: true),
@@ -96,7 +130,10 @@ enum NovaShell {
                                        "--abbrev-commit", "--"]
     static let env = ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory(), "LANG": "en_US.UTF-8", "GIT_OPTIONAL_LOCKS": "0", "GIT_CONFIG_NOSYSTEM": "1"]
 
-    static func plan(_ command: String, cwd: String = "", home: String = NSHomeDirectory(), exists: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }) -> Plan {
+    /// Folders True already knows (roster repos). Refreshed by the hands before each shell call. `git` is free only inside these.
+    nonisolated(unsafe) static var projectRoots: [String] = []
+
+    static func plan(_ command: String, cwd: String = "", home: String = NSHomeDirectory(), projectRoots: [String] = NovaShell.projectRoots, exists: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }) -> Plan {
         let c = command.trimmingCharacters(in: .whitespacesAndNewlines)
         let park = Plan.park("run: " + c)
         guard !c.isEmpty else { return .refuse("empty command") }
