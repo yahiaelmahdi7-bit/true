@@ -257,3 +257,45 @@ private func session(_ t: StubTransport, token: String? = "tok", store: InMemory
         #expect(ScreenshotPlan.needsJPEGConversion(heic) && ScreenshotPlan.needsJPEGConversion(Data()))
     }
 }
+
+@Suite struct AttachmentTests {
+    @Test func attachEncodedOnlyWhenPresent() async throws {
+        let t = StubTransport((200, #"{"outcome":"landed"}"#, [:]), (200, #"{"outcome":"landed"}"#, [:]))
+        let (s, _) = session(t)
+        _ = try await s.paneInput(id: "A", intent: .prompt, text: "x", attachments: [.shot(id: "s1"), .file(name: "a b.pdf")])
+        let b1 = try JSONSerialization.jsonObject(with: try #require(t.requests[0].httpBody)) as? [String: Any]
+        let attach = try #require(b1?["attach"] as? [[String: String]])
+        #expect(attach == [["id": "s1"], ["name": "a b.pdf"]])
+        _ = try await s.paneInput(id: "A", intent: .prompt, text: "x")
+        let b2 = try JSONSerialization.jsonObject(with: try #require(t.requests[1].httpBody)) as? [String: String]
+        #expect(b2 == ["intent": "prompt", "text": "x"])
+    }
+
+    @Test func refFromDrop() {
+        #expect(PaneAttachmentRef(drop: DropResponse(ok: true, where: "shots", id: "i", name: nil)) == .shot(id: "i"))
+        #expect(PaneAttachmentRef(drop: DropResponse(ok: true, where: "downloads", id: nil, name: "n")) == .file(name: "n"))
+        #expect(PaneAttachmentRef(drop: DropResponse(ok: true, where: "x", id: "i", name: "n")) == nil)
+        #expect(PaneAttachmentRef(drop: DropResponse(ok: true, where: "shots", id: nil, name: nil)) == nil)
+    }
+
+    @Test func canSendRules() {
+        #expect(!AttachmentPlan.canSend(text: "  ", attachments: []))
+        #expect(AttachmentPlan.canSend(text: "hi", attachments: []))
+        #expect(AttachmentPlan.canSend(text: "", attachments: [.ready, .failed]))
+        #expect(!AttachmentPlan.canSend(text: "hi", attachments: [.ready, .uploading]))
+        #expect(!AttachmentPlan.canSend(text: "", attachments: [.failed]))
+    }
+
+    @Test func filenamesAndCaps() {
+        let utc = TimeZone(identifier: "UTC")!
+        let d = Date(timeIntervalSince1970: 1_791_642_330)
+        let stamp = AttachmentPlan.filename(for: .camera(index: 1), now: d, timeZone: utc)
+        #expect(stamp.hasPrefix("Camera-") && stamp.hasSuffix("-1.jpg"))
+        #expect(AttachmentPlan.filename(for: .photo(ext: "HEIC", index: 2), now: d, timeZone: utc).hasSuffix("-2.jpg"))
+        #expect(AttachmentPlan.filename(for: .photo(ext: "png", index: 1), now: d, timeZone: utc).hasSuffix("-1.png"))
+        #expect(AttachmentPlan.filename(for: .photo(ext: "mov", index: 1), now: d, timeZone: utc).hasSuffix("-1.mov"))
+        #expect(AttachmentPlan.filename(for: .file(name: "Report.pdf"), now: d) == "Report.pdf")
+        #expect(AttachmentPlan.room(current: 3) == 5 && AttachmentPlan.room(current: 9) == 0)
+        #expect(AttachmentPlan.withinCap(bytes: 200_000_000) && !AttachmentPlan.withinCap(bytes: 200_000_001))
+    }
+}

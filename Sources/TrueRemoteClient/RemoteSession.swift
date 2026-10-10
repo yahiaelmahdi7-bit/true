@@ -131,8 +131,17 @@ public actor RemoteSession {
     public func shots() async throws -> [Shot] { try await get("/api/shots", as: ShotsResponse.self).shots }
     public func shotData(id: String) async throws -> Data { try await call("GET", "/api/shots/" + Self.seg(id)) }
     /// POST /api/pane/<id>/input. Never throws on an unrecognised outcome string; 404 is `.paneGone`.
-    public func paneInput(id: String, intent: PaneInputIntent, text: String = "") async throws -> InputOutcome {
-        let data = try await call("POST", "/api/pane/" + Self.seg(id) + "/input", json: ["intent": intent.rawValue, "text": text])
+    public func paneInput(id: String, intent: PaneInputIntent, text: String = "",
+                          attachments: [PaneAttachmentRef] = []) async throws -> InputOutcome {
+        struct Body: Encodable { var intent: String; var text: String; var attach: [PaneAttachmentRef]?
+            func encode(to e: Encoder) throws {
+                var c = e.container(keyedBy: K.self)
+                try c.encode(intent, forKey: .intent); try c.encode(text, forKey: .text)
+                if let attach, !attach.isEmpty { try c.encode(attach, forKey: .attach) }
+            }
+            enum K: String, CodingKey { case intent, text, attach } }
+        let data = try await call("POST", "/api/pane/" + Self.seg(id) + "/input",
+                                  json: Body(intent: intent.rawValue, text: text, attach: attachments))
         let wire = (try? JSONDecoder().decode([String: String].self, from: data))?["outcome"]
         return InputOutcome(wire: wire ?? "")
     }
