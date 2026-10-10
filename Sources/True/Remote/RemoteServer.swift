@@ -198,7 +198,8 @@ final class RemoteServer: @unchecked Sendable {
             Self.log.notice("deny 401 \(req.path, privacy: .public): not paired")
             _ = send(fd, HTTPResponse.make(status: 401, reason: "Unauthorized", body: Array("Not paired".utf8)))
         case .allow:
-            Self.log.notice("allow \(req.method, privacy: .public) \(req.path, privacy: .public) device=\(device?.label ?? "-", privacy: .public)")
+            let duty = req.header("x-true-duty").map { " duty=\($0)" } ?? ""
+            Self.log.notice("allow \(req.method, privacy: .public) \(req.path, privacy: .public) device=\(device?.label ?? "-", privacy: .public)\(duty, privacy: .public)")
             route(fd, req, device: device?.id)
         }
     }

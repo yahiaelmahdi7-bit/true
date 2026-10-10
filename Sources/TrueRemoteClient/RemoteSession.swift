@@ -53,6 +53,10 @@ public actor RemoteSession {
     public let baseURL: URL
     private let store: TokenStore
     private let transport: RemoteTransport
+    private var dutyHeader: String?
+
+    /// Diagnostic value sent as `X-True-Duty` on GET /api/hub only; nil sends nothing.
+    public func setDutyHeader(_ value: String?) { dutyHeader = value }
 
     public init(baseURL: URL, store: TokenStore, transport: RemoteTransport = RemoteSession.defaultTransport()) {
         self.baseURL = baseURL; self.store = store; self.transport = transport
@@ -195,6 +199,7 @@ public actor RemoteSession {
         }
         if method != "GET" { req.setValue(origin, forHTTPHeaderField: "Origin") }
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
+        if method == "GET", path == "/api/hub", let d = dutyHeader { req.setValue(d, forHTTPHeaderField: "X-True-Duty") }
         do { return try await transport.send(req) }
         catch let e as RemoteError { throw e }
         catch { throw RemoteError.transport(error.localizedDescription) }

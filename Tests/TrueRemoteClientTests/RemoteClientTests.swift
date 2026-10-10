@@ -139,7 +139,10 @@ private func session(_ t: StubTransport, token: String? = "tok", store: InMemory
         #expect(row.question == "Run it?" && row.tool == "Bash" && row.detail == "ls")
         let bare = #"{"kind":"seat","id":"seat-b","name":"b"}"#
         let old = try JSONDecoder().decode(HubRow.self, from: Data(bare.utf8))
-        #expect(old.question == nil && old.tool == nil && old.detail == nil)
+        #expect(old.question == nil && old.tool == nil && old.detail == nil && old.needKind == nil)
+        let q = try JSONDecoder().decode(HubRow.self, from: Data(#"{"kind":"pane","id":"p","name":"n","needKind":"question"}"#.utf8))
+        #expect(q.needKind == "question" && NeedsYouNotifier.isQuestion(q) && NeedsYouNotifier.title(for: q) == "n has a question")
+        #expect(!NeedsYouNotifier.isQuestion(old) && NeedsYouNotifier.title(for: old) == "b needs you")
     }
 
     @Test func hubElapsedDecodesSecondsOrText() throws {

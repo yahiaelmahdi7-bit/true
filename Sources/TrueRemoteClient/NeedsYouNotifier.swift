@@ -23,6 +23,10 @@ public enum NeedsYouNotifier {
         Set(snap.projects.flatMap(\.rows).filter { $0.statusKey == "working" }.map(\.id))
     }
 
+    public static func isQuestion(_ row: HubRow) -> Bool { row.needKind == "question" }
+
+    public static func title(for row: HubRow) -> String { isQuestion(row) ? "\(row.name) has a question" : "\(row.name) needs you" }
+
     /// First line the question, second line "tool: detail" when the Mac sent either.
     public static func body(for row: HubRow) -> String {
         let first = (row.question?.isEmpty == false ? row.question : nil) ?? row.cwd ?? "Tap to open"

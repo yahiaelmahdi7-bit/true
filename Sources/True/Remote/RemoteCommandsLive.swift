@@ -44,6 +44,14 @@ struct LoosePane: Equatable {
     var question: String; var tool: String?; var detail: String?
 }
 
+/// Whether a need is a permission prompt or a question. Deterministic on what the hook already sends.
+enum NeedKind {
+    static func classify(question: String, tool: String?) -> String {
+        if let t = tool, !t.isEmpty { return "permission" }
+        return question.lowercased().contains("permission") ? "permission" : "question"
+    }
+}
+
 /// The Hub as JSON, from the Mac Hub's own groups (HubModel.build): same grouping, order, counts and status labels.
 enum RemoteHubJSON {
     static func make(groups: [HubProjectGroup], seatStatus: (String) -> AgentStatus, seatPane: (String) -> UUID?,
@@ -59,6 +67,7 @@ enum RemoteHubJSON {
                     r["pane"] = p.uuidString
                     if st == .needsYou, let q = ask(p) {
                         r["question"] = String(q.question.prefix(300))
+                        r["needKind"] = NeedKind.classify(question: q.question, tool: q.tool)
                         if let t = q.tool, !t.isEmpty { r["tool"] = String(t.prefix(300)) }
                         if let d = q.detail, !d.isEmpty { r["detail"] = String(d.prefix(300)) }
                     }
@@ -85,7 +94,8 @@ enum RemoteHubJSON {
         for lp in loosePanes where !seatPanes.contains(lp.pane) {
             var r: [String: Any] = ["kind": "pane", "id": "pane-\(lp.pane.uuidString)", "name": lp.name,
                                     "status": AgentStatus.needsYou.label, "statusKey": AgentStatus.needsYou.rawValue,
-                                    "pane": lp.pane.uuidString, "cwd": lp.cwd, "question": String(lp.question.prefix(300))]
+                                    "pane": lp.pane.uuidString, "cwd": lp.cwd, "question": String(lp.question.prefix(300)),
+                                    "needKind": NeedKind.classify(question: lp.question, tool: lp.tool)]
             if let t = lp.tool, !t.isEmpty { r["tool"] = String(t.prefix(300)) }
             if let d = lp.detail, !d.isEmpty { r["detail"] = String(d.prefix(300)) }
             let key = lp.projectKey

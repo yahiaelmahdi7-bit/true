@@ -304,6 +304,7 @@ func answer(_ kind: String, danger: Double? = nil, judged: Bool = true) -> JevRe
         let row = try #require(rows.first { $0["name"] as? String == "cfo" })
         #expect((row["question"] as? String)?.count == 300)
         #expect(row["tool"] as? String == "Bash")
+        #expect(row["needKind"] as? String == "permission")
         #expect(row["detail"] == nil)
     }
 
@@ -327,12 +328,20 @@ func answer(_ kind: String, danger: Double? = nil, judged: Bool = true) -> JevRe
         #expect(one["pane"] as? String == loose.uuidString)
         #expect(one["question"] as? String == "Run rm?")
         #expect(one["tool"] as? String == "Bash")
+        #expect(one["needKind"] as? String == "permission")
         // The seat's own pane is never duplicated as a loose row.
         #expect(rows.first { $0["id"] as? String == "pane-\(seatPane.uuidString)" } == nil)
         // A pane in a project the Hub has no group for gets one.
         let two = try #require(projects.first { ($0["key"] as? String) == "/p/two" })
         #expect(two["needsYou"] as? Int == 1)
         #expect(json["needsYou"] as? Int == 2)
+    }
+
+    @Test func needKindClassifiesToolAndPermissionWording() {
+        #expect(NeedKind.classify(question: "Claude needs your input", tool: nil) == "question")
+        #expect(NeedKind.classify(question: "Claude needs your permission to use Bash", tool: nil) == "permission")
+        #expect(NeedKind.classify(question: "Claude needs your input", tool: "") == "question")
+        #expect(NeedKind.classify(question: "x", tool: "Bash") == "permission")
     }
 
     @Test func ackValidatesTheIdAndWritesMeta() throws {

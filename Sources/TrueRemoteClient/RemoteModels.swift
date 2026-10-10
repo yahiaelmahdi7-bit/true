@@ -77,15 +77,17 @@ public struct HubRow: Codable, Equatable, Sendable, Identifiable {
     public var question: String?
     public var tool: String?
     public var detail: String?
+    /// Needs-you rows only: "permission" or "question" (nil from an older Mac).
+    public var needKind: String?
 
     public init(kind: String, id: String, name: String, status: String, statusKey: String, model: String? = nil,
                 pane: String? = nil, cwd: String? = nil, elapsed: String? = nil, builderId: String? = nil,
                 acked: Bool? = nil, branch: String? = nil, updated: Double? = nil,
-                question: String? = nil, tool: String? = nil, detail: String? = nil) {
+                question: String? = nil, tool: String? = nil, detail: String? = nil, needKind: String? = nil) {
         self.kind = kind; self.id = id; self.name = name; self.status = status; self.statusKey = statusKey
         self.model = model; self.pane = pane; self.cwd = cwd; self.elapsed = elapsed; self.builderId = builderId
         self.acked = acked; self.branch = branch; self.updated = updated
-        self.question = question; self.tool = tool; self.detail = detail
+        self.question = question; self.tool = tool; self.detail = detail; self.needKind = needKind
     }
 
     public init(from d: Decoder) throws {
@@ -105,6 +107,7 @@ public struct HubRow: Codable, Equatable, Sendable, Identifiable {
         question = try c.decodeIfPresent(String.self, forKey: .question)
         tool = try c.decodeIfPresent(String.self, forKey: .tool)
         detail = try c.decodeIfPresent(String.self, forKey: .detail)
+        needKind = try c.decodeIfPresent(String.self, forKey: .needKind)
         if let text = try? c.decodeIfPresent(String.self, forKey: .elapsed) { elapsed = text }
         else if let secs = try? c.decodeIfPresent(Double.self, forKey: .elapsed) { elapsed = Self.elapsedLabel(secs) }
         else { elapsed = nil }
