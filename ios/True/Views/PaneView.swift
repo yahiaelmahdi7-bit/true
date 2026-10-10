@@ -132,7 +132,11 @@ final class FitScrollView: UIScrollView, UIScrollViewDelegate {
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { terminal }
 
+    /// True while layoutSubviews is setting zoomScale itself; those callbacks are not user pinches.
+    private var programmaticZoom = false
+
     func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        guard !programmaticZoom else { return }
         atFit = zoomScale <= minimumZoomScale + 0.001
         updatePanning()
         centerContent()
@@ -155,7 +159,9 @@ final class FitScrollView: UIScrollView, UIScrollViewDelegate {
         let gridChanged = grid != laidOutGrid
         laidOutBounds = bounds.size; laidOutGrid = grid
 
-        zoomScale = 1
+        programmaticZoom = true
+        defer { programmaticZoom = false }
+        zoomScale = 1   // measure the grid at true size; the delegate ignores this reset
         let size = terminal.getOptimalFrameSize().size
         guard size.width > 0 else { return }
         // +0.5 keeps floor(width / cellWidth) == cols against float error.
