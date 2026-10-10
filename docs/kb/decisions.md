@@ -72,3 +72,6 @@ Owner: cto · Last verified: 2026-09-30
 
 ## 2026-10-08 — Screenshot chip drags and snaps to corners (Run 19)
 - Decision: the top-right-pinned chip covered the tab-bar "Restart to update" pill; Yahia chose Picture-in-Picture behaviour (drag, snap to nearest of 4 corners, remembered per corner in `screenshotTray.corner`) over moving it elsewhere. Drag is a single SwiftUI `DragGesture` on the collapsed chip (not a Button) so < 4 pt stays a click; expanded views keep tile drag-out and anchor to the chosen corner. [source: SPEC.md Run 19; Model/TrayPanelFrame.swift]. Status: Accepted.
+
+## 2026-10-10 — Nova lives inside True (Run 26)
+- Decision: voice control ships in True.app (overrides SPEC v1 "No Nova"). Brain = Jev reflex (fast, typed) + Claude Haiku 5.5 over raw SSE (no Swift SDK). Reach = apps/system, True agents/panes via the Command bar pipeline and `PaneDelivery`, shell and files. Autonomy = Nova's gate (park consequential actions for a spoken "go ahead"). Speculative race, honestly: the brain request is held up to 0.9 s for the reflex verdict so it can carry it as a prior; if the reflex wins, the brain task is cancelled. Screen hands and the computer toolset were deferred to the next run. [source: SPEC.md Run 26; Sources/True/Nova/]. Status: Accepted.

@@ -21,3 +21,11 @@ Owner: knowledge-keeper · Last verified: 2026-09-30
 | Verdict | The Overseer's one-word read of a turn: verified, unverified, partial, asksToContinue, asksYou, blocked | status |
 | Watcher | Standing agent (eye avatar) that turns builder/git/Overseer signals into Inbox items you approve, reject or hand off (SPEC Run 15) | architecture |
 | Inbox | Append-only event log of Watcher items; state is `Inbox.fold` over it | architecture |
+
+## Nova terms (Run 26)
+- **Ears** — mic, wake word "Nova", push-to-talk, Apple on-device speech-to-text.
+- **Reflex** — the Jev classification of an utterance (~0.35 s): kind, verb, seat, interrupt.
+- **Brain** — Claude Haiku 5.5 tool loop (`HaikuBrain`).
+- **Hands** — the tools that act (`NovaHands`): True panes/agents, apps, shell, files.
+- **Gate** — deterministic code in front of every hand (`NovaGate`).
+- **HUD** — Nova's floating status panel.

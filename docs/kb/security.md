@@ -26,3 +26,12 @@ One dependency, SwiftTerm, pinned in Package.resolved. [source: Package.swift]. 
 
 ## Incident steps
 If a key leaks: rotate at TypeSafe, update Keychain item. If a runaway agent: `truectl status`, sleep the agent from the Hub/tab; never kill True.app from an agent. [assumption]
+
+## Nova threat model (Run 26)
+- **Mic always on (wake word):** on-device Apple STT; audio is not stored; visible mic pill and one-click mute; Settings toggle.
+- **Prompt injection via screen/pane/file/web text → tool calls:** all such text is wrapped as DATA and the system prompt says so, but the model is not trusted: `NovaGate` decides from tool name + arguments only (consequential labels, ⌘↩, secure fields, shell allowlist, `DenyList`, trash).
+- **Shell:** captured `/bin/zsh -c`, 30 s, 8 KB; read-only allowlist free, everything else parks; `DenyList` refuses outright.
+- **Files:** `read_file` refuses `~/.ssh`, `~/.true`, `~/.aws`, keychains, `.env*`, `*.pem`, `*.key`.
+- **Key storage:** Anthropic/ElevenLabs keys in Keychain service `net.prismlens.true`, read via `/usr/bin/security`, never logged.
+- **Run logs:** `~/.true/nova/runs/` 0600, transcript hash and tool summaries only; os_log never carries the words.
+- **Residual risk:** an approved ("go ahead") park is trusted; ambient speech from a TV could trigger `ambientSafeVerbs` only.
