@@ -15,6 +15,8 @@ public enum RemoteError: Error, Equatable, Sendable {
     case http(Int)
     /// POST /pair answered 401/403 with {"error"}: wrong, burned or expired code.
     case pairingFailed(String)
+    /// 404 on /api/pane/<id>/input: the pane was closed.
+    case paneGone
     case badResponse
     case transport(String)
 }
@@ -128,6 +130,12 @@ public actor RemoteSession {
 
     public func shots() async throws -> [Shot] { try await get("/api/shots", as: ShotsResponse.self).shots }
     public func shotData(id: String) async throws -> Data { try await call("GET", "/api/shots/" + Self.seg(id)) }
+    /// POST /api/pane/<id>/input. Never throws on an unrecognised outcome string; 404 is `.paneGone`.
+    public func paneInput(id: String, intent: PaneInputIntent, text: String = "") async throws -> InputOutcome {
+        let data = try await call("POST", "/api/pane/" + Self.seg(id) + "/input", json: ["intent": intent.rawValue, "text": text])
+        let wire = (try? JSONDecoder().decode([String: String].self, from: data))?["outcome"]
+        return InputOutcome(wire: wire ?? "")
+    }
     public func tabs() async throws -> TabsResponse { try await get("/api/tabs") }
 
     // MARK: Plumbing
@@ -186,6 +194,7 @@ public actor RemoteSession {
     private func map(_ resp: HTTPURLResponse, path: String) throws -> RemoteError {
         switch resp.statusCode {
         case 401: store.clear(); return .unauthorized
+        case 404 where path.hasPrefix("/api/pane/") && path.hasSuffix("/input"): return .paneGone
         case 404 where path.hasPrefix("/api/route") || path == "/api/run": return .routeExpired
         case 429: return .rateLimited(retryAfter: resp.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init))
         case 403: return .refused

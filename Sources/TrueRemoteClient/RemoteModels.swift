@@ -226,6 +226,44 @@ public struct RemotePane: Codable, Equatable, Sendable, Identifiable {
     public var needsYou: Bool
     public var busy: Bool
     public var live: Bool
+    /// The pane runs Claude Code / a seat (Approve/Deny mean something). Older Macs omit it.
+    public var claude: Bool
+
+    private enum CodingKeys: String, CodingKey { case id, title, cwd, agent, needsYou, busy, live, claude }
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        cwd = try c.decode(String.self, forKey: .cwd)
+        agent = try c.decodeIfPresent(String.self, forKey: .agent)
+        needsYou = try c.decode(Bool.self, forKey: .needsYou)
+        busy = try c.decode(Bool.self, forKey: .busy)
+        live = try c.decode(Bool.self, forKey: .live)
+        claude = try c.decodeIfPresent(Bool.self, forKey: .claude) ?? (agent != nil)
+    }
+}
+
+/// What a composer request did, as the Mac's PaneDelivery reported it. Unknown strings decode to `.unknown`.
+public enum InputOutcome: Equatable, Sendable {
+    case landed, staged, unverified, stuckInComposer, noPane, promptGone
+    case unknown(String)
+
+    public init(wire: String) {
+        switch wire {
+        case "landed": self = .landed
+        case "staged": self = .staged
+        case "unverified": self = .unverified
+        case "stuckInComposer": self = .stuckInComposer
+        case "noPane": self = .noPane
+        case "promptGone": self = .promptGone
+        default: self = .unknown(wire)
+        }
+    }
+}
+
+/// What the composer may ask a pane to do; raw values are the wire names.
+public enum PaneInputIntent: String, Sendable, CaseIterable {
+    case prompt, stage, control, submitOnly, approve, deny
 }
 
 struct PairResponse: Codable { var token: String?; var error: String? }

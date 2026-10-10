@@ -178,3 +178,40 @@ private func session(_ t: StubTransport, token: String? = "tok", store: InMemory
         #expect(seen == [.seconds(2), .seconds(4), .seconds(8), .seconds(16), .seconds(30), .seconds(30)])
     }
 }
+
+@Suite struct PaneInputTests {
+    @Test func encodesRequestAndDecodesOutcome() async throws {
+        let t = StubTransport((200, #"{"outcome":"landed"}"#, [:]))
+        let (s, _) = session(t)
+        let o = try await s.paneInput(id: "ABC", intent: .prompt, text: "hi \"there\"\nline2")
+        #expect(o == .landed)
+        let req = try #require(t.requests.first)
+        #expect(req.httpMethod == "POST" && req.url?.path == "/api/pane/ABC/input")
+        #expect(req.value(forHTTPHeaderField: "Origin") == "https://mac.tail1234.ts.net:8444")
+        let body = try JSONSerialization.jsonObject(with: try #require(req.httpBody)) as? [String: String]
+        #expect(body == ["intent": "prompt", "text": "hi \"there\"\nline2"])
+    }
+
+    @Test func unknownOutcomeIsTolerated() async throws {
+        let (s, _) = session(StubTransport((200, #"{"outcome":"teleported"}"#, [:])))
+        #expect(try await s.paneInput(id: "A", intent: .approve) == .unknown("teleported"))
+        let (s2, _) = session(StubTransport((200, "{}", [:])))
+        #expect(try await s2.paneInput(id: "A", intent: .deny) == .unknown(""))
+        for (w, o) in [("stuckInComposer", InputOutcome.stuckInComposer), ("promptGone", .promptGone), ("unverified", .unverified)] {
+            #expect(InputOutcome(wire: w) == o)
+        }
+    }
+
+    @Test func notFoundMapsToPaneGone() async throws {
+        let (s, _) = session(StubTransport((404, #"{"error":"No such pane"}"#, [:])))
+        await #expect(throws: RemoteError.paneGone) { try await s.paneInput(id: "A", intent: .prompt, text: "x") }
+    }
+
+    @Test func paneDecodesWithAndWithoutClaude() throws {
+        let base = #"{"id":"1","title":"t","cwd":"/","agent":null,"needsYou":false,"busy":false,"live":true"#
+        let old = try JSONDecoder().decode(RemotePane.self, from: Data((base + "}").utf8))
+        #expect(old.claude == false)
+        let new = try JSONDecoder().decode(RemotePane.self, from: Data((base + #","claude":true}"#).utf8))
+        #expect(new.claude)
+    }
+}
