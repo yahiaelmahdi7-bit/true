@@ -5,8 +5,9 @@ import UserNotifications
 /// the live poll loop (so an on-duty, locked phone notifies within one poll) and the ~15 min background refresh.
 enum Notifications {
     static let needsCategory = "pane.needsYou"
+    static let questionCategory = "pane.question"
     static let doneCategory = "pane.done"
-    static let approve = "approve", deny = "deny", reply = "reply"
+    static let approve = "approve", deny = "deny", reply = "reply", open = "open"
 
     static var onDuty: Bool { UserDefaults.standard.bool(forKey: "onDuty") }
 
@@ -19,8 +20,12 @@ enum Notifications {
                       UNNotificationAction(identifier: deny, title: "Deny", options: []),
                       replyAction],
             intentIdentifiers: [], options: [])
+        let question = UNNotificationCategory(
+            identifier: questionCategory,
+            actions: [UNNotificationAction(identifier: open, title: "Open", options: [.foreground]), replyAction],
+            intentIdentifiers: [], options: [])
         let done = UNNotificationCategory(identifier: doneCategory, actions: [replyAction], intentIdentifiers: [], options: [])
-        UNUserNotificationCenter.current().setNotificationCategories([needs, done])
+        UNUserNotificationCenter.current().setNotificationCategories([needs, question, done])
     }
 
     /// Diff a snapshot against what was already announced: post new needs-you, clear resolved, and (on duty) post finished turns.
@@ -33,13 +38,14 @@ enum Notifications {
         }
         for row in plan.fire {
             let c = UNMutableNotificationContent()
-            c.title = "\(row.name) needs you"
+            let isQuestion = NeedsYouNotifier.isQuestion(row)
+            c.title = NeedsYouNotifier.title(for: row)
             c.body = NeedsYouNotifier.body(for: row)
             c.sound = .default
             c.interruptionLevel = .timeSensitive
-            c.categoryIdentifier = needsCategory
+            c.categoryIdentifier = isQuestion ? questionCategory : needsCategory
             c.threadIdentifier = row.pane ?? row.id
-            c.userInfo = userInfo(row)
+            c.userInfo = userInfo(row, compose: isQuestion)
             try? await center.add(UNNotificationRequest(identifier: "needs-\(row.id)", content: c, trigger: nil))
         }
         let oldWorking = SharedConfig.workingIDs
@@ -57,9 +63,9 @@ enum Notifications {
         }
     }
 
-    private static func userInfo(_ row: HubRow) -> [AnyHashable: Any] {
+    private static func userInfo(_ row: HubRow, compose: Bool = false) -> [AnyHashable: Any] {
         guard let pane = row.pane else { return ["rowId": row.id] }
-        return ["url": "true://pane/\(pane)", "pane": pane, "rowId": row.id]
+        return ["url": "true://pane/\(pane)" + (compose ? "?compose=1" : ""), "pane": pane, "rowId": row.id]
     }
 
     /// Run a lock-screen button. Builds its own session: the app may have been launched cold by the action.

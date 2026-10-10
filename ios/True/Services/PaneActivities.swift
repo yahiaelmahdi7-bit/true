@@ -46,8 +46,8 @@ enum PaneActivities {
             guard let pane = row.pane else { continue }
             let question = row.question ?? "Needs your answer"
             if let a = Activity<PaneActivityAttributes>.activities.first(where: { $0.attributes.paneId == pane }) {
-                if a.content.state.question != question {
-                    let s = PaneActivityAttributes.ContentState(question: question, tool: row.tool, status: "needsYou", since: Date())
+                if a.content.state.question != question || a.content.state.kind != row.needKind {
+                    let s = PaneActivityAttributes.ContentState(question: question, tool: row.tool, status: "needsYou", since: Date(), kind: row.needKind)
                     await a.update(ActivityContent(state: s, staleDate: nil))
                 }
                 continue
@@ -55,7 +55,7 @@ enum PaneActivities {
             guard !expired.contains(pane + "|" + question) else { continue }
             let live = Activity<PaneActivityAttributes>.activities.sorted { $0.content.state.since < $1.content.state.since }
             if live.count >= maxActive, let oldest = live.first { await oldest.end(nil, dismissalPolicy: .immediate) }
-            let s = PaneActivityAttributes.ContentState(question: question, tool: row.tool, status: "needsYou", since: Date())
+            let s = PaneActivityAttributes.ContentState(question: question, tool: row.tool, status: "needsYou", since: Date(), kind: row.needKind)
             do {
                 _ = try Activity.request(attributes: PaneActivityAttributes(paneId: pane, name: row.name),
                                          content: ActivityContent(state: s, staleDate: nil))

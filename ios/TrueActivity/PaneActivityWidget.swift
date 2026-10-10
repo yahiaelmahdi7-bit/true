@@ -23,6 +23,7 @@ struct PaneActivityWidget: Widget {
                 buttons(ctx)
             }
             .padding(16)
+            .widgetURL(URL(string: "true://pane/\(ctx.attributes.paneId)"))
             .activityBackgroundTint(Color.black.opacity(0.35))
         } dynamicIsland: { ctx in
             DynamicIsland {
@@ -45,21 +46,27 @@ struct PaneActivityWidget: Widget {
             Circle().fill(amber).frame(width: 8, height: 8)
             Text(ctx.attributes.name).font(.headline).lineLimit(1)
             Spacer()
-            Text(statusLabel(ctx.state.status)).font(.caption).foregroundStyle(amber)
+            Text(statusLabel(ctx.state)).font(.caption).foregroundStyle(amber)
         }
     }
 
-    private func statusLabel(_ status: String) -> String {
-        switch status {
+    private func statusLabel(_ state: PaneActivityAttributes.ContentState) -> String {
+        switch state.status {
         case "sent": return "Sent"
         case "gone": return "Already answered"
-        default: return "Needs you"
+        default: return state.kind == "question" ? "Needs your answer" : "Needs you"
         }
     }
 
     @ViewBuilder
     private func buttons(_ ctx: ActivityViewContext<PaneActivityAttributes>) -> some View {
-        if ctx.state.status == "needsYou" {
+        if ctx.state.status == "needsYou", ctx.state.kind == "question" {
+            // A Live Activity cannot take text; Open lands in the pane with the composer focused.
+            Link(destination: URL(string: "true://pane/\(ctx.attributes.paneId)?compose=1")!) {
+                Text("Open").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent).tint(.blue)
+        } else if ctx.state.status == "needsYou" {
             HStack(spacing: 10) {
                 // Liquid Glass on the controls (doctrine: glass only on controls; blue = the interactive one).
                 Button(intent: ApprovePaneIntent(paneId: ctx.attributes.paneId)) { Text("Approve").frame(maxWidth: .infinity) }

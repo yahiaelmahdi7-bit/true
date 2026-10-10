@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             guard let pane = info["pane"] as? String, let r = response as? UNTextInputNotificationResponse,
                   let answer = LockScreenAnswer.reply(trimming: r.userText) else { return }
             await Notifications.answer(answer, pane: pane)
+        case Notifications.open:
+            if let s = info["url"] as? String, let u = URL(string: s) { await MainActor.run { onURL?(u) } }
         default:
             if let s = info["url"] as? String, let u = URL(string: s) { await MainActor.run { onURL?(u) } }
         }

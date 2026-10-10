@@ -87,7 +87,10 @@ struct PaneView: View {
             .background(Color.black.ignoresSafeArea())
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
-            .onAppear { controller.onCopied = { model.show("Copied") } }
+            .onAppear {
+                controller.onCopied = { model.show("Copied") }
+                if route.compose { Task { try? await Task.sleep(for: .milliseconds(300)); fieldFocused = true } }
+            }
             .task { await loadClaudeFlag() }
             .task { await controller.run(model: model, paneId: route.id) { dismiss() } }
             .onDisappear { Task { await controller.stop() } }

@@ -11,7 +11,7 @@ extension ShapeStyle where Self == Color {
     }
 }
 
-struct PaneRoute: Hashable, Identifiable { let id: String; let title: String }
+struct PaneRoute: Hashable, Identifiable { let id: String; let title: String; var compose: Bool = false }
 
 @MainActor @Observable
 final class AppModel {
@@ -202,6 +202,7 @@ final class AppModel {
         }
         guard url.scheme == "true", url.host == "pane" else { return }
         let id = url.lastPathComponent
-        if !id.isEmpty, id != "/" { selectedTab = "hub"; openPane = PaneRoute(id: id, title: "Pane") }
+        let compose = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "compose" && $0.value == "1" } ?? false
+        if !id.isEmpty, id != "/" { selectedTab = "hub"; openPane = PaneRoute(id: id, title: "Pane", compose: compose) }
     }
 }

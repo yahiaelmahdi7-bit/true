@@ -9,6 +9,8 @@ struct PaneActivityAttributes: ActivityAttributes {
         /// "needsYou" | "working" | "done" | "sent" (an Approve/Deny was just pressed; buttons are gone until the next poll).
         var status: String
         var since: Date
+        /// "permission" | "question" (nil from an older Mac = permission).
+        var kind: String?
     }
 
     var paneId: String
