@@ -1,6 +1,5 @@
 import Foundation
 import AppKit
-import CryptoKit
 import OSLog
 
 /// Wires EARS → REFLEX ∥ BRAIN → HANDS (behind the GATE) → HUD + VOICE. One name per thing; see docs/kb/glossary.md.
@@ -11,12 +10,13 @@ final class NovaEngine: ObservableObject {
     private static let log = Logger(subsystem: "net.prismlens.true", category: "nova")
 
     enum State: String { case idle, listening, thinking, acting, waiting = "waiting for go-ahead", done }
-    struct Line: Identifiable { let id = UUID(); var text: String; var ok: Bool? }
+    struct Line: Identifiable { let id = UUID(); var text: String; var ok: Bool?; var tool = "" }
 
     @Published var state: State = .idle
     @Published var transcript = ""
     @Published var lines: [Line] = []
     @Published var pending: String?
+    @Published private(set) var pendingID: UUID?
     @Published var notice: String?
     @Published var muted = false { didSet { muted ? wake.stop() : startWake() } }
     @Published private(set) var running = false
@@ -48,18 +48,28 @@ final class NovaEngine: ObservableObject {
     }()
     private var lastWordEnd: TimeInterval?
     private var brainTask: Task<Void, Never>?
-    private var approval: CheckedContinuation<Bool, Never>?
+    private let approvals = NovaApprovals()
+    private var speechEndedAt = Date.distantPast
+    private var eagerHeld = false
     private var announcedNoKey = false
     private var recent: [String] = []
-    private lazy var speech = NovaSpeechQueue(onSpeakingChanged: { [weak self] s in self?.speaking = s })
+    private lazy var speech = NovaSpeechQueue(onSpeakingChanged: { [weak self] s in if !s { self?.speechEndedAt = Date() }; self?.speaking = s })
     private lazy var hands = NovaHands(approve: { [weak self] what in await self?.approve(what) ?? false },
                                        cancelled: { Task.isCancelled })
+    /// Eager (mid-speech) hands: read-only tools only; anything that changes something is held for the final run (M1).
+    private lazy var eagerHands = NovaHands(approve: { _ in false }, cancelled: { Task.isCancelled }, eager: true,
+                                            onHeld: { [weak self] in Task { @MainActor in self?.eagerHeld = true } })
     private var run: [String: Any] = [:]
     private var speechBuf = ""
 
     func start() {
         guard NovaSettings.enabled, !running else { return }
         running = true
+        approvals.onChange = { [weak self] item in
+            guard let self else { return }
+            pending = item?.what; pendingID = item?.id
+            state = item == nil ? .acting : .waiting
+        }
         wake.streamTakes = true
         wake.onWake = { }   // the engine reads the name itself from onPartial (it needs the word index)
         wake.onPartial = { [weak self] t, final, end in Task { @MainActor in self?.partial(t, final: final, wordEnd: end) } }
@@ -91,7 +101,10 @@ final class NovaEngine: ObservableObject {
     private func partial(_ text: String, final: Bool, wordEnd: TimeInterval?) {
         guard !muted else { return }
         lastTokenCount = NovaLiveTurn.tokens(text).count
-        if speaking { if NovaLiveTurn.isBargeIn(text) { interrupt() }; return }
+        if NovaApproval.micGated(speaking: speaking, sinceSpeechEnd: Date().timeIntervalSince(speechEndedAt)) {
+            if speaking, NovaLiveTurn.isBargeIn(text) { interrupt() }   // only "stop" gets through while Nova talks
+            return
+        }
         guard let words = live.command(in: text, novaSpeaking: speaking) else { return }
         if !turnActive { beginTurn() }
         lastWordEnd = wordEnd
@@ -116,6 +129,7 @@ final class NovaEngine: ObservableObject {
         guard !turnActive else { return }
         turnActive = true; turnStart = Date(); lastChange = Date(); lastCommand = ""; lastWordEnd = nil
         state = .listening; transcript = ""; lines = []; directDone = []
+        eagerHeld = false; hands.resetTurn(); eagerHands.resetTurn()
         eager = NovaEagerTurn(); eagerTask?.cancel(); eagerTask = nil
         NSSound(named: "Tink")?.play()
         NovaNet.prewarm()
@@ -134,7 +148,7 @@ final class NovaEngine: ObservableObject {
     private func command(_ text: String, now: Date) {
         if text != lastCommand { lastCommand = text; lastChange = now }
         transcript = text
-        if pending != nil, resolveSpoken(text) { return }
+        if pending != nil, resolveSpoken(text, addressed: true) { return }   // command() text is addressed by construction
         guard var s = session else { return }
         let steps = s.feed(text, now: now); session = s
         if !steps.isEmpty { runner.enqueue(steps) }
@@ -173,8 +187,8 @@ final class NovaEngine: ObservableObject {
         live.endTurn(wordCount: lastTokenCount); lastTurnEnd = Date()
         if !NovaSettings.wakeWord, !hotkeyHeld { Task { try? await Task.sleep(for: .seconds(1)); if !turnActive { wake.stop() } } }
         if unhandled.isEmpty { eagerTask?.cancel(); state = handled.isEmpty ? .idle : .done; flushRecord(path: "instant"); return }
-        if eager.startedFor == unhandled, let t = eagerTask { await t.value }   // eager run already has it
-        else { eagerTask?.cancel(); await utterance(unhandled, source: .take, already: handled, eager: false) }
+        if eager.startedFor == unhandled, !eagerHeld, let t = eagerTask { await t.value }   // eager run already has it
+        else { eagerTask?.cancel(); directDone = []; await utterance(unhandled, source: .take, already: handled, eager: false) }   // M1: mismatch/held -> discard, rerun final
         eagerTask = nil
         if state == .done { Task { try? await Task.sleep(for: .seconds(3)); if state == .done, !turnActive { state = .idle } } }
     }
@@ -182,13 +196,17 @@ final class NovaEngine: ObservableObject {
     private func instantDone(_ verb: InstantVerb, _ text: String, _ bad: Bool) {
         var line = verb.spoken
         if NovaSettings.showTimings, let t = runner.timings.last { line += " · \(t.clauseToActMs) ms" }
-        lines.append(.init(text: line, ok: !bad)); state = .acting
+        lines.append(.init(text: line, ok: !bad, tool: "instant")); state = .acting
         if bad { say(text) } else { NSSound(named: "Pop")?.play() }
     }
 
     /// Words in the room, no wake word: reflex only, never the brain; may only complete `ambientSafeVerbs`.
     private func ambient(_ text: String) {
-        if pending != nil, resolveSpoken(text) { return }
+        if NovaApproval.micGated(speaking: speaking, sinceSpeechEnd: Date().timeIntervalSince(speechEndedAt)) { return }
+        if pending != nil {   // ambient speech can only say NO (C1)
+            if NovaApproval.decide(text, addressed: false) == .deny { approvals.resolve(false) }
+            return
+        }
         if turnActive || speaking || Date().timeIntervalSince(lastTurnEnd) < 3 { return }   // never re-read a turn or Nova's own voice
         Task { await utterance(text, source: .ambient) }
     }
@@ -196,21 +214,17 @@ final class NovaEngine: ObservableObject {
     // MARK: GATE approval
 
     func approve(_ what: String) async -> Bool {
-        await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
-            approval = c; pending = what; state = .waiting
-            speech.enqueue(.init(line: "Go ahead?", elevenEnabled: Vault.has("elevenlabs"), elevenVoiceID: nil, elevenModel: nil, voiceboxProfile: nil))
-            Task { try? await Task.sleep(for: .seconds(NovaGate.parkSeconds)); resolve(false) }
+        speech.enqueue(.init(line: "Go ahead?", elevenEnabled: Vault.has("elevenlabs"), elevenVoiceID: nil, elevenModel: nil, voiceboxProfile: nil))
+        return await approvals.request(what, seconds: NovaGate.parkSeconds)
+    }
+    /// HUD click: bound to the id of the card that was shown, so a stale click can't approve a newer action (M2).
+    func resolve(_ yes: Bool, id: UUID? = nil) { approvals.resolve(yes, id: id) }
+    private func resolveSpoken(_ text: String, addressed: Bool) -> Bool {
+        switch NovaApproval.decide(text, addressed: addressed) {
+        case .approve: approvals.resolve(true); return true
+        case .deny: approvals.resolve(false); return true
+        case .none: return false
         }
-    }
-    func resolve(_ yes: Bool) {
-        guard let c = approval else { return }
-        approval = nil; pending = nil; state = .acting; c.resume(returning: yes)
-    }
-    private func resolveSpoken(_ text: String) -> Bool {
-        let t = text.lowercased()
-        if t.contains("go ahead") || t.contains("approve") { resolve(true); return true }
-        if t.contains("cancel") || t.contains("don't") || t.contains("stop") { resolve(false); return true }
-        return false
     }
     func interrupt() { brainTask?.cancel(); speech.shutUp(); resolve(false); state = .idle }
 
@@ -222,7 +236,6 @@ final class NovaEngine: ObservableObject {
 
     func utterance(_ raw: String, source: NovaReflex.Source, already: [String] = [], eager: Bool = false) async {
         let reading = NovaAddress.read(raw)
-        if pending != nil, resolveSpoken(raw) { return }
         if reading.isSummons { say("Yes?"); state = .idle; return }
         let text = eager ? raw : reading.rest
         if !eager { transcript = text }; if source == .take { state = .thinking }
@@ -238,14 +251,15 @@ final class NovaEngine: ObservableObject {
         var tools: [String] = []
         let roster = seats.map { "\($0.name)\($0.live ? "*" : "")" }.joined(separator: ", ")
         let focus = ctx.lookingAt ?? "unknown"
-        let h = hands
+        let h = eager ? eagerHands : hands
         let path = await NovaSpeculative.race(
             reflex: { let v = await NovaReflex.read(text, context: ctx, source: source); return v },
             direct: { [weak self] a in
                 let (name, input) = Self.tool(for: a)
                 let key = name + "|" + input.keys.sorted().map { "\($0)=\(input[$0] ?? "")" }.joined(separator: ",")
+                if eager, await h.markHeldIfMutating(name) { return }   // M1: eager never changes anything
                 guard await self?.claimDirect(key) == true else { return }
-                await self?.begin(NovaToolSchemas.summary(name, input))
+                await self?.begin(NovaToolSchemas.summary(name, input), tool: name)
                 let r = await h.run(name: name, input: input, id: "reflex")
                 await self?.end(name, ok: !r.isError, said: r.text)
             },
@@ -265,7 +279,7 @@ final class NovaEngine: ObservableObject {
                                 let sentence = String(self.speechBuf[...r]).trimmingCharacters(in: .whitespacesAndNewlines)
                                 self.speechBuf = String(self.speechBuf[self.speechBuf.index(after: r)...]); if !sentence.isEmpty { self.say(sentence) }
                             }
-                        case .toolStart(let n, let s): self.state = .acting; self.lines.append(.init(text: s, ok: nil)); _ = n
+                        case .toolStart(let n, let s): self.state = .acting; self.lines.append(.init(text: s, ok: nil, tool: n))
                         case .toolEnd(_, let ok): if let i = self.lines.lastIndex(where: { $0.ok == nil }) { self.lines[i].ok = ok }
                         }
                     }
@@ -282,8 +296,8 @@ final class NovaEngine: ObservableObject {
         try? await Task.sleep(for: .seconds(3)); if state == .done { state = .idle }
     }
 
-    private func begin(_ summary: String) {
-        state = .acting; lines.append(.init(text: summary, ok: nil))
+    private func begin(_ summary: String, tool: String = "") {
+        state = .acting; lines.append(.init(text: summary, ok: nil, tool: tool))
     }
     /// One direct act per tool+input per turn (the eager run and the final run must not both fire it).
     private func claimDirect(_ key: String) -> Bool { directDone.insert(key).inserted }
@@ -307,22 +321,26 @@ final class NovaEngine: ObservableObject {
         }
     }
 
-    // MARK: RECORD (hash, never the words; no secrets)
+    // MARK: RECORD (no words, no hash of the words, no command text: tool names + timings only)
 
-    private func flushRecord(path: String) { record(text: lastCommand, path: path, reflexMs: 0, brainMs: 0) }
-    private func record(text: String, path: String, reflexMs: Int, brainMs: Int) {
-        let hash = SHA256.hash(data: Data(text.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
-        Self.log.info("utterance \(hash, privacy: .public) path=\(path, privacy: .public) reflex_ms=\(reflexMs) brain_ms=\(brainMs) tools=\(self.lines.count) gate=\(self.pending == nil ? "clear" : "pending", privacy: .public)")
+    private func flushRecord(path: String) { record(path: path, reflexMs: 0, brainMs: 0) }
+    private func record(text: String = "", path: String, reflexMs: Int, brainMs: Int) {
+        let tools = lines.map { ($0.tool.isEmpty ? "tool" : $0.tool, $0.ok) }
+        Self.log.info("utterance path=\(path, privacy: .public) reflex_ms=\(reflexMs) brain_ms=\(brainMs) tools=\(tools.count) gate=\(self.pending == nil ? "clear" : "pending", privacy: .public)")
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".true/nova/runs")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let obj: [String: Any] = ["at": ISO8601DateFormatter().string(from: Date()), "transcript_hash": hash, "path": path,
-                                  "reflex_ms": reflexMs, "brain_ms": brainMs,
-                                  "clause_to_act_ms": runner.timings.last?.clauseToActMs as Any? ?? NSNull(),
-                                  "word_to_act_ms": runner.timings.last?.wordToActMs as Any? ?? NSNull(), "tools": lines.map { ["line": $0.text, "ok": $0.ok as Any? ?? NSNull()] }]
+        let obj = Self.runObject(path: path, reflexMs: reflexMs, brainMs: brainMs, clauseMs: runner.timings.last?.clauseToActMs,
+                                 wordMs: runner.timings.last?.wordToActMs, tools: tools)
         if let d = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]) {
-            let f = dir.appendingPathComponent("\(Int(Date().timeIntervalSince1970))-\(hash).json")
+            let f = dir.appendingPathComponent("\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8)).json")
             FileManager.default.createFile(atPath: f.path, contents: d, attributes: [.posixPermissions: 0o600])
         }
         run = [:]
+    }
+    /// The run record: tool names and ok flags only (M3/L4). Static so a test can prove no command text or transcript hash leaks.
+    nonisolated static func runObject(path: String, reflexMs: Int, brainMs: Int, clauseMs: Int?, wordMs: Int?, tools: [(String, Bool?)]) -> [String: Any] {
+        ["at": ISO8601DateFormatter().string(from: Date()), "path": path, "reflex_ms": reflexMs, "brain_ms": brainMs,
+         "clause_to_act_ms": clauseMs as Any? ?? NSNull(), "word_to_act_ms": wordMs as Any? ?? NSNull(),
+         "tools": tools.map { ["tool": $0.0, "ok": $0.1 as Any? ?? NSNull()] }]
     }
 }

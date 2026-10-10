@@ -22,6 +22,11 @@ final class NovaHands: NovaToolRunner, @unchecked Sendable {
     }
 
     /// A new turn: forget which actions already ran (no repeated action across a turn).
+    /// Eager mode: a tool that changes something is held for the final run (marks `onHeld`). Returns true when held.
+    func markHeldIfMutating(_ name: String) async -> Bool {
+        guard eager, !Self.readOnly.contains(name) else { return false }
+        onHeld(); return true
+    }
     func resetTurn() { claimed.withLock { $0 = [] } }
 
     /// Model-initiated call (Haiku or a reflex act): the full gate applies.
@@ -37,7 +42,7 @@ final class NovaHands: NovaToolRunner, @unchecked Sendable {
         if cancelled() { return ("stopped by the user", true) }
         var input = input
         if name == "relay" {   // read first so the card shows the exact text that would be sent
-            let (text, bad) = await MainActor.run { Self.read(input["from"] as? String ?? "", lines: 40) }
+            let (text, bad) = await MainActor.run { [from = input["from"] as? String ?? ""] in Self.read(from, lines: 40) }
             if bad { return (text, true) }
             input["_text"] = text
         }

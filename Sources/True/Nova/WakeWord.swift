@@ -205,6 +205,8 @@ final class WakeListener: ObservableObject {
         let sink = TapSink(req)
         self.sink = sink
         let input = audio.inputNode
+        // C1: echo cancellation so Nova's own voice isn't heard as the user. Best effort; failure keeps the mic gate in NovaEngine.
+        try? input.setVoiceProcessingEnabled(true)
         // THE CRASH GUARD. `outputFormat(forBus:)` reports 0 Hz / 0 channels while the input device
         // is absent or still coming back — and handing that to `installTap` raises an Objective-C
         // exception that Swift cannot catch, aborting the whole app (see AudioSafety.swift; this is

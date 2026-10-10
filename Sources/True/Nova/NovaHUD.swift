@@ -47,10 +47,10 @@ struct NovaHUDView: View {
             }
             if let p = engine.pending {
                 HStack {
-                    Text("Go ahead: \(p)?").font(.system(size: 12)).foregroundStyle(Theme.text).lineLimit(2)
+                    Text("Go ahead: \(p)?").font(.system(size: 12)).foregroundStyle(Theme.text).lineLimit(8)
                     Spacer(minLength: 8)
-                    Button("Cancel") { engine.resolve(false) }.buttonStyle(.plain).foregroundStyle(Theme.dimText)
-                    Button("Approve") { engine.resolve(true) }.buttonStyle(.plain).foregroundStyle(Theme.text).bold()
+                    Button("Cancel") { engine.resolve(false, id: engine.pendingID) }.buttonStyle(.plain).foregroundStyle(Theme.dimText)
+                    Button("Approve") { engine.resolve(true, id: engine.pendingID) }.buttonStyle(.plain).foregroundStyle(Theme.text).bold()
                 }.font(.system(size: 12))
             }
             if let n = engine.notice {

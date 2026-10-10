@@ -16,7 +16,7 @@ enum NovaGate {
     /// Where a tool call comes from. `.local` = the user's own words matched by the instant lane / reflex tables.
     enum Origin { case model, local }
     /// The app Nova lives in: it may never quit, hide or terminate it.
-    static let ownBundleIDs: Set<String> = ["net.prismlens.true"].union(Bundle.main.bundleIdentifier.map { [$0] } ?? [])
+    static let ownBundleIDs: Set<String> = Set(["net.prismlens.true"] + (Bundle.main.bundleIdentifier.map { [$0] } ?? []))
     static func isOwnApp(name: String) -> Bool {
         let n = name.lowercased().trimmingCharacters(in: .whitespaces)
         var own: Set<String> = ["true", "true app", "true.app"]

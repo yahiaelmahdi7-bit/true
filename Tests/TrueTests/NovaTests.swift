@@ -21,7 +21,8 @@ import Foundation
     @Test func shellAllowlistFreeOtherParksDenyRefused() {
         #expect(NovaGate.shell("ls -la") == .allow)
         #expect(NovaGate.shell("git status") == .allow)
-        #expect(NovaGate.shell("git log | head -5") == .allow)
+        // Run 26c H2: pipes are shell syntax, so a pipeline is never "provably read-only" and parks (was .allow before).
+        if case .park = NovaGate.shell("git log | head -5") {} else { Issue.record("pipe should park") }
         if case .park = NovaGate.shell("touch x") {} else { Issue.record("touch should park") }
         if case .park = NovaGate.shell("git commit -m x") {} else { Issue.record("git commit should park") }
         if case .park = NovaGate.shell("ls; rm x") {} else { Issue.record("chained should park") }
@@ -37,7 +38,8 @@ import Foundation
     @Test func toolLevelRules() {
         if case .park = NovaGate.tool("move_to_trash", ["path": "/tmp/x"]) {} else { Issue.record("trash parks") }
         if case .park = NovaGate.tool("send_to_pane", [:], paneBusy: true) {} else { Issue.record("busy pane parks") }
-        #expect(NovaGate.tool("send_to_pane", [:], paneBusy: false) == .allow)
+        // Run 26c C2: every model-initiated send parks, whatever the pane state (was .allow before).
+        if case .park = NovaGate.tool("send_to_pane", [:], paneBusy: false) {} else { Issue.record("model send parks") }
         if case .park = NovaGate.tool("quit_app", [:], hasUnsaved: true) {} else { Issue.record("unsaved parks") }
     }
     /// Screen text is DATA: an injected instruction carried in a screen-table row label can only reach a hand through

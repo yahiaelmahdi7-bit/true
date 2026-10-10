@@ -44,7 +44,8 @@ enum NovaPaths {
         let l = canon.lowercased() == "/" ? "" : canon.lowercased()
         return roots(home: home).contains { $0.hasPrefix(l + "/") }
     }
-    static func check(_ path: String, base: String = NSHomeDirectory(), home: String = NSHomeDirectory()) -> GateVerdict {
+    static func check(_ rawPath: String, base: String = NSHomeDirectory(), home: String = NSHomeDirectory()) -> GateVerdict {
+        let path = rawPath == "~" ? home : (rawPath.hasPrefix("~/") ? home + String(rawPath.dropFirst()) : rawPath)   // ~ means THIS home
         guard let c = canonical(path, base: base) else { return .refuse("can't resolve that path") }
         if isSecret(c, home: home) || isSecret(URL(fileURLWithPath: ((path as NSString).expandingTildeInPath as NSString).standardizingPath).path, home: home) {
             return .refuse("that file holds secrets")

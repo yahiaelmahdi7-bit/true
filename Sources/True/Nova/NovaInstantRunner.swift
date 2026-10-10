@@ -58,6 +58,11 @@ enum NovaInstantTools {
         }
     }
 
+    /// The single new process of that name that appeared since `before`; nil if none or ambiguous.
+    static func newPID(named: String, before: Set<Int32>, now: [(Int32, String)]) -> Int32? {
+        let hits = now.filter { !before.contains($0.0) && $0.1.lowercased() == named.lowercased() }
+        return hits.count == 1 ? hits[0].0 : nil
+    }
     @MainActor static func running(_ name: String) -> NSRunningApplication? {
         NSWorkspace.shared.runningApplications.first { $0.localizedName?.lowercased() == name.lowercased() }
     }
@@ -68,6 +73,12 @@ enum NovaInstantTools {
     static func setVolume(_ n: Int) async { await osa("set volume output volume \(n)") }
     static func osa(_ s: String) async { _ = await NovaHands.exec("/usr/bin/osascript", ["-e", s], cwd: nil, timeout: 5, cap: 64) }
 }
+
+/// The pid Nova's own open created (set after the act; read by undo).
+final class LaunchedPID: @unchecked Sendable { var pid: Int32? }
+/// Undo's terminate, injectable so a test can prove which pid it touches.
+nonisolated(unsafe) var novaTerminatePID: (Int32) -> Void = { _ = NSRunningApplication(processIdentifier: $0)?.terminate() }
+private func terminate(_ pid: Int32) { novaTerminatePID(pid) }
 
 /// Serial executor for the instant lane's Steps. Captures undo state BEFORE each hand moves, times dispatch.
 @MainActor
@@ -102,7 +113,9 @@ final class NovaInstantRunner {
         case .undo(let id):
             if let u = undos.removeValue(forKey: id) { await u(); onUndo?() }
         case .act(let verb):
-            let undo = await captureUndo(verb)
+            let launched = LaunchedPID()
+            let beforePIDs = await MainActor.run { Set(NSWorkspace.shared.runningApplications.map(\.processIdentifier)) }
+            let undo = await captureUndo(verb, launched: launched)
             let started = Date()
             let ms = Int(started.timeIntervalSince(step.completedAt) * 1000)
             let w = wordEnd()
@@ -110,6 +123,9 @@ final class NovaInstantRunner {
             timings.append(.init(clauseToActMs: ms, wordToActMs: wordMs, verb: String(describing: verb).prefix(12).description))
             let (tool, input) = Self.tool(for: verb)
             let r = await hands.runLocal(name: tool, input: input)
+            if case .openApp(let n) = verb {
+                launched.pid = await MainActor.run { NovaInstantTools.newPID(named: n, before: beforePIDs, now: NSWorkspace.shared.runningApplications.map { ($0.processIdentifier, $0.localizedName ?? "") }) }
+            }
             if let undo, !r.isError { undos[step.id] = undo }
             onResult?(verb, r.text, r.isError)
         }
@@ -133,13 +149,14 @@ final class NovaInstantRunner {
     }
 
     /// Snapshot what the act will change so "no" can put it back.
-    private func captureUndo(_ v: InstantVerb) async -> (() async -> Void)? {
+    private func captureUndo(_ v: InstantVerb, launched: LaunchedPID) async -> (() async -> Void)? {
         let front = NSWorkspace.shared.frontmostApplication
         let restoreFront: () async -> Void = { @MainActor in front?.activate() }
         switch v {
         case .openApp(let n):
             let wasRunning = NovaInstantTools.running(n) != nil
-            return { await restoreFront(); if !wasRunning { await MainActor.run { _ = NovaInstantTools.running(n)?.terminate() } } }
+            // L6: undo terminates only the pid Nova's own open produced (recorded after the act), never "an app by that name".
+            return { await restoreFront(); if !wasRunning { await MainActor.run { if let pid = launched.pid { terminate(pid) } } } }
         case .hideApp(let n): return { () async -> Void in await MainActor.run { _ = NovaInstantTools.running(n)?.unhide() } }
         case .quitApp(let n):
             let url = NovaInstantTools.running(n)?.bundleURL
