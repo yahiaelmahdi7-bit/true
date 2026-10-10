@@ -19,4 +19,4 @@ Smart input (one box: shell vs agent request, next-command, commit/PR text) · i
 "Fans spinning" is the reason Axon died: if idle CPU is not ~0%, that is a stop-and-fix. [source: SPEC.md:6-8, Hard rules] Other kill criteria: Unknown — see Open questions.
 
 ## Next: Nova screen hands
-`do_on_screen`/`read_screen`/`click_row`/`type_into_row`/`press_keys`/`scroll` (AX table + OCR fallback), the `computer_toolset_20260801` fallback wired to tools, live partial transcript in the HUD, unsaved-changes detection for `quit_app`.
+`do_on_screen`/`read_screen`/`click_row`/`type_into_row`/`press_keys`/`scroll` (AX table + OCR fallback), the `computer_toolset_20260801` fallback wired to tools, (live partial transcript in the HUD: done in Run 26b), unsaved-changes detection for `quit_app`.

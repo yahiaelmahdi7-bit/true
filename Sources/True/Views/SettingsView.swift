@@ -14,6 +14,7 @@ struct SettingsView: View {
     @AppStorage(NovaSettings.wakeKey) private var novaWake = true
     @AppStorage(NovaSettings.hotkeyKey) private var novaKey = Hotkey.rightOption.rawValue
     @AppStorage(NovaSettings.effortKey) private var novaEffort = "low"
+    @AppStorage(NovaSettings.timingsKey) private var novaTimings = false
 
     var body: some View {
         Form {
@@ -42,6 +43,7 @@ struct SettingsView: View {
                 Toggle("Wake word “Nova” (mic always on)", isOn: $novaWake)
                 Picker("Push-to-talk", selection: $novaKey) { ForEach(Hotkey.allCases) { Text($0.label).tag($0.rawValue) } }
                 Picker("Brain effort", selection: $novaEffort) { Text("low").tag("low"); Text("medium").tag("medium") }
+                Toggle("Show timings (ms on each HUD line)", isOn: $novaTimings)
                 LabeledContent("Haiku key", value: Vault.has("anthropic", envFallback: ["ANTHROPIC_API_KEY"]) ? "set" : "missing — reflex-only")
                 LabeledContent("ElevenLabs key", value: Vault.has("elevenlabs") ? "set" : "none — system voice")
                 ForEach([("Microphone", "Privacy_Microphone"), ("Speech Recognition", "Privacy_SpeechRecognition"), ("Accessibility", "Privacy_Accessibility"),

@@ -723,3 +723,12 @@ Yahia's call: **Nova lives inside True.app** (overrides the v1 "No Nova, voice, 
 - **Record:** os_log category `nova` (hash, never words) and `~/.true/nova/runs/*.json` (0600).
 - **Settings → Nova:** enable, wake word (default ON, mic pill + one-click mute in the title bar), hotkey, effort, key and permission status.
 - **Not in this run:** screen hands (`do_on_screen`, `read_screen`, `click_row`, `type_into_row`, `press_keys`, `scroll`) and the computer toolset fallback (request builder supports the toolset entry; no tools wired); live partial transcript (HUD shows "listening" then the final text); unsaved-changes detection (`quit_app` parks only if the caller reports unsaved state — not wired yet).
+
+### Run 26b — Instant Nova (2026-10-10)
+Decided: **act mid-sentence; undo on "no"**. A common command's hand starts ≤ 30 ms in-process after the partial that completes it.
+- **Live stream:** the wake stream stays on through a take (no stand-down, no recorder). `WakeListener.onPartial` feeds `NovaEngine`; recognizer biased with running/installed app names (≤ 60) + True roster.
+- **Instant lane** (`NovaInstant`, `NovaInstantRunner`): clauses dispatched as completed, chained serially; undo records; app index with aliases; ambiguous prefixes ("Music" vs "Music Memos") wait 250 ms. Quit is graceful `terminate()` only.
+- **Rest of the sentence:** unmatched clauses go to reflex and brain at the same instant (`NovaSpeculative.race`: brain at t0, never awaits reflex; no prior). Eager end-of-turn after 250 ms unchanged (≤ 3 restarts); final end by `DynamicEndpointing`; hotkey release ends the turn at once.
+- **Feedback never waits:** act earcon "Pop" (wake is "Tink"); speech only for information (status, read_pane) or failure.
+- **Warm wires:** shared `NovaNet.session`; keyless HEAD prewarm at turn start. **Measure:** `clause_to_act_ms`, `word_to_act_ms` in run JSON; Settings → Nova "Show timings".
+- Not in this run: screen hands (`do_on_screen` etc.) — still on the roadmap.

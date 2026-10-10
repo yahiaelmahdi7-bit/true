@@ -29,3 +29,8 @@ Owner: knowledge-keeper · Last verified: 2026-09-30
 - **Hands** — the tools that act (`NovaHands`): True panes/agents, apps, shell, files.
 - **Gate** — deterministic code in front of every hand (`NovaGate`).
 - **HUD** — Nova's floating status panel.
+- **Live stream** — the on-device `SFSpeechRecognizer` stream (`WakeListener`) kept running THROUGH a take; the words after the last "Nova" (or after the held hotkey) in each partial are the command. Partials drive the HUD live (Run 26b).
+- **Instant lane** — pure local matcher (`NovaInstant`) run on every addressed partial: open/hide/quit apps, focus panes, volume, media, scroll, screenshot, known sites. No network; acts still go through Hands + Gate.
+- **Clause** — a piece of the addressed partial split on "and then", "then", "and", "after that", ","; dispatched the moment it is complete, never twice.
+- **Undo record** — one per instant act (depth 3, 8 s TTL); a clause starting "no / nope / actually / undo / wait no / not that / I mean" undoes the last act, then the rest runs as a new clause.
+- **Addressed** — words after the wake name or while the hotkey is held; ambient speech is never addressed.

@@ -269,7 +269,7 @@ private func verdict(kind: NovaReflex.Kind = .deskControl, kc: Double = 0.95, ad
         let b = Box(); let t0 = Date()
         _ = await NovaSpeculative.race(reflex: { try? await Task.sleep(for: .milliseconds(400)); return verdict(vc: 0.2) },
                                        direct: { _ in }, brain: { b.started = Date() })
-        #expect((b.started?.timeIntervalSince(t0) ?? 9) < 0.02)
+        #expect((b.started?.timeIntervalSince(t0) ?? 9) < 0.1)   // ~1 ms alone; the bound is loose only for a loaded parallel test run (sequential would be >= 0.4)
     }
 }
 

@@ -35,3 +35,11 @@ If a key leaks: rotate at TypeSafe, update Keychain item. If a runaway agent: `t
 - **Key storage:** Anthropic/ElevenLabs keys in Keychain service `net.prismlens.true`, read via `/usr/bin/security`, never logged.
 - **Run logs:** `~/.true/nova/runs/` 0600, transcript hash and tool summaries only; os_log never carries the words.
 - **Residual risk:** an approved ("go ahead") park is trusted; ambient speech from a TV could trigger `ambientSafeVerbs` only.
+
+## Nova instant lane (Run 26b)
+- **Mic-only lane:** the lane reads only the on-device recognizer's text; no network, no model; nothing in a pane, file or web page can reach it.
+- **Addressed only:** ambient speech (a TV saying "open Safari") never fires it — only words after the wake name or while the hotkey is held.
+- **Self-speech ignored:** partials heard while Nova is speaking are dropped; only "stop" barges in.
+- **Quit is graceful:** `NSRunningApplication.terminate()` only, never force; the app's own save prompt protects work. Every instant act still passes `NovaGate` + `NovaHands`.
+- **Undo:** the last 3 acts (8 s TTL) are reversible by a clause starting "no / undo / actually…".
+- **Prewarm:** keyless `HEAD` requests only; keys never logged.
