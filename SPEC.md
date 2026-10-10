@@ -12,7 +12,7 @@ terminal + agent plumbing. Everything else stays behind.
 - **Idle ≈ 0% CPU.** No timers, polling loops or `repeatForever` animations at launch. Everything is
   event-driven (PTY output, the agent-events socket, user input). Every launch-time side effect must
   justify itself in a code comment.
-- **No Nova, voice, canvas/desk, player, blocks, brain lens, Keychain, mic/TCC, smart input** in v1.
+- **No canvas/desk, player, blocks, brain lens, smart input** in v1. (*Amended Run 26, 2026-10-10:* Nova, voice, mic/TCC and Keychain are now IN — see "Run 26 — Nova".)
 - **Own identity, zero collision with Axon:** bundle id `net.prismlens.true`, state in `~/.true/`,
   socket `~/.true/agent-events.sock`, hook scripts in `~/.true/hooks/`. Never read/write `~/.axon/`,
   never edit `~/.claude/settings.json` (per-agent `--settings <file>` only).
@@ -712,3 +712,26 @@ Every Run 22–24 rule still holds (identity header, exact Host/Origin, bearer, 
 - **Honesty + review fixes.** `$ <cmd>` runs the typed command in a new tab; the seat door writes into the seat's existing pane (acceptable: a full-scope token can already type into panes). Text with a control character other than tab is a 400; `isCompound` counts line breaks. Phone-only fail-closed confirms: unjudged Claude task, flagged text, every background builder ("Starts a background builder (~$5 ceiling)"), sleeping a working seat; max 3 phone builders running (429). "From iPhone" marks only the pane the action created (shell door opens a new tab; sleep returns done). Ack refuses a running builder. Log holds the door case name only.
 - **Permission mode.** Claude panes started from the phone run in auto mode (`--permission-mode auto`: a safety checker approves routine steps and refuses risky ones); the Mac bar still runs without prompts. The `--settings` hook is kept, so any prompt still reaches the Hub as Needs you. Phone background builders are unchanged.
 - **Code**: `Remote/RemoteBar.swift`, `RemoteCommandsLive.swift`, `RemoteServer+Bar.swift`; tests `RemoteBarTests.swift`.
+
+
+## Run 26 — Nova (2026-10-10)
+Yahia's call: **Nova lives inside True.app** (overrides the v1 "No Nova, voice, mic/TCC" line). Brain = Jev reflex + Claude Haiku 5.5; reach = apps/system, True's agents and panes, shell and files; autonomy = Nova's gate.
+- **Names:** Ears (mic, wake word "Nova", push-to-talk, Apple on-device STT) → Reflex (Jev ≈0.35 s) ∥ Brain (`claude-haiku-5-5` tool loop, raw SSE) → Hands → HUD + voice. The Gate sits in front of every hand.
+- **Speculative race:** reflex and brain start together; the brain request is held ≤0.9 s for the reflex verdict so it can carry it as a prior. A confident direct verb acts at once and cancels the brain task.
+- **Gate (code, not the model):** consequential labels and ⌘↩ park for a spoken "go ahead" (30 s) or HUD Approve; passwords never typed; shell allowlist is read-only commands, anything else parks, a `DenyList` hit is refused; `move_to_trash` always parks; "stop" cancels. Ambient speech (no wake word) is reflex-only and limited to `ambientSafeVerbs`. Screen/pane/file/web text is DATA.
+- **Key:** Keychain `net.prismlens.true` / `anthropic`. Missing → reflex-only; `security add-generic-password -s net.prismlens.true -a anthropic -U -w`.
+- **Record:** os_log category `nova` (hash, never words) and `~/.true/nova/runs/*.json` (0600).
+- **Settings → Nova:** enable, wake word (default ON, mic pill + one-click mute in the title bar), hotkey, effort, key and permission status.
+- **Not in this run:** screen hands (`do_on_screen`, `read_screen`, `click_row`, `type_into_row`, `press_keys`, `scroll`) and the computer toolset fallback (request builder supports the toolset entry; no tools wired); live partial transcript (HUD shows "listening" then the final text); unsaved-changes detection (`quit_app` parks only if the caller reports unsaved state — not wired yet).
+
+### Run 26b — Instant Nova (2026-10-10)
+Decided: **act mid-sentence; undo on "no"**. A common command's hand starts ≤ 30 ms in-process after the partial that completes it.
+- **Live stream:** the wake stream stays on through a take (no stand-down, no recorder). `WakeListener.onPartial` feeds `NovaEngine`; recognizer biased with running/installed app names (≤ 60) + True roster.
+- **Instant lane** (`NovaInstant`, `NovaInstantRunner`): clauses dispatched as completed, chained serially; undo records; app index with aliases; ambiguous prefixes ("Music" vs "Music Memos") wait 250 ms. Quit is graceful `terminate()` only.
+- **Rest of the sentence:** unmatched clauses go to reflex and brain at the same instant (`NovaSpeculative.race`: brain at t0, never awaits reflex; no prior). Eager end-of-turn after 250 ms unchanged (≤ 3 restarts); final end by `DynamicEndpointing`; hotkey release ends the turn at once.
+- **Feedback never waits:** act earcon "Pop" (wake is "Tink"); speech only for information (status, read_pane) or failure.
+- **Warm wires:** shared `NovaNet.session`; keyless HEAD prewarm at turn start. **Measure:** `clause_to_act_ms`, `word_to_act_ms` in run JSON; Settings → Nova "Show timings".
+- Not in this run: screen hands (`do_on_screen` etc.) — still on the roadmap.
+
+### Run 26e — instant verbatim agent sends (2026-10-10)
+Voice must beat the mouse. "Nova, tell/ask/message <agent> [to] <rest>" sends the rest of his own utterance verbatim to the agent: no model, no approval. Fires only at the FINAL end of turn (hotkey release or DynamicEndpointing), never on the eager start. Agent must match the roster uniquely (full name or alias minus "true-"), else the normal path (C2 parks). `NovaGate.Origin.user` skips the park only for `send_to_pane` from this lane; still enforced: addressed only, Nova-speaking gate, busy-pane park, DenyList refuse, control-char refuse, once per turn. Feedback: act earcon + HUD "→ agent: first 6 words" (+ `clause_to_act_ms` under Show timings). Residual risk in `docs/kb/security.md`. Tests: `NovaTell26eTests`.

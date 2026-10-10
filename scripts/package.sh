@@ -44,7 +44,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <!-- macOS charges a child process's mic use to the app that launched it, so Claude Code's
        hold-space voice mode asks as True. Without this key TCC refuses silently, no prompt. -->
-  <key>NSMicrophoneUsageDescription</key><string>Programs you run in True, such as Claude Code voice mode, use the microphone to hear you.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Nova (True's voice assistant) and programs you run in True, such as Claude Code voice mode, use the microphone to hear you.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>Nova transcribes what you say on-device so you can control True by voice.</string>
+  <key>NSAppleEventsUsageDescription</key><string>Nova uses Apple Events to open, quit and control apps when you ask.</string>
 </dict>
 </plist>
 PLIST

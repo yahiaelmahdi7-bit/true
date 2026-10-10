@@ -70,6 +70,14 @@ enum PaneDelivery {
     /// it lands as a second, truncated instruction. Callers upstream (`NovaBrain`) already flatten
     /// their jobs, but this is the seam that must guarantee it — a hand-typed multi-line paste or a
     /// future caller would otherwise reintroduce the bug one prompt at a time.
+    /// The one door for typed text, every origin: C0 (except tab/newline), DEL and C1 never reach the pane, so a
+    /// message can't close the bracketed paste early (ESC[201~) or toggle the agent's mode (ESC[Z).
+    nonisolated static func sanitize(_ s: String) -> String {
+        String(String.UnicodeScalarView(s.unicodeScalars.filter { u in
+            u.value == 0x09 || u.value == 0x0A || !(u.value < 0x20 || u.value == 0x7F || (0x80...0x9F).contains(u.value))
+        }))
+    }
+
     static func flatten(_ raw: String) -> String {
         raw.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -127,7 +135,7 @@ enum PaneDelivery {
 
         switch intent {
         case .stage:
-            view.send(txt: text)
+            view.send(txt: sanitize(text))
             onOutcome?(.staged)
 
         case .submitOnly:
@@ -140,7 +148,7 @@ enum PaneDelivery {
             break // handled above, before the sleep/wake branch
 
         case .prompt, .control:
-            let body = flatten(text)
+            let body = sanitize(flatten(text))
             guard !body.isEmpty else { onOutcome?(.staged); return }
             typeBody(body, into: view)
             Task {
