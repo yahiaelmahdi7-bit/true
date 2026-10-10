@@ -1,4 +1,7 @@
 import Foundation
+#if os(iOS)
+import UIKit
+#endif
 
 public enum RemoteError: Error, Equatable, Sendable {
     /// 401 (or WS close 4401): the token is gone or revoked. The token store has been cleared; show the pairing screen.
@@ -53,12 +56,23 @@ public actor RemoteSession {
         self.baseURL = baseURL; self.store = store; self.transport = transport
     }
 
+    public static var clientUserAgent: String {
+        #if os(iOS)
+        let device = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+        return "True/1 (\(device); iOS \(UIDevice.current.systemVersion))"
+        #else
+        return "True/1 (Macintosh)"
+        #endif
+    }
+
     public static func defaultTransport() -> URLSession {
         let c = URLSessionConfiguration.ephemeral
         c.httpShouldSetCookies = false
         c.httpCookieStorage = nil
         c.requestCachePolicy = .reloadIgnoringLocalCacheData
         c.timeoutIntervalForRequest = 20
+        // The Mac labels a paired device from this header ("iPhone · paired ..."); CFNetwork's default says neither.
+        c.httpAdditionalHeaders = ["User-Agent": clientUserAgent]
         return URLSession(configuration: c)
     }
 

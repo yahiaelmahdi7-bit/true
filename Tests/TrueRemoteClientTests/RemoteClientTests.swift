@@ -29,7 +29,7 @@ let sampleHub = """
  {"title":"true","summary":"1 working · 1 needs you","rows":[
   {"kind":"seat","id":"lead-true","name":"lead-true","status":"Working","statusKey":"working","pane":"11111111-1111-1111-1111-111111111111","cwd":"~/Projects/true","elapsed":"12m"},
   {"kind":"seat","id":"helper-1-true","name":"helper-1-true","status":"Needs you","statusKey":"needsYou","pane":"22222222-2222-2222-2222-222222222222","cwd":"~/Projects/true/Sources","elapsed":"3m"},
-  {"kind":"background","id":"builder run-26","name":"builder run-26","status":"Done","statusKey":"done","builderId":"run-26","acked":false,"cwd":"~/Projects/true.builders","elapsed":"41m","branch":null}]},
+  {"kind":"background","id":"builder run-26","name":"builder run-26","status":"Done","statusKey":"done","builderId":"run-26","acked":false,"cwd":"~/Projects/true.builders","elapsed":2460.7,"branch":null}]},
  {"title":"axon","summary":"1 failed","rows":[
   {"kind":"other","id":"zsh in Ghostty","name":"zsh in Ghostty","status":"Working","statusKey":"working","cwd":"~/Projects/axon","elapsed":"1h 2m"}]}]}
 """
@@ -129,6 +129,19 @@ private func session(_ t: StubTransport, token: String? = "tok", store: InMemory
         #expect(h.projects[0].rows[1].statusKey == "needsYou")
         #expect(h.projects[0].rows[2].builderId == "run-26" && h.projects[0].rows[2].branch == nil)
         #expect(h.needsYouIDs == ["helper-1-true"])
+    }
+
+    /// The Mac sends builders `elapsed` in seconds and seats a label; a number must never fail the whole snapshot
+    /// (that read as "Mac asleep or offline" on the phone, Run 30).
+    @Test func hubElapsedDecodesSecondsOrText() throws {
+        let h = try JSONDecoder().decode(HubSnapshot.self, from: Data(sampleHub.utf8))
+        let rows = h.projects.flatMap(\.rows)
+        #expect(rows.first { $0.kind == "background" }?.elapsed == "41m")
+        #expect(rows.first { $0.id == "lead-true" }?.elapsed == "12m")
+        #expect(HubRow.elapsedLabel(41) == "41s")
+        #expect(HubRow.elapsedLabel(3720) == "1h 2m")
+        let bare = #"{"projects":[{"title":"t","rows":[{"kind":"seat","id":"a","name":"a","status":"","statusKey":"idle"}]}]}"#
+        #expect(try JSONDecoder().decode(HubSnapshot.self, from: Data(bare.utf8)).projects[0].rows[0].elapsed == nil)
     }
 
     @Test func routeResponseDecodesWhereKey() throws {

@@ -66,11 +66,48 @@ public struct HubRow: Codable, Equatable, Sendable, Identifiable {
     public var model: String?
     public var pane: String?
     public var cwd: String?
+    /// Always text for display ("41m", "1h 2m"). The Mac sends builder rows a number of seconds and may send
+    /// seats a label; both decode, so a type change on one side never reads as "Mac offline" on the phone.
     public var elapsed: String?
     public var builderId: String?
     public var acked: Bool?
     public var branch: String?
     public var updated: Double?
+
+    public init(kind: String, id: String, name: String, status: String, statusKey: String, model: String? = nil,
+                pane: String? = nil, cwd: String? = nil, elapsed: String? = nil, builderId: String? = nil,
+                acked: Bool? = nil, branch: String? = nil, updated: Double? = nil) {
+        self.kind = kind; self.id = id; self.name = name; self.status = status; self.statusKey = statusKey
+        self.model = model; self.pane = pane; self.cwd = cwd; self.elapsed = elapsed; self.builderId = builderId
+        self.acked = acked; self.branch = branch; self.updated = updated
+    }
+
+    public init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(String.self, forKey: .kind)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
+        statusKey = try c.decodeIfPresent(String.self, forKey: .statusKey) ?? ""
+        model = try c.decodeIfPresent(String.self, forKey: .model)
+        pane = try c.decodeIfPresent(String.self, forKey: .pane)
+        cwd = try c.decodeIfPresent(String.self, forKey: .cwd)
+        builderId = try c.decodeIfPresent(String.self, forKey: .builderId)
+        acked = try c.decodeIfPresent(Bool.self, forKey: .acked)
+        branch = try c.decodeIfPresent(String.self, forKey: .branch)
+        updated = try c.decodeIfPresent(Double.self, forKey: .updated)
+        if let text = try? c.decodeIfPresent(String.self, forKey: .elapsed) { elapsed = text }
+        else if let secs = try? c.decodeIfPresent(Double.self, forKey: .elapsed) { elapsed = Self.elapsedLabel(secs) }
+        else { elapsed = nil }
+    }
+
+    /// 0...59 s -> "41s", under an hour -> "12m", otherwise "1h 2m".
+    public static func elapsedLabel(_ seconds: Double) -> String {
+        let s = Int(max(0, seconds).rounded())
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m" }
+        return "\(s / 3600)h \((s % 3600) / 60)m"
+    }
 }
 
 public struct BuilderDetail: Codable, Equatable, Sendable {
