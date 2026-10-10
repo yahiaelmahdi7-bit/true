@@ -32,6 +32,7 @@ enum NovaGate {
     static func shell(_ command: String, cwd: String = "") -> GateVerdict {
         let c = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !c.isEmpty else { return .refuse("empty command") }
+        if c.unicodeScalars.contains(where: { $0.value == 0 }) || cwd.unicodeScalars.contains(where: { $0.value == 0 }) { return .refuse("bad characters in the command") }
         if DenyList.isHit(c) { return .refuse("blocked by the deny-list: \(DenyList.hits(c).joined(separator: ", "))") }
         switch NovaShell.plan(c, cwd: cwd) {
         case .run: return .allow
@@ -60,6 +61,7 @@ enum NovaGate {
     /// Every model-initiated send/relay/spawn/open_url parks with the exact target and full text or URL.
     static func tool(_ name: String, _ input: [String: Any], paneBusy: Bool = false, hasUnsaved: Bool = false, origin: Origin = .model) -> GateVerdict {
         func str(_ k: String) -> String { input[k] as? String ?? "" }
+        if input.values.contains(where: { ($0 as? String)?.unicodeScalars.contains { $0.value == 0 } == true }) { return .refuse("bad characters in the request") }
         switch name {
         case "run_shell": return shell(str("command"), cwd: str("cwd"))
         case "read_file": return readableFile(str("path"))

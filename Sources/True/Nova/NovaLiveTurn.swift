@@ -32,7 +32,12 @@ struct NovaLiveTurn {
 
     /// Engine entry point for every partial. `gated` = Nova speaking or in its echo tail.
     mutating func ingest(_ text: String, gated: Bool, novaSpeaking: Bool) -> [String]? {
-        if gated { return nil }
+        if gated {
+            // Nova's own words (and the echo tail) are spent: a "nova" in them must never address a later command (P1).
+            let n = Self.tokens(text).count
+            if hotkeyBase != nil { hotkeyBase = n } else { floor = n }
+            return nil
+        }
         return command(in: text, novaSpeaking: novaSpeaking)
     }
 

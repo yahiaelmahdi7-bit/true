@@ -20,7 +20,8 @@ import Foundation
     }
     @Test func shellAllowlistFreeOtherParksDenyRefused() {
         #expect(NovaGate.shell("ls -la") == .allow)
-        #expect(NovaGate.shell("git status") == .allow)
+        // Run 26d P2c: git is free only inside a known True project folder (NovaSecurity26dTests); elsewhere it parks.
+        if case .park = NovaGate.shell("git status") {} else { Issue.record("git outside a known project should park") }
         // Run 26c H2: pipes are shell syntax, so a pipeline is never "provably read-only" and parks (was .allow before).
         if case .park = NovaGate.shell("git log | head -5") {} else { Issue.record("pipe should park") }
         if case .park = NovaGate.shell("touch x") {} else { Issue.record("touch should park") }

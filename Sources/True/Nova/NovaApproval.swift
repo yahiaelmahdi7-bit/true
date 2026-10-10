@@ -24,7 +24,10 @@ enum NovaApproval {
     }
     /// The only entry for SPOKEN approval. Approve needs a FINAL utterance and the card that was showing when it started.
     static func resolution(_ text: String, addressed: Bool, final: Bool, cardAtStart: UUID?, cardNow: UUID?) -> Decision {
-        decide(text, addressed: addressed)
+        let d = decide(text, addressed: addressed)
+        if d == .deny { return .deny }                       // a no is safe from anywhere, even mid-sentence
+        guard d == .approve, final, let start = cardAtStart, start == cardNow else { return .none }
+        return .approve
     }
     /// Nova's own voice (and its echo tail) never counts as input.
     static func micGated(speaking: Bool, sinceSpeechEnd: TimeInterval) -> Bool { speaking || sinceSpeechEnd < micTail }

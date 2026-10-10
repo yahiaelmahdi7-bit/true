@@ -12,7 +12,8 @@ final class NovaHands: NovaToolRunner, @unchecked Sendable {
     /// held (`onHeld`) and only the final end-of-turn run executes it.
     private let eager: Bool
     private let onHeld: @Sendable () -> Void
-    private let claimed = OSAllocatedUnfairLock(initialState: Set<String>())
+    /// Claimed actions this turn -> their outcome (nil while still running), so a repeat reports what really happened.
+    private let claimed = OSAllocatedUnfairLock(initialState: [String: (text: String, isError: Bool)?]())
     static let log = Logger(subsystem: "net.prismlens.true", category: "nova")
     static let readOnly: Set<String> = ["hub_status", "read_pane", "find_files", "read_file", "run_shell"]
 
@@ -27,7 +28,7 @@ final class NovaHands: NovaToolRunner, @unchecked Sendable {
         guard eager, !Self.readOnly.contains(name) else { return false }
         onHeld(); return true
     }
-    func resetTurn() { claimed.withLock { $0 = [] } }
+    func resetTurn() { claimed.withLock { $0 = [:] } }
 
     /// Model-initiated call (Haiku or a reflex act): the full gate applies.
     func run(name: String, input: [String: Any], id: String) async -> (text: String, isError: Bool) {
@@ -41,6 +42,11 @@ final class NovaHands: NovaToolRunner, @unchecked Sendable {
     private func run(name: String, input: [String: Any], origin: NovaGate.Origin) async -> (text: String, isError: Bool) {
         if cancelled() { return ("stopped by the user", true) }
         var input = input
+        // a control character in any argument could abort the process inside Foundation (NSException): refuse up front
+        if input.values.contains(where: { ($0 as? String)?.unicodeScalars.contains { $0.value == 0 } == true }) { return ("refused: bad characters in the request", true) }
+        if ["run_shell", "read_file", "find_files"].contains(name) {   // roster folders = where free git may run
+            NovaShell.projectRoots = await MainActor.run { AgentRegistry.shared.crew.map(\.repo).filter { !$0.isEmpty } }
+        }
         if name == "relay" {   // read first so the card shows the exact text that would be sent
             let (text, bad) = await MainActor.run { [from = input["from"] as? String ?? ""] in Self.read(from, lines: 40) }
             if bad { return (text, true) }
@@ -55,8 +61,22 @@ final class NovaHands: NovaToolRunner, @unchecked Sendable {
         }
         if origin == .model, !Self.readOnly.contains(name) {
             let key = name + "|" + input.keys.sorted().map { "\($0)=\(input[$0] ?? "")" }.joined(separator: ",")
-            guard claimed.withLock({ $0.insert(key).inserted }) else { return ("already done this turn", false) }
+            let prior: (text: String, isError: Bool)?? = claimed.withLock { d in
+                if let p = d[key] { return .some(p) }
+                d[key] = .some(nil); return nil
+            }
+            if let prior {
+                guard let out = prior else { return ("already in progress this turn", false) }
+                return out.isError ? out : ("already done this turn: \(out.text)", false)   // a refusal/denial is never "already done"
+            }
+            let out = await proceed(name, input, verdict)
+            claimed.withLock { $0[key] = .some(out) }
+            return out
         }
+        return await proceed(name, input, verdict)
+    }
+
+    private func proceed(_ name: String, _ input: [String: Any], _ verdict: GateVerdict) async -> (text: String, isError: Bool) {
         switch verdict {
         case .refuse(let why): Self.log.info("gate refuse \(name, privacy: .public)"); return ("refused: \(why)", true)
         case .park(let what):
@@ -119,10 +139,16 @@ final class NovaHands: NovaToolRunner, @unchecked Sendable {
             guard Self.validFindQuery(s("query")) else { return ("bad search query", true) }
             let r = await Self.exec("/usr/bin/mdfind", ["-name", s("query")], cwd: nil, timeout: 30, cap: 8192)
             let kept = r.out.split(separator: "\n").map(String.init).filter { NovaPaths.check($0) == .allow }.prefix(40)
-            return (Self.wrap("results", kept.joined(separator: "\n")), r.status != 0)
+            let all = r.out.split(separator: "\n").count
+            let note = all > kept.count ? "\n(\(all - kept.count) hidden, protected or capped results left out)" : ""
+            return (Self.wrap("results", kept.joined(separator: "\n") + note), r.status != 0)
         case "read_file":
-            let (fd, v) = NovaPaths.openChecked(s("path"))
-            guard let fd else { if case .refuse(let w) = v { return ("refused: \(w)", true) }; return ("can't open", true) }
+            let (fd, v) = NovaPaths.openChecked(s("path"), approved: approved)
+            guard let fd else {
+                if case .refuse(let w) = v { return ("refused: \(w)", true) }
+                if case .park = v { return ("needs approval", true) }
+                return ("can't open", true)
+            }
             let h = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
             let data = (try? h.read(upToCount: 64 * 1024)) ?? Data()
             guard let t = String(data: data, encoding: .utf8) else { return ("not a text file", true) }
@@ -207,13 +233,16 @@ final class NovaHands: NovaToolRunner, @unchecked Sendable {
         case .run(let exe, let args, let dir): r = await Self.exec(exe, args, cwd: dir, timeout: 30, cap: 8192, env: NovaShell.env)
         default:
             guard approved else { return ("refused: not read-only", true) }
-            let dir = cwd.isEmpty ? NSHomeDirectory() : (cwd as NSString).expandingTildeInPath
+            let raw = cwd.isEmpty ? NSHomeDirectory() : (cwd as NSString).expandingTildeInPath
+            let dir = NovaPaths.canonical(raw, base: NSHomeDirectory()) ?? raw   // exactly the folder the card showed
             r = await Self.exec("/bin/zsh", ["-f", "-c", cmd], cwd: dir, timeout: 30, cap: 8192)
         }
         return (Self.wrap("output", attrs: "exit=\(r.status)", r.out), r.status != 0)
     }
     static func exec(_ exe: String, _ args: [String], cwd: String?, timeout: TimeInterval, cap: Int, env: [String: String]? = nil) async -> (status: Int32, out: String) {
-        await withCheckedContinuation { c in
+        let bad: (String) -> Bool = { $0.unicodeScalars.contains { $0.value == 0 } }
+        if bad(exe) || args.contains(where: bad) || (cwd.map(bad) ?? false) { return (-1, "bad argument") }   // NUL raises an NSException in Process
+        return await withCheckedContinuation { c in
             DispatchQueue.global().async {
                 let p = Process(); p.executableURL = URL(fileURLWithPath: exe); p.arguments = args
                 if let cwd { p.currentDirectoryURL = URL(fileURLWithPath: cwd) }

@@ -42,7 +42,7 @@ import Foundation
                         "uniq a b", "tree -o /tmp/x", "git log --output=/tmp/x", "rg --pre print t x", "echo $HOME", "ls `id`", "ls > /tmp/x", "ls\nrm x"]
         for p in payloads { #expect(NovaGate.shell(p) != .allow, "\(p)") }
         #expect(NovaGate.shell("ls -la") == .allow)
-        if case .run(let exe, let args, _) = NovaShell.plan("git status") { #expect(exe.hasPrefix("/")); #expect(args.last == "status"); #expect(!args.contains("--exec-path")) } else { Issue.record("git status should run via argv") }
+        if case .run(let exe, let args, _) = NovaShell.plan("git status", projectRoots: [NSHomeDirectory()]) { #expect(exe.hasPrefix("/")); #expect(args.last == "status"); #expect(!args.contains("--exec-path")) } else { Issue.record("git status should run via argv") }
     }
     // H3
     @Test func h3_pathGuard() throws {

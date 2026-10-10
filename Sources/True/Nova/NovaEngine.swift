@@ -61,6 +61,8 @@ final class NovaEngine: ObservableObject {
                                             onHeld: { [weak self] in Task { @MainActor in self?.eagerHeld = true } })
     private var run: [String: Any] = [:]
     private var speechBuf = ""
+    private var utterSeen = false
+    private var utterCard: UUID?
 
     func start() {
         guard NovaSettings.enabled, !running else { return }
@@ -101,14 +103,14 @@ final class NovaEngine: ObservableObject {
     private func partial(_ text: String, final: Bool, wordEnd: TimeInterval?) {
         guard !muted else { return }
         lastTokenCount = NovaLiveTurn.tokens(text).count
-        if NovaApproval.micGated(speaking: speaking, sinceSpeechEnd: Date().timeIntervalSince(speechEndedAt)) {
-            if speaking, NovaLiveTurn.isBargeIn(text) { interrupt() }   // only "stop" gets through while Nova talks
-            return
-        }
-        guard let words = live.command(in: text, novaSpeaking: speaking) else { return }
+        let gated = NovaApproval.micGated(speaking: speaking, sinceSpeechEnd: Date().timeIntervalSince(speechEndedAt))
+        if gated, speaking, NovaLiveTurn.isBargeIn(text) { interrupt() }   // only "stop" gets through while Nova talks
+        // gated words are consumed (P1): a "nova" Nova said itself can never address a later command
+        guard let words = live.ingest(text, gated: gated, novaSpeaking: speaking) else { return }
         if !turnActive { beginTurn() }
+        if !utterSeen { utterSeen = true; utterCard = approvals.current?.id }   // the card showing when this utterance STARTED
         lastWordEnd = wordEnd
-        command(words.joined(separator: " "), now: Date())
+        command(words.joined(separator: " "), now: Date(), final: final)
         if final { Task { await finishTurn() } }
     }
 
@@ -145,10 +147,10 @@ final class NovaEngine: ObservableObject {
     }
 
     /// New addressed words: drive the instant lane, spoken approvals, the HUD, and the eager end-of-turn.
-    private func command(_ text: String, now: Date) {
+    private func command(_ text: String, now: Date, final: Bool = false) {
         if text != lastCommand { lastCommand = text; lastChange = now }
         transcript = text
-        if pending != nil, resolveSpoken(text, addressed: true) { return }   // command() text is addressed by construction
+        if pending != nil, resolveSpoken(text, addressed: true, final: final) { return }   // command() text is addressed by construction
         guard var s = session else { return }
         let steps = s.feed(text, now: now); session = s
         if !steps.isEmpty { runner.enqueue(steps) }
@@ -181,7 +183,9 @@ final class NovaEngine: ObservableObject {
 
     private func finishTurn() async {
         guard turnActive else { return }
+        if pending != nil, !lastCommand.isEmpty, resolveSpoken(lastCommand, addressed: true, final: true) { utterSeen = false; utterCard = nil }   // end of turn = the final utterance
         turnActive = false; ticker?.cancel(); ticker = nil
+        utterSeen = false; utterCard = nil
         let unhandled = session?.unhandled.trimmingCharacters(in: .whitespaces) ?? ""
         let handled = session?.handled ?? []
         live.endTurn(wordCount: lastTokenCount); lastTurnEnd = Date()
@@ -219,10 +223,11 @@ final class NovaEngine: ObservableObject {
     }
     /// HUD click: bound to the id of the card that was shown, so a stale click can't approve a newer action (M2).
     func resolve(_ yes: Bool, id: UUID? = nil) { approvals.resolve(yes, id: id) }
-    private func resolveSpoken(_ text: String, addressed: Bool) -> Bool {
-        switch NovaApproval.decide(text, addressed: addressed) {
-        case .approve: approvals.resolve(true); return true
-        case .deny: approvals.resolve(false); return true
+    private func resolveSpoken(_ text: String, addressed: Bool, final: Bool) -> Bool {
+        let now = approvals.current?.id
+        switch NovaApproval.resolution(text, addressed: addressed, final: final, cardAtStart: utterCard, cardNow: now) {
+        case .approve: approvals.resolve(true, id: now); return true
+        case .deny: approvals.resolve(false, id: now); return true
         case .none: return false
         }
     }

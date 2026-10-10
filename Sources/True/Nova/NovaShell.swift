@@ -66,7 +66,7 @@ enum NovaPaths {
             let rel = l.dropFirst(h.count + 1).split(separator: "/").map(String.init)
             for (n, comp) in rel.enumerated() where comp.hasPrefix(".") {
                 if comp == ".claude", projectRoots.contains(where: { r in
-                    let rr = (real(r) ?? r).lowercased(); return l.hasPrefix(rr + "/") && rr.count >= h.count + 1 }) { continue }
+                    [r, real(r) ?? r].contains { let rr = $0.lowercased(); return l.hasPrefix(rr + "/") && rr.count >= h.count + 1 } }) { continue }
                 _ = n; return true
             }
         }
@@ -135,14 +135,15 @@ enum NovaShell {
 
     static func plan(_ command: String, cwd: String = "", home: String = NSHomeDirectory(), projectRoots: [String] = NovaShell.projectRoots, exists: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }) -> Plan {
         let c = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        let park = Plan.park("run: " + c)
         guard !c.isEmpty else { return .refuse("empty command") }
-        if c.unicodeScalars.contains(where: forbidden.contains) { return park }
-        let words = c.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-        guard let cmd = words.first else { return park }
+        if c.unicodeScalars.contains(where: { $0.value == 0 }) { return .refuse("bad command") }
         let dir = cwd.isEmpty ? home : (cwd as NSString).expandingTildeInPath
         guard let dirReal = NovaPaths.canonical(dir, base: home) else { return .refuse("can't resolve the folder") }
         if NovaPaths.isSecret(dirReal, home: home) { return .refuse("that folder holds secrets") }
+        let park = Plan.park("run: " + c + "\nin: " + dirReal)   // the card shows exactly what runs and where
+        if c.unicodeScalars.contains(where: forbidden.contains) { return park }
+        let words = c.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        guard let cmd = words.first else { return park }
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: dirReal, isDirectory: &isDir), isDir.boolValue else { return park }
         var rest = Array(words.dropFirst())
@@ -150,9 +151,18 @@ enum NovaShell {
         var prefix: [String] = []
         if cmd == "git" {
             guard let sub = rest.first, gitSubs.contains(sub), exists("/usr/bin/git") else { return park }
+            // a hostile repo's config runs code (fsmonitor, filters, textconv, gpg): git is free only in folders True already knows
+            let known = projectRoots.contains { r in
+                guard let rr = NovaPaths.canonical(r, base: home) else { return false }
+                return dirReal == rr || dirReal.hasPrefix(rr + "/") }
+            guard known else { return park }
             rest.removeFirst()
-            spec = Spec(exe: "/usr/bin/git", short: Set("nsbpavr"), long: gitLong, digits: true, maxPositional: sub == "branch" ? 0 : 99)
-            prefix = ["--no-pager", "-c", "core.fsmonitor=", "-c", "core.pager=cat", "-c", "core.hooksPath=/dev/null", sub]
+            // no patch text: it would read file contents past the path guard. Only stat/name listings stay free.
+            if sub == "diff" || sub == "show", !rest.contains(where: { ["--stat", "--name-only", "--name-status", "--shortstat"].contains($0) }) { return park }
+            if rest.contains(where: { $0.contains(":") }) { return park }   // <rev>:<path>
+            spec = Spec(exe: "/usr/bin/git", short: Set("nsbavr"), long: gitLong, digits: true, maxPositional: sub == "branch" ? 0 : 99)
+            prefix = ["--no-pager", "-c", "core.fsmonitor=", "-c", "core.pager=cat", "-c", "core.hooksPath=/dev/null",
+                      "-c", "log.showSignature=false", "-c", "diff.external=", sub]
             if sub != "branch" && sub != "status" { prefix += ["--no-ext-diff", "--no-textconv"] }
         } else if cmd == "find" {
             spec = Spec(exe: "/usr/bin/find", recursive: true)
@@ -174,14 +184,18 @@ enum NovaShell {
         guard positional.count <= spec.maxPositional else { return park }
         if spec.paths {
             for p in positional {
-                switch NovaPaths.check(p, base: dirReal, home: home) {
+                switch NovaPaths.check(p, base: dirReal, home: home, projectRoots: projectRoots) {
                 case .refuse(let w): return .refuse(w)
-                default: break
+                case .park(let w): return .park("run: " + c + "\nin: " + dirReal + "\n(" + w + ")")
+                case .allow: break
                 }
                 if spec.recursive, let cp = NovaPaths.canonical(p, base: dirReal), NovaPaths.containsSecret(cp, home: home) { return park }
             }
             let searchesCwd = cmd == "rg" ? positional.count <= 1 : positional.isEmpty
             if spec.recursive, searchesCwd, NovaPaths.containsSecret(dirReal, home: home) { return park }
+        }
+        if cmd == "rg" && spec.recursive {   // recursive search never reads secret-named files
+            for g in [".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_ed25519*", "id_ecdsa*", ".ssh", ".aws", ".gnupg"] { prefix += ["-g", "!" + g] }
         }
         return .run(exe: spec.exe, args: prefix + rest, cwd: dirReal)
     }
