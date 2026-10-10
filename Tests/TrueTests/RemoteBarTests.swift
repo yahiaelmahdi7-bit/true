@@ -253,7 +253,8 @@ func answer(_ kind: String, danger: Double? = nil, judged: Bool = true) -> JevRe
         let table = RemoteServer.routeTable
         for entry in table where entry.hasPrefix("POST") {
             #expect(["POST /pair", "POST /api/drop", "POST /api/clip", "POST /api/hub/builder/<id>/ack",
-                     "POST /api/route", "POST /api/route/<routeId>/slot", "POST /api/run"].contains(entry), "\(entry)")
+                     "POST /api/route", "POST /api/route/<routeId>/slot", "POST /api/run",
+                     "POST /api/pane/<uuid>/input"].contains(entry), "\(entry)")
         }
         for bad in ["exec", "cmd", "shell", "command", "eval"] { #expect(!table.contains { $0.contains(bad) }) }
     }

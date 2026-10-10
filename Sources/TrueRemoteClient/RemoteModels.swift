@@ -230,6 +230,10 @@ public struct RemotePane: Codable, Equatable, Sendable, Identifiable {
     public var claude: Bool
 
     private enum CodingKeys: String, CodingKey { case id, title, cwd, agent, needsYou, busy, live, claude }
+    public init(id: String, title: String, cwd: String, agent: String?, needsYou: Bool, busy: Bool, live: Bool, claude: Bool = false) {
+        self.id = id; self.title = title; self.cwd = cwd; self.agent = agent
+        self.needsYou = needsYou; self.busy = busy; self.live = live; self.claude = claude
+    }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
