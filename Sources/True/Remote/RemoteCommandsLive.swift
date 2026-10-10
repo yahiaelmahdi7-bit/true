@@ -38,12 +38,19 @@ final class PhoneBuilders: @unchecked Sendable {
     }
 }
 
+/// A pane that is asking but belongs to no seat (a plain `claude` run). `projectKey` is `HubProject.key(forCwd:)`.
+struct LoosePane: Equatable {
+    var pane: UUID; var name: String; var cwd: String; var projectKey: String
+    var question: String; var tool: String?; var detail: String?
+}
+
 /// The Hub as JSON, from the Mac Hub's own groups (HubModel.build): same grouping, order, counts and status labels.
 enum RemoteHubJSON {
     static func make(groups: [HubProjectGroup], seatStatus: (String) -> AgentStatus, seatPane: (String) -> UUID?,
                      ask: (UUID) -> (question: String, tool: String?, detail: String?)? = { _ in nil },
+                     loosePanes: [LoosePane] = [],
                      now: Double) -> [String: Any] {
-        let projects: [[String: Any]] = groups.map { g in
+        var projects: [[String: Any]] = groups.map { g in
             var rows: [[String: Any]] = g.seats.map { a in
                 let st = seatStatus(a.name)
                 var r: [String: Any] = ["kind": "seat", "id": "seat-\(a.name)", "name": a.name, "status": st.label,
@@ -71,7 +78,27 @@ enum RemoteHubJSON {
             return ["key": g.key, "title": g.title, "summary": g.summary, "working": g.working, "needsYou": g.needsYou,
                     "failed": g.failed, "rows": rows]
         }
-        let w = groups.reduce(0) { $0 + $1.working }, n = groups.reduce(0) { $0 + $1.needsYou }
+        // A plain `claude` pane (no seat) that is asking: it has no seat row, so it gets a "pane" row in its
+        // project group — otherwise the phone never hears about it (no notification, no Live Activity).
+        let seatPanes = Set(groups.flatMap(\.seats).compactMap { seatPane($0.name) })
+        var extraNeeds = 0
+        for lp in loosePanes where !seatPanes.contains(lp.pane) {
+            var r: [String: Any] = ["kind": "pane", "id": "pane-\(lp.pane.uuidString)", "name": lp.name,
+                                    "status": AgentStatus.needsYou.label, "statusKey": AgentStatus.needsYou.rawValue,
+                                    "pane": lp.pane.uuidString, "cwd": lp.cwd, "question": String(lp.question.prefix(300))]
+            if let t = lp.tool, !t.isEmpty { r["tool"] = String(t.prefix(300)) }
+            if let d = lp.detail, !d.isEmpty { r["detail"] = String(d.prefix(300)) }
+            let key = lp.projectKey
+            if let i = projects.firstIndex(where: { ($0["key"] as? String) == key }) {
+                projects[i]["rows"] = ((projects[i]["rows"] as? [[String: Any]]) ?? []) + [r]
+                projects[i]["needsYou"] = ((projects[i]["needsYou"] as? Int) ?? 0) + 1
+            } else {
+                projects.insert(["key": key, "title": HubProject.title(key), "summary": "1 needs you", "working": 0,
+                                 "needsYou": 1, "failed": 0, "rows": [r]], at: 0)
+            }
+            extraNeeds += 1
+        }
+        let w = groups.reduce(0) { $0 + $1.working }, n = groups.reduce(0) { $0 + $1.needsYou } + extraNeeds
         let f = groups.reduce(0) { $0 + $1.failed }
         var parts: [String] = []
         if w > 0 { parts.append("\(w) working") }
@@ -202,8 +229,22 @@ struct RemoteCommandsLive: RemoteCommands {
                                         peers: hub.peers, builders: hub.builders, now: now)
             let obj: [String: Any] = RemoteHubJSON.make(groups: groups, seatStatus: { reg.statusOf($0) }, seatPane: { reg.panes[$0] },
                                                  ask: { id in NeedsYouQueue.shared.rows.first { $0.paneID == id }.map { ($0.question, $0.tool, $0.detail) } },
+                                                 loosePanes: Self.loosePanes(reg: reg),
                                                  now: now)
             return (try? JSONSerialization.data(withJSONObject: obj)) ?? Data("{}".utf8)
+        }
+    }
+
+    /// Needs-you rows whose pane is not a seat: named by repo (else folder), grouped like the Mac Hub would.
+    @MainActor static func loosePanes(reg: AgentRegistry) -> [LoosePane] {
+        let model = WorkspaceModel.shared
+        return NeedsYouQueue.shared.rows.filter { reg.name(for: $0.paneID) == nil }.map { row in
+            let recorded = model.state.tabs.lazy.compactMap { $0.cwds[row.paneID] }.first ?? ""
+            let id = PaneIdentity.resolve(pane: row.paneID, recordedCwd: recorded)
+            let cwd = id.cwd.isEmpty ? recorded : id.cwd
+            let name = id.repo ?? (cwd.isEmpty ? "Claude" : (cwd as NSString).lastPathComponent)
+            return LoosePane(pane: row.paneID, name: name, cwd: cwd, projectKey: HubProject.key(forCwd: cwd),
+                             question: row.question, tool: row.tool, detail: row.detail)
         }
     }
 

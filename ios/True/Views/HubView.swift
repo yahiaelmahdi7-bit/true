@@ -96,7 +96,7 @@ struct HubView: View {
     private func toggleCommand(_ row: HubRow) -> String { row.statusKey == "asleep" ? "wake \(row.name)" : "sleep \(row.name)" }
 
     @ViewBuilder private func rowLink(_ row: HubRow) -> some View {
-        if row.kind == "seat", let pane = row.pane {
+        if row.kind == "seat" || row.kind == "pane", let pane = row.pane {
             NavigationLink(value: PaneRoute(id: pane, title: row.name)) { RowView(row: row) }
                 .matchedTransitionSource(id: pane, in: ns)
                 .swipeActions(edge: .trailing) {
@@ -150,7 +150,7 @@ struct RowView: View {
     private var hot: Bool { row.statusKey == "needsYou" || row.statusKey == "failed" }
     private var failedBuilder: Bool { row.kind == "background" && row.statusKey == "failed" }
     private var symbol: String {
-        failedBuilder ? "exclamationmark.circle.fill" : row.kind == "seat" ? "terminal" : row.kind == "background" ? "hammer" : "rectangle.on.rectangle"
+        failedBuilder ? "exclamationmark.circle.fill" : row.kind == "seat" || row.kind == "pane" ? "terminal" : row.kind == "background" ? "hammer" : "rectangle.on.rectangle"
     }
     private var detail: String? { row.kind == "background" ? (row.branch ?? row.cwd) : row.cwd }
     private var tint: AnyShapeStyle {

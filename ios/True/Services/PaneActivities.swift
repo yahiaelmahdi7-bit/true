@@ -12,6 +12,16 @@ enum PaneActivities {
     /// "pane|question" pairs already ended by the 30-minute limit, so a row that is still waiting is not restarted each poll.
     private static var expired: Set<String> = []
 
+    /// Why the last start could not happen (shown once by the app), nil when fine.
+    private(set) static var lastProblem: String?
+    private static var reported: String?
+
+    /// A problem the app has not shown yet, or nil.
+    static func unreportedProblem() -> String? {
+        guard let p = lastProblem, p != reported else { return nil }
+        reported = p; return p
+    }
+
     static func sync(_ snap: HubSnapshot) async {
         let needing = snap.projects.flatMap(\.rows).filter { $0.statusKey == "needsYou" && $0.pane != nil }
         let panes = Set(needing.compactMap(\.pane))
@@ -28,7 +38,10 @@ enum PaneActivities {
             }
         }
 
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            if !needing.isEmpty { lastProblem = "Live Activities are off for True in Settings" }
+            return
+        }
         for row in needing {
             guard let pane = row.pane else { continue }
             let question = row.question ?? "Needs your answer"
@@ -43,8 +56,13 @@ enum PaneActivities {
             let live = Activity<PaneActivityAttributes>.activities.sorted { $0.content.state.since < $1.content.state.since }
             if live.count >= maxActive, let oldest = live.first { await oldest.end(nil, dismissalPolicy: .immediate) }
             let s = PaneActivityAttributes.ContentState(question: question, tool: row.tool, status: "needsYou", since: Date())
-            _ = try? Activity.request(attributes: PaneActivityAttributes(paneId: pane, name: row.name),
-                                      content: ActivityContent(state: s, staleDate: nil))
+            do {
+                _ = try Activity.request(attributes: PaneActivityAttributes(paneId: pane, name: row.name),
+                                         content: ActivityContent(state: s, staleDate: nil))
+                lastProblem = nil
+            } catch {
+                lastProblem = "Live Activity didn't start: \(error.localizedDescription)"
+            }
         }
     }
 }
