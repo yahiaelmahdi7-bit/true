@@ -9,10 +9,26 @@ struct PairView: View {
     @State private var paired = 0
     @State private var scanning = false
     @FocusState private var codeFocused: Bool
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
             Form {
+                if let mac = model.nearbyMac {
+                    Section {
+                        TileRow(symbol: "macbook.and.iphone", title: "\(mac.name) is nearby", detail: "Scan the code on its screen to pair",
+                                symbolStyle: AnyShapeStyle(.tint), titleLines: 2) { EmptyView() }
+                        Button("Scan the code") { scanning = true }
+                        Button("Type the code") { address = mac.address; codeFocused = true }
+                    }
+                    .transition(.opacity)
+                } else if [.poweredOff, .unauthorized, .unsupported].contains(model.bluetoothState) {
+                    Section {
+                        Label("Turn on Bluetooth to find your Mac automatically", systemImage: "antenna.radiowaves.left.and.right.slash")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+
                 Section {
                     Button { scanning = true } label: {
                         TileRow(symbol: "qrcode.viewfinder", title: "Scan the code on your Mac", detail: "Fills the address and code for you") {
@@ -74,6 +90,12 @@ struct PairView: View {
                 #if DEBUG
                 if model.uiState == "pair-scan" { scanning = true }
                 #endif
+            }
+            .animation(.default, value: model.nearbyMac)
+            .onAppear { if scenePhase == .active { model.startNearbyScan() } }
+            .onDisappear { model.stopNearbyScan() }
+            .onChange(of: scenePhase) { _, p in
+                if p == .active { model.startNearbyScan() } else { model.stopNearbyScan() }
             }
             .sensoryFeedback(.success, trigger: paired)
             .sensoryFeedback(.error, trigger: error)
