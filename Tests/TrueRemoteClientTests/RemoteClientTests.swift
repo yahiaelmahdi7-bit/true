@@ -227,3 +227,33 @@ private func session(_ t: StubTransport, token: String? = "tok", store: InMemory
         #expect(InputOutcome.unknown("x").reaction(for: .prompt) == .toast("Sent"))
     }
 }
+
+@Suite struct ScreenshotPlanTests {
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    @Test func plansNewerUnseenOldestFirst() {
+        let assets = [("c", t0.addingTimeInterval(30)), ("a", t0.addingTimeInterval(10)), ("old", t0.addingTimeInterval(-5)), ("b", t0.addingTimeInterval(20))]
+        #expect(ScreenshotPlan.plan(assets: assets, lastSynced: t0, seen: ["b"]) == ["a", "c"])
+    }
+
+    @Test func nothingBeforeArmedOrAtBoundary() {
+        #expect(ScreenshotPlan.plan(assets: [("a", t0)], lastSynced: nil, seen: []).isEmpty)
+        #expect(ScreenshotPlan.plan(assets: [("a", t0)], lastSynced: t0, seen: []).isEmpty)
+    }
+
+    @Test func filenameIsStable() {
+        let utc = TimeZone(identifier: "UTC")!
+        let d = Date(timeIntervalSince1970: 1_791_642_325) // 2026-10-10 14:25:25 UTC
+        #expect(ScreenshotPlan.filename(created: d, ext: "png", timeZone: utc) == "Screenshot-20261010-142525.png")
+    }
+
+    @Test func sniffsFormats() {
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0])
+        let jpg = Data([0xFF, 0xD8, 0xFF, 0xE0, 0, 0])
+        let heic = Data([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63])
+        #expect(ScreenshotPlan.format(of: png) == .png)
+        #expect(ScreenshotPlan.format(of: jpg) == .jpeg)
+        #expect(!ScreenshotPlan.needsJPEGConversion(png) && !ScreenshotPlan.needsJPEGConversion(jpg))
+        #expect(ScreenshotPlan.needsJPEGConversion(heic) && ScreenshotPlan.needsJPEGConversion(Data()))
+    }
+}
