@@ -5,7 +5,10 @@ import WidgetKit
 
 @main
 struct TrueActivityBundle: WidgetBundle {
-    var body: some Widget { PaneActivityWidget() }
+    var body: some Widget {
+        PaneActivityWidget()
+        ComposeControl()
+    }
 }
 
 /// Amber = state ("needs you"). Blue = the one interactive button. No green.
