@@ -34,3 +34,5 @@ Owner: knowledge-keeper · Last verified: 2026-09-30
 - **Clause** — a piece of the addressed partial split on "and then", "then", "and", "after that", ","; dispatched the moment it is complete, never twice.
 - **Undo record** — one per instant act (depth 3, 8 s TTL); a clause starting "no / nope / actually / undo / wait no / not that / I mean" undoes the last act, then the rest runs as a new clause.
 - **Addressed** — words after the wake name or while the hotkey is held; ambient speech is never addressed.
+- **Verbatim send** — Run 26e: "tell / ask / message <agent> [to] <rest>"; the rest of HIS utterance goes to the agent byte for byte, never through Haiku or Jev, with no approval. Fires at the final end of turn only.
+- **Origin** — who authored a tool call: `.model` (Haiku/reflex acts; full gate, sends park), `.local` (instant lane's fixed table), `.user` (his verbatim words from the tell lane; the only unparked agent send).

@@ -45,7 +45,7 @@ Tests: `Tests/TrueTests/NovaSecurity26dTests.swift`, written first and run again
 Tests: `Tests/TrueTests/NovaSecurityTests.swift`, one per finding ID.
 - **Approval (C1/H1/M2):** a parked action is approved only by an *addressed* yes ("Nova, go ahead"/"Nova, approve"), a yes while the hotkey is held, or the HUD Approve button. A bare "go ahead" never approves; ambient speech can only say NO. Any negation ("don't", "no", "cancel", "stop", "disapprove"…) anywhere means NO. Each approval is bound to one parked action id; a new park denies the old one, a stale id or click is a no-op. The card shows the exact command, text or URL.
 - **Mic during Nova's speech (C1):** all input is dropped while Nova speaks and for 400 ms after (only "stop" barges in). Voice processing (echo cancellation) is requested on the input node best-effort (`try?`); whether the OS grants it is NOT verified here.
-- **Agent sends (C2):** every model-initiated `send_to_pane`, `relay`, `spawn_agent` and `open_url` parks with the exact target and full text/URL. Only the instant lane's fixed known-site table opens URLs unparked (the user's own words, matched locally).
+- **Agent sends (C2):** every model-initiated `send_to_pane`, `relay`, `spawn_agent` and `open_url` parks (the only unparked send is the user-verbatim `tell` lane, Run 26e below) with the exact target and full text/URL. Only the instant lane's fixed known-site table opens URLs unparked (the user's own words, matched locally).
 - **Shell (H2):** `run_shell` never goes through a shell on the free path. A strict tokenizer rejects any metacharacter (`$`, backtick, `;`, `&`, `|`, redirects, globs/qualifiers, `=(`, newline); allowlisted binaries run via `Process` with an argv array and an absolute path from a fixed table; per-command flag denylist; anything not provably read-only parks (git: see Run 26d), and an approved park runs `zsh -f -c` on the exact card text. `DenyList` is checked first.
 - **Paths (H3):** one guard (`NovaPaths`) for `read_file`, `find_files` results and every path argument the shell allowlist passes: `realpath`, case-insensitive match against the refused set, refuse on doubt; `read_file` opens first then checks the descriptor's real path.
 - **Eager end-of-turn (M1):** eager runs may start reflex+brain; read-only tools may run early; any tool that changes something is held until the end of the turn is final and the transcript still matches, otherwise the eager run is discarded and the final run redone. A same-input model action runs once per turn.
@@ -66,3 +66,11 @@ Tests: `Tests/TrueTests/NovaSecurityTests.swift`, one per finding ID.
 - **Quit is graceful:** `NSRunningApplication.terminate()` only, never force; the app's own save prompt protects work. Every instant act still passes `NovaGate` + `NovaHands`.
 - **Undo:** the last 3 acts (8 s TTL) are reversible by a clause starting "no / undo / actually…".
 - **Prewarm:** keyless `HEAD` requests only; keys never logged.
+
+## Run 26e — verbatim `tell` sends (2026-10-10)
+
+"Nova, tell the CTO to review the PR" sends his own words straight to the agent with no approval; approval still applies whenever the model writes or routes a message.
+
+- **Origin tag, enforced in code:** `NovaGate.Origin.user` is set only by `NovaHands.runUser`, called only from the engine's tell lane. The model tool path is hard-coded `.model` and cannot pass `.user`. Only `send_to_pane` honours `.user`; `relay`, `spawn_agent`, `open_url` and every model send park as before.
+- **Still enforced for `.user` sends:** addressed only (ambient never sends); Nova-speaking gate + tail; target pane mid-turn parks; any `DenyList` hit in the text is refused with the reason; control characters refused; the target must match the roster uniquely (else the normal path, where C2 parks); final end of turn only (eager start never sends); at most one send per turn.
+- **Residual risk (accepted by Yahia 2026-10-10):** audio that says "Nova, tell <exact agent name> …" can send a message to an agent that runs without permission prompts.

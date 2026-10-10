@@ -732,3 +732,6 @@ Decided: **act mid-sentence; undo on "no"**. A common command's hand starts ≤ 
 - **Feedback never waits:** act earcon "Pop" (wake is "Tink"); speech only for information (status, read_pane) or failure.
 - **Warm wires:** shared `NovaNet.session`; keyless HEAD prewarm at turn start. **Measure:** `clause_to_act_ms`, `word_to_act_ms` in run JSON; Settings → Nova "Show timings".
 - Not in this run: screen hands (`do_on_screen` etc.) — still on the roadmap.
+
+### Run 26e — instant verbatim agent sends (2026-10-10)
+Voice must beat the mouse. "Nova, tell/ask/message <agent> [to] <rest>" sends the rest of his own utterance verbatim to the agent: no model, no approval. Fires only at the FINAL end of turn (hotkey release or DynamicEndpointing), never on the eager start. Agent must match the roster uniquely (full name or alias minus "true-"), else the normal path (C2 parks). `NovaGate.Origin.user` skips the park only for `send_to_pane` from this lane; still enforced: addressed only, Nova-speaking gate, busy-pane park, DenyList refuse, control-char refuse, once per turn. Feedback: act earcon + HUD "→ agent: first 6 words" (+ `clause_to_act_ms` under Show timings). Residual risk in `docs/kb/security.md`. Tests: `NovaTell26eTests`.

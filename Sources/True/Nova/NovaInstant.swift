@@ -290,3 +290,45 @@ struct NovaInstantSession {
         return steps
     }
 }
+
+/// Run 26e: "tell the CTO to review the PR" -> the rest of HIS utterance goes verbatim to the agent.
+enum NovaTell {
+    struct Tell: Equatable { let target: String; let text: String }
+    static let verbs: Set<String> = ["tell", "ask", "message"]
+
+    /// "tell/ask/message <agent> [to] <rest>": longest agent phrase wins; two agents behind one phrase = ambiguous = nil.
+    /// `text` is the rest of the original utterance, tokens joined by single spaces, never rewritten.
+    static func parse(_ rawText: String, roster: [String]) -> Tell? {
+        let toks = rawText.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard toks.count >= 3, verbs.contains(AppIndex.norm(toks[0])) else { return nil }
+        var i = 1
+        if AppIndex.norm(toks[i]) == "the" { i += 1 }
+        var index: [String: Set<String>] = [:]
+        for name in roster {
+            let n = AppIndex.norm(name)
+            index[n, default: []].insert(name)
+            if n.hasPrefix("true ") { index[String(n.dropFirst(5)), default: []].insert(name) }
+        }
+        for k in stride(from: min(4, toks.count - i - 1), through: 1, by: -1) {
+            let key = AppIndex.norm(toks[i..<(i + k)].joined(separator: " "))
+            guard let hit = index[key] else { continue }
+            guard hit.count == 1, let name = hit.first else { return nil }
+            var j = i + k
+            if j < toks.count, AppIndex.norm(toks[j]) == "to" { j += 1 }
+            guard j < toks.count else { return nil }
+            return Tell(target: name, text: toks[j...].joined(separator: " "))
+        }
+        return nil
+    }
+}
+
+/// One verbatim send per turn, only at the final end of a turn, addressed, and not while Nova is speaking.
+struct NovaTellTurn {
+    private(set) var sent = false
+    mutating func finalize(_ text: String, roster: [String], addressed: Bool, gated: Bool, final: Bool) -> NovaTell.Tell? {
+        guard final, addressed, !gated, !sent, let t = NovaTell.parse(text, roster: roster) else { return nil }
+        sent = true
+        return t
+    }
+    mutating func reset() { sent = false }
+}

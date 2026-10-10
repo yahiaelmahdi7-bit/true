@@ -14,7 +14,7 @@ enum NovaGate {
     static let parkSeconds: TimeInterval = 30
 
     /// Where a tool call comes from. `.local` = the user's own words matched by the instant lane / reflex tables.
-    enum Origin { case model, local }
+    enum Origin { case model, local, user }
     /// The app Nova lives in: it may never quit, hide or terminate it.
     static let ownBundleIDs: Set<String> = Set(["net.prismlens.true"] + (Bundle.main.bundleIdentifier.map { [$0] } ?? []))
     static func isOwnApp(name: String) -> Bool {
@@ -66,6 +66,11 @@ enum NovaGate {
         case "run_shell": return shell(str("command"), cwd: str("cwd"))
         case "read_file": return readableFile(str("path"))
         case "move_to_trash": return .park("move to trash: " + str("path"))
+        case "send_to_pane" where origin == .user:   // Run 26e: his own verbatim words; the text is still checked, never trusted
+            let text = str("text")
+            if text.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F }) { return .refuse("control characters in the message") }
+            if DenyList.isHit(text) { return .refuse("blocked by the deny-list: \(DenyList.hits(text).joined(separator: ", "))") }
+            return paneBusy ? .park("interrupt busy agent \(str("target")): \(text)") : .allow
         case "send_to_pane": return origin == .local && !paneBusy ? .allow : .park("\(paneBusy ? "interrupt busy agent " : "send to ")\(str("target")): \(str("text"))")
         case "relay": return .park("relay \(str("from")) → \(str("to"))\(paneBusy ? " (busy)" : "")")
         case "spawn_agent": return .park("start an agent: " + str("text"))

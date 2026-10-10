@@ -39,6 +39,11 @@ final class NovaHands: NovaToolRunner, @unchecked Sendable {
         await run(name: name, input: input, origin: .local)
     }
 
+    /// The user's own verbatim words from the instant lane (Run 26e). Only the engine's `tell` lane calls this; the model path is hard-coded `.model`.
+    func runUser(name: String, input: [String: Any]) async -> (text: String, isError: Bool) {
+        await run(name: name, input: input, origin: .user)
+    }
+
     private func run(name: String, input: [String: Any], origin: NovaGate.Origin) async -> (text: String, isError: Bool) {
         if cancelled() { return ("stopped by the user", true) }
         var input = input

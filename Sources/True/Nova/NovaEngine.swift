@@ -28,6 +28,7 @@ final class NovaEngine: ObservableObject {
     private var turnActive = false
     private var turnStart = Date()
     private var lastCommand = ""
+    private var tellTurn = NovaTellTurn()
     private var lastChange = Date()
     private var lastTokenCount = 0
     private var hotkeyHeld = false
@@ -129,7 +130,7 @@ final class NovaEngine: ObservableObject {
 
     private func beginTurn() {
         guard !turnActive else { return }
-        turnActive = true; turnStart = Date(); lastChange = Date(); lastCommand = ""; lastWordEnd = nil
+        turnActive = true; turnStart = Date(); lastChange = Date(); lastCommand = ""; lastWordEnd = nil; tellTurn.reset()
         state = .listening; transcript = ""; lines = []; directDone = []
         eagerHeld = false; hands.resetTurn(); eagerHands.resetTurn()
         eager = NovaEagerTurn(); eagerTask?.cancel(); eagerTask = nil
@@ -162,6 +163,7 @@ final class NovaEngine: ObservableObject {
         switch eager.observe(unhandled: s.unhandled, now: now) {
         case .cancel: eagerTask?.cancel(); eagerTask = nil
         case .start(let t):
+            if NovaTell.parse(lastCommand, roster: AgentRegistry.shared.crew.map(\.name)) != nil { break }   // a tell only ever fires at the final end of turn
             let done = s.handled
             eagerTask = Task { [weak self] in await self?.utterance(t, source: .take, already: done, eager: true) }
         case .none: break
@@ -183,6 +185,7 @@ final class NovaEngine: ObservableObject {
 
     private func finishTurn() async {
         guard turnActive else { return }
+        let finalAt = Date()
         if pending != nil, !lastCommand.isEmpty, resolveSpoken(lastCommand, addressed: true, final: true) { utterSeen = false; utterCard = nil }   // end of turn = the final utterance
         turnActive = false; ticker?.cancel(); ticker = nil
         utterSeen = false; utterCard = nil
@@ -190,11 +193,28 @@ final class NovaEngine: ObservableObject {
         let handled = session?.handled ?? []
         live.endTurn(wordCount: lastTokenCount); lastTurnEnd = Date()
         if !NovaSettings.wakeWord, !hotkeyHeld { Task { try? await Task.sleep(for: .seconds(1)); if !turnActive { wake.stop() } } }
+        if pending == nil, await verbatimSend(finalAt: finalAt) { eagerTask?.cancel(); eagerTask = nil; return }
         if unhandled.isEmpty { eagerTask?.cancel(); state = handled.isEmpty ? .idle : .done; flushRecord(path: "instant"); return }
         if eager.startedFor == unhandled, !eagerHeld, let t = eagerTask { await t.value }   // eager run already has it
         else { eagerTask?.cancel(); directDone = []; await utterance(unhandled, source: .take, already: handled, eager: false) }   // M1: mismatch/held -> discard, rerun final
         eagerTask = nil
         if state == .done { Task { try? await Task.sleep(for: .seconds(3)); if state == .done, !turnActive { state = .idle } } }
+    }
+
+    /// Run 26e: "tell <agent> <his words>" goes straight to the pane, no model, no approval. Final end of turn only.
+    private func verbatimSend(finalAt: Date) async -> Bool {
+        let gated = NovaApproval.micGated(speaking: speaking, sinceSpeechEnd: Date().timeIntervalSince(speechEndedAt))
+        guard let t = tellTurn.finalize(lastCommand, roster: AgentRegistry.shared.crew.map(\.name), addressed: true, gated: gated, final: true) else { return false }
+        let clauseToActMs = Int(Date().timeIntervalSince(finalAt) * 1000)
+        NSSound(named: "Pop")?.play()
+        let r = await hands.runUser(name: "send_to_pane", input: ["target": t.target, "text": t.text])
+        var line = "→ \(t.target): " + t.text.split(separator: " ").prefix(6).joined(separator: " ")
+        if r.isError { line = r.text }
+        if NovaSettings.showTimings { line += " · \(clauseToActMs) ms" }
+        lines.append(.init(text: line, ok: !r.isError, tool: "tell"))
+        state = .done; flushRecord(path: "tell")
+        Task { try? await Task.sleep(for: .seconds(3)); if state == .done, !turnActive { state = .idle } }
+        return true
     }
 
     private func instantDone(_ verb: InstantVerb, _ text: String, _ bad: Bool) {
