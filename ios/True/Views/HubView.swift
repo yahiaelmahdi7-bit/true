@@ -70,7 +70,7 @@ struct HubView: View {
         }
     }
 
-    private func isHot(_ r: HubRow) -> Bool { r.statusKey == "needsYou" || r.statusKey == "failed" }
+    private func isHot(_ r: HubRow) -> Bool { r.needsAttention }
 
     private func list(_ hub: HubSnapshot) -> some View {
         let hot = hub.projects.flatMap(\.rows).filter(isHot)
@@ -148,7 +148,7 @@ extension HubRow {
 struct RowView: View {
     let row: HubRow
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private var hot: Bool { row.statusKey == "needsYou" || row.statusKey == "failed" }
+    private var hot: Bool { row.needsAttention }
     private var failedBuilder: Bool { row.kind == "background" && row.statusKey == "failed" }
     private var symbol: String {
         failedBuilder ? "exclamationmark.circle.fill" : row.kind == "seat" || row.kind == "pane" ? "terminal" : row.kind == "background" ? "hammer" : "rectangle.on.rectangle"

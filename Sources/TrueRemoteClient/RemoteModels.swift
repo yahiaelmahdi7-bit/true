@@ -321,3 +321,9 @@ public enum PaneInputIntent: String, Sendable, CaseIterable {
 }
 
 struct PairResponse: Codable { var token: String?; var error: String? }
+
+public extension HubRow {
+    /// Belongs in "Needs you": a pane that is asking, or a failure nobody has acknowledged yet.
+    /// An acked failure stays listed (the Mac keeps it 24 h) but is no longer anyone's problem.
+    var needsAttention: Bool { statusKey == "needsYou" || (statusKey == "failed" && acked != true) }
+}

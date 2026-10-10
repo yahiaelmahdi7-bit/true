@@ -382,3 +382,19 @@ private func session(_ t: StubTransport, token: String? = "tok", store: InMemory
         #expect(PanePicker.order(rows: rows, lastPaneId: nil).map(\.id) == ["b"])
     }
 }
+
+@Suite struct NeedsAttentionTests {
+    private func row(_ key: String, acked: Bool? = nil) -> HubRow {
+        HubRow(kind: "background", id: key, name: "b", status: key, statusKey: key, acked: acked)
+    }
+    @Test func askingPaneAndUnackedFailureNeedYou() {
+        #expect(row("needsYou").needsAttention)
+        #expect(row("failed").needsAttention)
+        #expect(row("failed", acked: false).needsAttention)
+    }
+    @Test func ackedFailureAndWorkingDoNot() {
+        #expect(!row("failed", acked: true).needsAttention)
+        #expect(!row("working").needsAttention)
+        #expect(!row("done", acked: false).needsAttention)
+    }
+}
