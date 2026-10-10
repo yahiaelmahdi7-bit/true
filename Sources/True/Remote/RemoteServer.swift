@@ -1,5 +1,7 @@
 import Foundation
 import Darwin
+import ImageIO
+import UniformTypeIdentifiers
 import os
 
 /// Tiny HTTP/1.1 + WebSocket server on 127.0.0.1 ONLY. `tailscale serve` terminates TLS on the tailnet
@@ -205,7 +207,7 @@ final class RemoteServer: @unchecked Sendable {
     /// Every API route this server answers (the test asserts none of them reads the Mac clipboard or a Mac path).
     static let routeTable: [String] = [
         "POST /pair", "GET /api/tabs", "WS /api/pane/<uuid>", "POST /api/drop", "POST /api/clip",
-        "GET /api/shots", "GET /api/shots/<id>", "GET /api/inbox", "GET /api/inbox/<id>", "DELETE /api/inbox/<id>",
+        "GET /api/shots", "GET /api/shots/<id>", "GET /api/shots/<id>/thumb", "GET /api/inbox", "GET /api/inbox/<id>", "DELETE /api/inbox/<id>",
         "GET /api/hub", "GET /api/hub/builder/<id>", "POST /api/hub/builder/<id>/ack",
         "POST /api/route", "POST /api/route/<routeId>/slot", "POST /api/run", "GET /api/recent",
     ]
@@ -251,7 +253,11 @@ final class RemoteServer: @unchecked Sendable {
         if req.method == "POST", req.path == "/api/drop" { handleDrop(fd, req); return }
         if req.method == "POST", req.path == "/api/clip" { handleClip(fd, req); return }
         if req.method == "GET", req.path == "/api/shots" { handleShotsList(fd); return }
-        if req.method == "GET", req.path.hasPrefix("/api/shots/") { handleShot(fd, String(req.path.dropFirst("/api/shots/".count))); return }
+        if req.method == "GET", req.path.hasPrefix("/api/shots/") {
+            let rest = String(req.path.dropFirst("/api/shots/".count))
+            if rest.hasSuffix("/thumb") { handleShotThumb(fd, String(rest.dropLast("/thumb".count))) } else { handleShot(fd, rest) }
+            return
+        }
         if req.path == "/api/inbox", req.method == "GET" { handleInboxList(fd); return }
         if req.path.hasPrefix("/api/inbox/") {
             let id = String(req.path.dropFirst("/api/inbox/".count))
@@ -350,6 +356,27 @@ final class RemoteServer: @unchecked Sendable {
         guard Self.validShotID(id), let e = store.load().shots.first(where: { $0.id == id }),
               e.file.hasPrefix("shots/"), !e.file.contains("..") else { plain(fd, 404, "Not Found", "Not found"); return }
         sendFile(fd, store.url(for: e), name: e.file.split(separator: "/").last.map(String.init) ?? id)
+    }
+
+    /// GET /api/shots/<id>/thumb — a 480 px JPEG (~30 KB) so the phone grid is not 21 full-size PNGs. Cached on disk.
+    private func handleShotThumb(_ fd: Int32, _ id: String) {
+        let store = files.tray()
+        guard Self.validShotID(id), let e = store.load().shots.first(where: { $0.id == id }),
+              e.file.hasPrefix("shots/"), !e.file.contains("..") else { plain(fd, 404, "Not Found", "Not found"); return }
+        let dir = files.tmpDir.appendingPathComponent("thumbs", isDirectory: true)
+        let cached = dir.appendingPathComponent(id + ".jpg")
+        if !FileManager.default.fileExists(atPath: cached.path) {
+            guard let src = CGImageSourceCreateWithURL(store.url(for: e) as CFURL, nil),
+                  let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, [
+                      kCGImageSourceThumbnailMaxPixelSize: 480, kCGImageSourceCreateThumbnailFromImageAlways: true,
+                      kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary),
+                  (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) != nil,
+                  let dest = CGImageDestinationCreateWithURL(cached as CFURL, UTType.jpeg.identifier as CFString, 1, nil)
+            else { plain(fd, 404, "Not Found", "Not found"); return }
+            CGImageDestinationAddImage(dest, cg, [kCGImageDestinationLossyCompressionQuality: 0.72] as CFDictionary)
+            guard CGImageDestinationFinalize(dest) else { plain(fd, 404, "Not Found", "Not found"); return }
+        }
+        sendFile(fd, cached, name: id + ".jpg")
     }
 
     private func handleInboxList(_ fd: Int32) {

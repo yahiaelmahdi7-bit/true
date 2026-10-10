@@ -370,10 +370,10 @@ function setTab(name) {
   tab = name; view = name === 'panes' ? 'list' : name;
   for (const [t, id] of Object.entries(SECTIONS)) $(id).hidden = t !== name;
   document.querySelectorAll('#nav button').forEach((b) => { if (b.dataset.tab === name) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
-  clearInterval(inboxTimer); inboxTimer = null;
+  clearInterval(inboxTimer); inboxTimer = null; clearInterval(shotsTimer); shotsTimer = null;
   if (name === 'panes') loadList();
   if (name === 'terms') loadTerms();
-  if (name === 'shots') loadShots();
+  if (name === 'shots') { shotIds = ''; loadShots(); shotsTimer = setInterval(loadShots, 4000); }
   if (name === 'send') { $('dot').hidden = true; loadInbox(); inboxTimer = setInterval(loadInbox, 5000); }
 }
 document.querySelectorAll('#nav button').forEach((b) => (b.onclick = () => setTab(b.dataset.tab)));
@@ -391,23 +391,35 @@ async function blobFor(path) {
   return e;
 }
 
+// Live pull: the Mac copies each new screenshot into the tray the moment it lands; the phone re-lists every 4 s while
+// this tab is open and only adds what is new. Grid tiles use the small /thumb JPEG, the viewer the full image.
+let shotsTimer = null, shotIds = '';
+async function thumbFor(id, tries = 3) {
+  for (let i = 0; i < tries; i++) {
+    try { return await blobFor('/api/shots/' + id + '/thumb'); }
+    catch (e) { if (String(e.message) === '401' || i === tries - 1) throw e; await new Promise((r) => setTimeout(r, 800 * (i + 1))); }
+  }
+}
 async function loadShots() {
-  if (view !== 'shots') return;
+  if (view !== 'shots' || document.hidden) return;
   try {
     const r = await api('/api/shots');
     if (r.status === 401) { unpair(); return; }
     if (!r.ok) throw new Error(String(r.status));
     const shots = (await r.json()).shots || [];
+    banner('');
     $('shotsEmpty').hidden = shots.length > 0;
+    const ids = shots.map((s) => s.id).join();
+    if (ids === shotIds) return;
+    shotIds = ids;
     const g = $('grid'); g.textContent = '';
     for (const s of shots) {
       const b = document.createElement('button'); b.setAttribute('aria-label', 'Screenshot ' + s.created);
-      const img = document.createElement('img'); img.alt = ''; img.loading = 'lazy'; b.appendChild(img);
-      blobFor('/api/shots/' + s.id).then((e) => { img.src = e.url; }).catch(() => {});
+      const img = document.createElement('img'); img.alt = ''; img.decoding = 'async'; b.appendChild(img);
+      thumbFor(s.id).then((e) => { img.src = e.url; }).catch(() => { b.classList.add('failed'); });
       b.onclick = () => openViewer(s);
       g.appendChild(b);
     }
-    banner('');
   } catch (e) { banner('Mac asleep or offline — retrying…'); }
 }
 

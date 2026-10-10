@@ -78,7 +78,7 @@ struct HTTPRequest: Equatable {
 
 enum HTTPResponse {
     /// Every response carries the same hardening headers; `Cache-Control: no-store` is on all of them (a superset of /api/*).
-    static let csp = "default-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; style-src 'self' 'unsafe-inline'"
+    static let csp = "default-src 'self'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; style-src 'self' 'unsafe-inline'"
 
     static func make(status: Int, reason: String, headers: [String: String] = [:], body: [UInt8] = [],
                      contentType: String = "text/plain; charset=utf-8") -> [UInt8] {

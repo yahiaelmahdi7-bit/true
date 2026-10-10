@@ -110,3 +110,4 @@ progress{width:100%;height:6px;margin-top:6px;accent-color:var(--ok)}
 .recent{margin-top:14px}.recent h3{margin:0 0 4px;font-size:12px;letter-spacing:.8px;text-transform:uppercase;color:var(--dim)}
 .recent button{display:block;width:100%;min-height:44px;text-align:left;border:0;border-top:1px solid var(--line);background:transparent;color:var(--fg);font:15px inherit;font-family:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .msg{color:var(--warn);font-weight:600;margin:8px 0}
+#grid button.failed{background:var(--key2)}

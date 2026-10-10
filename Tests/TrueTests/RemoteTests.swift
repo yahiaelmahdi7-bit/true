@@ -273,7 +273,7 @@ private func tempFile() -> URL {
         let r = String(decoding: HTTPResponse.make(status: 200, reason: "OK"), as: UTF8.self)
         for h in ["X-Frame-Options: DENY", "X-Content-Type-Options: nosniff", "Referrer-Policy: no-referrer",
                   "Cache-Control: no-store",
-                  "Content-Security-Policy: default-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; style-src 'self' 'unsafe-inline'"] {
+                  "Content-Security-Policy: default-src 'self'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; style-src 'self' 'unsafe-inline'"] {
             #expect(r.contains(h), "\(h)")
         }
         #expect(!r.lowercased().contains("set-cookie"))
