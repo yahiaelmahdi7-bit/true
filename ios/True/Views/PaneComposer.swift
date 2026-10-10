@@ -65,8 +65,9 @@ struct ComposerBar: View {
         VStack(spacing: 8) {
             keyRow
             HStack(alignment: .bottom, spacing: 8) {
-                Button(action: onKeys) { Label("Keys", systemImage: "terminal").labelStyle(.iconOnly).frame(width: hit, height: hit) }
-                    .buttonStyle(.glass).buttonBorderShape(.circle)
+                Button(action: onKeys) { Label("Keys", systemImage: "terminal").labelStyle(.titleOnly).padding(.horizontal, 6).frame(minHeight: hit) }
+                    .buttonStyle(.glass).buttonBorderShape(.capsule)
+                    .accessibilityLabel("Keys")
                     .accessibilityHint("Type straight into the terminal")
                 TextField("Message", text: $draft, axis: .vertical)
                     .lineLimit(1...5)

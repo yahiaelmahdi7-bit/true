@@ -39,7 +39,6 @@ struct PaneView: View {
     var body: some View {
         TerminalRepresentable(controller: controller)
             .background(Color.black)
-            .ignoresSafeArea(.container, edges: .bottom)
             .navigationTitle(route.title).navigationBarTitleDisplayMode(.inline)
             .navigationSubtitle(row?.status ?? "")
             .toolbarVisibility(.hidden, for: .tabBar)
@@ -68,8 +67,9 @@ struct PaneView: View {
             .safeAreaInset(edge: .bottom) {
                 if keysMode {
                     HStack {
-                        Button { setKeys(false) } label: { Label("Compose a prompt", systemImage: "keyboard.chevron.compact.down").labelStyle(.iconOnly).frame(width: 44, height: 44) }
-                            .buttonStyle(.glass).buttonBorderShape(.circle)
+                        Button { setKeys(false) } label: { Label("Compose", systemImage: "text.bubble").labelStyle(.titleOnly).padding(.horizontal, 6).frame(minHeight: 44) }
+                            .buttonStyle(.glass).buttonBorderShape(.capsule)
+                            .accessibilityLabel("Compose a prompt")
                         Spacer()
                         if !keyboardUp {
                             Button { _ = controller.terminal.becomeFirstResponder() } label: { Label("Show keyboard", systemImage: "keyboard").labelStyle(.iconOnly).frame(width: 44, height: 44) }
@@ -80,8 +80,10 @@ struct PaneView: View {
                     ComposerBar(draft: draftBinding, composer: composer, isClaude: isClaude, focused: $fieldFocused,
                                 onKeys: { setKeys(true) }, onSend: { send(.prompt) },
                                 onKey: { controller.sendKey($0) }, onIntent: { send($0) })
+                        .background(Color.black.ignoresSafeArea(edges: .bottom))
                 }
             }
+            .background(Color.black.ignoresSafeArea())
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardUp = true }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardUp = false }
             .onAppear { controller.onCopied = { model.show("Copied") } }
@@ -93,8 +95,89 @@ struct PaneView: View {
 
 struct TerminalRepresentable: UIViewRepresentable {
     let controller: PaneController
-    func makeUIView(context: Context) -> SelectableTerminalView { controller.terminal }
-    func updateUIView(_ uiView: SelectableTerminalView, context: Context) {}
+    func makeUIView(context: Context) -> FitScrollView { FitScrollView(terminal: controller.terminal) }
+    func updateUIView(_ uiView: FitScrollView, context: Context) {
+        uiView.setGrid(cols: controller.cols, rows: controller.rows)
+    }
+}
+
+/// Hosts the terminal at exactly the Mac's cols x rows and scales it to fit the width (pinch to zoom in).
+/// The terminal's frame is cols x cell width, so SwiftTerm's own layout derives the same cols and never reflows.
+final class FitScrollView: UIScrollView, UIScrollViewDelegate {
+    let terminal: SelectableTerminalView
+    private var cols = 0, rows = 0
+    private var laidOutBounds = CGSize.zero
+    private var laidOutGrid = (cols: 0, rows: 0)
+    private var atFit = true
+
+    init(terminal: SelectableTerminalView) {
+        self.terminal = terminal
+        super.init(frame: .zero)
+        backgroundColor = .black
+        delegate = self
+        bouncesZoom = false
+        maximumZoomScale = 2
+        showsHorizontalScrollIndicator = false
+        showsVerticalScrollIndicator = false
+        contentInsetAdjustmentBehavior = .never
+        addSubview(terminal)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func setGrid(cols: Int, rows: Int) {
+        guard cols != self.cols || rows != self.rows else { return }
+        self.cols = cols; self.rows = rows
+        setNeedsLayout()
+    }
+
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? { terminal }
+
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        atFit = zoomScale <= minimumZoomScale + 0.001
+        updatePanning()
+        centerContent()
+    }
+
+    private func updatePanning() {
+        isScrollEnabled = !atFit || contentSize.height > bounds.height + 1
+    }
+
+    private func centerContent() {
+        let dx = max(0, (bounds.width - contentSize.width) / 2)
+        contentInset = UIEdgeInsets(top: 0, left: dx, bottom: 0, right: dx)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard cols > 0, rows > 0, bounds.width > 0 else { return }
+        let grid = (cols: cols, rows: rows)
+        guard bounds.size != laidOutBounds || grid != laidOutGrid else { return }
+        let gridChanged = grid != laidOutGrid
+        laidOutBounds = bounds.size; laidOutGrid = grid
+
+        zoomScale = 1
+        let size = terminal.getOptimalFrameSize().size
+        guard size.width > 0 else { return }
+        // +0.5 keeps floor(width / cellWidth) == cols against float error.
+        terminal.frame = CGRect(x: 0, y: 0, width: size.width + 0.5, height: size.height + 0.5)
+        terminal.layoutIfNeeded()
+        contentSize = terminal.frame.size
+        #if DEBUG
+        let after = terminal.getOptimalFrameSize().size
+        if abs(after.width - size.width) > 0.01 || abs(after.height - size.height) > 0.01 {
+            print("PaneView: SwiftTerm reflowed \(size) -> \(after) for \(cols)x\(rows)")
+            assertionFailure("terminal reflowed")
+        }
+        #endif
+
+        let fit = min(1, bounds.width / size.width)
+        minimumZoomScale = fit
+        maximumZoomScale = max(2, fit)
+        if atFit || gridChanged { zoomScale = fit; atFit = true } else { zoomScale = max(fit, min(zoomScale, maximumZoomScale)) }
+        centerContent()
+        updatePanning()
+        if atFit { contentOffset = CGPoint(x: -contentInset.left, y: max(0, contentSize.height - bounds.height)) }
+    }
 }
 
 /// SwiftTerm already owns long-press → word select → drag handles → Copy (its `longPress` shows the
@@ -114,6 +197,8 @@ final class SelectableTerminalView: TerminalView {
 final class PaneController: NSObject, TerminalViewDelegate {
     let terminal: SelectableTerminalView
     var status: String?
+    var cols = 0
+    var rows = 0
     var hasSelection = false
     var onCopied: (() -> Void)?
     private var socket: PaneSocket?
@@ -128,6 +213,7 @@ final class PaneController: NSObject, TerminalViewDelegate {
             self.hasSelection = active
             self.copyKey?.isEnabled = active
         }
+        terminal.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         terminal.terminalDelegate = self
         terminal.nativeBackgroundColor = .black
         terminal.nativeForegroundColor = .white
@@ -236,7 +322,7 @@ final class PaneController: NSObject, TerminalViewDelegate {
                 case .output(let d): backoff = nil; terminal.feed(byteArray: [UInt8](d)[...])
                 case .snapshot(let c, let r):
                     terminal.resize(cols: c, rows: r)
-                    terminal.font = UIFont.monospacedSystemFont(ofSize: max(9, min(14, terminal.bounds.width / (CGFloat(c) * 0.6))), weight: .regular)
+                    cols = c; rows = r
                 case .gone: status = "This pane was closed on the Mac."; try? await Task.sleep(for: .seconds(1.2)); onGone(); return
                 case .closed(let err):
                     if case .unauthorized = err { await model.unpair(); return }
