@@ -25,6 +25,7 @@ targets:
       - path: ../Sources/TrueRemoteClient
       - ../Sources/TrueActivity/PaneActivityAttributes.swift
       - TrueActivity/PaneIntents.swift
+      - TrueActivity/ComposeIntent.swift   # control intents run in the app process
     dependencies:
       - package: SwiftTerm
       - target: TrueShare
