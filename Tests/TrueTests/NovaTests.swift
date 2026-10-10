@@ -253,15 +253,23 @@ private func verdict(kind: NovaReflex.Kind = .deskControl, kc: Double = 0.95, ad
     @Test func raceReflexWinsCancelsBrain() async {
         final class Flag: @unchecked Sendable { var direct = false; var brain = false }
         let f = Flag()
-        let p = await NovaSpeculative.race(reflex: { verdict() }, direct: { _ in f.direct = true }, brain: { _ in f.brain = true })
+        let p = await NovaSpeculative.race(reflex: { verdict() }, direct: { _ in f.direct = true }, brain: { f.brain = true })
         if case .reflex = p {} else { Issue.record("expected reflex path, got \(p)") }
         #expect(f.direct && !f.brain)
     }
-    @Test func raceBelowFloorRunsBrainWithPrior() async {
-        final class Box: @unchecked Sendable { var prior: String?? = nil }
+    // Run 26b supersedes the old "brain waits for the reflex prior" test: the brain now starts at t0.
+    @Test func raceBelowFloorRunsBrain() async {
+        final class Box: @unchecked Sendable { var ran = false }
         let b = Box()
-        _ = await NovaSpeculative.race(reflex: { verdict(vc: 0.2) }, direct: { _ in }, brain: { b.prior = .some($0) })
-        #expect(b.prior != nil)
+        _ = await NovaSpeculative.race(reflex: { verdict(vc: 0.2) }, direct: { _ in }, brain: { b.ran = true })
+        #expect(b.ran)
+    }
+    @Test func raceBrainStartsAtT0WhileReflexIsSlow() async {
+        final class Box: @unchecked Sendable { var started: Date? }
+        let b = Box(); let t0 = Date()
+        _ = await NovaSpeculative.race(reflex: { try? await Task.sleep(for: .milliseconds(400)); return verdict(vc: 0.2) },
+                                       direct: { _ in }, brain: { b.started = Date() })
+        #expect((b.started?.timeIntervalSince(t0) ?? 9) < 0.02)
     }
 }
 

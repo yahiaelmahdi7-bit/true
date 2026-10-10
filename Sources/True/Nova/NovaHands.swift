@@ -33,6 +33,11 @@ final class NovaHands: NovaToolRunner, @unchecked Sendable {
         let str: [String: String] = i.compactMapValues { $0 as? String }
         func s(_ k: String) -> String { str[k] ?? "" }
         switch name {
+        case "activate_app_or_open":
+            let running = await MainActor.run { NovaInstantTools.running(s("name")) != nil }
+            if running { return await NovaInstantTools.run("activate_app", i) }
+            return await tool("/usr/bin/open", ["-a", s("name")], ok: "launched \(s("name"))")
+        case let n where NovaInstantTools.names.contains(n): return await NovaInstantTools.run(n, i)
         case "hub_status": return (await MainActor.run { Self.hubStatus() }, false)
         case "focus_pane": return await MainActor.run { Self.focus(s("target")) }
         case "read_pane": let t = s("target"), n = i["lines"] as? Int ?? 40; return await MainActor.run { Self.read(t, lines: n) }

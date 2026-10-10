@@ -24,19 +24,16 @@ enum NovaSpeculative {
         "Reflex prior (Jev, advisory): kind=\(v.kind.rawValue) \(Int(v.kindConfidence * 100))%, verb=\(v.verb ?? "none"), seat=\(v.seat ?? "none")."
     }
 
-    /// Runs both; returns which path won. `brain` must honour cancellation.
+    /// Runs both at t0. The brain never awaits the reflex (Run 26b: parallel, not sequential); if the reflex clears
+    /// the acting floor the brain is cancelled. `brain` must honour cancellation.
     @discardableResult
     static func race(reflex: @escaping @Sendable () async -> NovaReflex.Verdict?,
                      direct: @escaping @Sendable (NovaAction) async -> Void,
-                     brain: @escaping @Sendable (String?) async -> Void,
+                     brain: @escaping @Sendable () async -> Void,
                      haveBrain: Bool = true) async -> Path {
-        let reflexTask = Task { await reflex() }
-        let brainTask: Task<Void, Never>? = haveBrain ? Task {
-            let v = await reflexTask.value
-            guard !Task.isCancelled else { return }
-            if case .brain(let prior) = decide(v) { await brain(prior) }
-        } : nil
-        let path = decide(await reflexTask.value)
+        let brainTask: Task<Void, Never>? = haveBrain ? Task { await brain() } : nil
+        let v = await reflex()
+        let path = decide(v)
         switch path {
         case .reflex(let a): brainTask?.cancel(); await direct(a)
         case .none: brainTask?.cancel()

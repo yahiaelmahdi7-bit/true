@@ -21,6 +21,15 @@ final class WakeListener: ObservableObject {
     /// `VoiceEngine` runs it through `NovaReflex`, which is the judgment this spotter lacks.
     /// Recognizer text, not whisper: good enough for a short desk command, never used as dictation.
     var onUtterance: ((String) -> Void)?
+    /// Run 26b: EVERY partial/final (full running transcript, isFinal, spoken-word end in seconds since the stream
+    /// started). The engine reads the live stream through a take instead of handing off to a recorder.
+    var onPartial: ((String, Bool, TimeInterval?) -> Void)?
+    /// Run 26b "Live stream": when true a wake trigger does NOT stand down / release the mic — it only calls `onWake`.
+    var streamTakes = false
+    /// Extra contextual strings (installed/running app names, True roster) appended to the wake hint.
+    var extraContext: [String] = []
+    /// When the current recognition stream started (segment timestamps are relative to it).
+    private(set) var streamStartedAt = Date()
     private var splitter = UtteranceSplitter()
     private var quietTimer: DispatchWorkItem?
 
@@ -188,7 +197,7 @@ final class WakeListener: ObservableObject {
         // ASR routinely writes "over"/"nover"/"no va" and the wake never fires. Contextual
         // strings are the documented seam for exactly this: rare proper nouns the stream should
         // prefer when the acoustics are ambiguous.
-        req.contextualStrings = NovaAddress.contextualStrings
+        req.contextualStrings = NovaAddress.contextualStrings + extraContext
         request = req
 
         // The tap fires on a real-time audio thread; `append` is documented thread-safe. A tiny
@@ -232,15 +241,17 @@ final class WakeListener: ObservableObject {
         // under the macOS 26 dynamic isolation check. Extract only Sendable values, then hop to main.
         task = recognizer.recognitionTask(with: req) { @Sendable [weak self] result, error in
             let text = result?.bestTranscription.formattedString
+            let lastEnd = result?.bestTranscription.segments.last.map { $0.timestamp + $0.duration }
             let isFinal = result?.isFinal ?? false
             let failed = error != nil
-            Task { @MainActor in self?.handle(text: text, isFinal: isFinal, failed: failed) }
+            Task { @MainActor in self?.handle(text: text, isFinal: isFinal, failed: failed, lastWordEnd: lastEnd) }
         }
         listening = true
         status = .listening
         backoff = Self.minBackoff   // the mic opened — earn back the fast retry
         heardWords = false
         silentChecks = 0
+        streamStartedAt = Date()
         scheduleWatchdog()
         log.info("wake listening on-device (ambient utterances \(self.onUtterance != nil ? "on" : "off", privacy: .public), \(Int(fmt.sampleRate), privacy: .public) Hz)")
     }
@@ -287,7 +298,8 @@ final class WakeListener: ObservableObject {
         scheduleWatchdog()
     }
 
-    private func handle(text: String?, isFinal: Bool, failed: Bool) {
+    private func handle(text: String?, isFinal: Bool, failed: Bool, lastWordEnd: TimeInterval? = nil) {
+        if let text, !text.isEmpty { onPartial?(text, isFinal, lastWordEnd) }
         // Debug, not info: partials arrive several times a second while anyone talks.
         if let text, !text.isEmpty, !heardWords {
             // Once per stream, at info: proof the recognizer is producing words on THIS engine.
@@ -299,7 +311,9 @@ final class WakeListener: ObservableObject {
             log.info("wake trigger heard")
             quietTimer?.cancel(); quietTimer = nil
             fire()
-            return   // standing down for the take — do not restart here
+            if !streamTakes { return }   // standing down for the take — do not restart here
+            if isFinal || failed { scheduleRestart() }
+            return   // live stream: the engine reads the words after the name from onPartial
         }
         // The running transcript accumulates for the life of the stream; the splitter hands out
         // only the words not yet delivered, once they've sat unchanged for the quiet gap.
@@ -338,7 +352,7 @@ final class WakeListener: ObservableObject {
     private func fire() {
         guard Date().timeIntervalSince(lastFire) > 2 else { return }   // debounce repeated partials
         lastFire = Date()
-        standDown()          // hand the mic to the take's own recorder
+        if !streamTakes { standDown() }   // hand the mic to the take's own recorder (legacy path)
         onWake?()
     }
 

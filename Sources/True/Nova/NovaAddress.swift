@@ -226,6 +226,18 @@ enum NovaAddress {
         return false
     }
 
+    /// Run 26b: index just past the LAST wake name in `words` (lowercased letter tokens), or nil. Same three tiers as
+    /// `heardWakeName`, but over the whole running transcript so the live stream can slice off the command after it.
+    static func indexAfterLastName(in words: [String]) -> Int? {
+        var last: Int?
+        for (i, word) in words.enumerated() {
+            if isStrongName(word) { last = i + 1 }
+            else if i + 1 < words.count, splitNames.contains(where: { $0[0] == word && $0[1] == words[i + 1] }) { last = i + 2 }
+            else if i > 0, weakNames.contains(word), greetings.contains(words[i - 1]) { last = i + 1 }
+        }
+        return last
+    }
+
     // MARK: - Token helpers
 
     private static let edgePunct = CharacterSet(charactersIn: ",.!?;:\"'()…-")

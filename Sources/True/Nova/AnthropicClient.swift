@@ -136,7 +136,7 @@ struct LiveMessagesTransport: MessagesTransport {
                     var attempt = 0
                     while true {
                         do {
-                            let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+                            let (bytes, resp) = try await NovaNet.session.bytes(for: req)
                             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
                             if code == 429 || code >= 500, attempt == 0 { attempt = 1; try await Task.sleep(for: .milliseconds(800)); continue }
                             if code != 200 { throw BrainError.http(code) }     // 400s are never retried
