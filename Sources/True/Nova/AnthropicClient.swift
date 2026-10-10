@@ -43,7 +43,7 @@ enum AnthropicRequest {
 }
 
 /// One parsed SSE frame.
-struct SSEEvent: Equatable { let event: String; let data: [String: AnyHashable] }
+struct SSEEvent: Equatable, @unchecked Sendable { let event: String; let data: [String: AnyHashable] }
 
 /// Incremental SSE parser: feed lines, get events when a blank line closes a frame.
 struct SSEParser {

@@ -101,6 +101,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Launch side effect: bind 127.0.0.1:8801 for the phone view — ONLY when the user turned Remote Access on
         // (default off), so a fresh install never listens.
         RemoteAccess.shared.startIfEnabled()
+        // Launch side effect: Nova's ears (wake word + push-to-talk) — on by default, one-click mute in the title bar.
+        NovaEngine.shared.start()
         // Launch side effect: paint the live Dock tile with the bare cursive T. The bundle icon alone gets
         // boxed into a grey tile by macOS 26; a runtime image is drawn as-is. One-shot, no ongoing cost.
         if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
