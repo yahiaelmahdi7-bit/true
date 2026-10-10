@@ -4,6 +4,7 @@ import SwiftUI
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import Observation
+import TrueRemoteClient
 
 /// Owner of the Remote Access server and its settings. Off by default; the toggle lives in UserDefaults.
 @MainActor
@@ -26,6 +27,15 @@ final class RemoteAccess {
     private(set) var selfLogin: String?
     private(set) var tailscaleNote: String?
 
+    /// "Show a pairing card when my iPhone is nearby" (default ON): gates Bluetooth advertising while Remote Access is on.
+    private(set) var nearbyCard = UserDefaults.standard.object(forKey: NearbyHost.cardKey) as? Bool ?? true
+    /// Where a phone's Bluetooth hello goes. Production: the floating card; tests replace it.
+    @ObservationIgnored var onNearbyHello: (NearbyPairing.Hello) -> Void = { _ in }
+    @ObservationIgnored lazy var nearby = NearbyHost(
+        advertiser: CoreBluetoothAdvertiser(),
+        computerName: { Host.current().localizedName ?? ProcessInfo.processInfo.hostName },
+        address: { [weak self] in self?.dnsName.map { "\($0):\(RemoteAccess.httpsPort)" } },
+        onHello: { [weak self] in self?.onNearbyHello($0) })
     @ObservationIgnored let codes = PairingCodes()
     @ObservationIgnored let deviceStore = DeviceStore()
     @ObservationIgnored private var server: RemoteServer?
@@ -38,7 +48,16 @@ final class RemoteAccess {
     }
 
     /// Launch side effect, justified: it only runs if the user turned Remote Access on (default off).
-    func startIfEnabled() { if enabled { start() }; syncClipboardShare() }
+    func startIfEnabled() { if enabled { start() }; syncClipboardShare(); syncNearby() }
+
+    func setNearbyCard(_ on: Bool) {
+        nearbyCard = on
+        UserDefaults.standard.set(on, forKey: NearbyHost.cardKey)
+        syncNearby()
+    }
+
+    /// Bluetooth advertises only while Remote Access is on AND the card toggle is on.
+    func syncNearby() { nearby.sync(remoteOn: enabled, cardOn: nearbyCard) }
 
     func setShareClipboard(_ on: Bool) {
         shareClipboard = on
@@ -56,6 +75,7 @@ final class RemoteAccess {
         UserDefaults.standard.set(on, forKey: Self.enabledKey)
         if on { start(); refreshTailnet(); newCode() } else { stop() }
         syncClipboardShare()
+        syncNearby()
     }
 
     private func start() {
@@ -239,6 +259,12 @@ struct RemoteAccessView: View {
                 }
                 Text("Pairing code — type it on the phone the first time. Single use, expires in 5 minutes.")
                     .font(.caption).foregroundStyle(.secondary)
+                Divider()
+                Toggle("Show a pairing card when my iPhone is nearby", isOn: Binding(get: { remote.nearbyCard },
+                                                                                  set: { remote.setNearbyCard($0) }))
+                    .toggleStyle(.switch)
+                Text("Bluetooth is used only to notice the phone. It never carries the pairing code.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Divider()
                 Text("Paired phones").font(.headline)
                 if remote.devices.isEmpty { Text("None yet.").foregroundStyle(.secondary) }

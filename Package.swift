@@ -16,7 +16,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "True",
-            dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")],
+            dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm"), "TrueRemoteClient"],
             path: "Sources/True",
             swiftSettings: [
                 // macOS 26 + Swift 6: the runtime's DYNAMIC main-actor isolation check hard-traps

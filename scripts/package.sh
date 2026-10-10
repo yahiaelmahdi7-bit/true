@@ -45,6 +45,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <!-- macOS charges a child process's mic use to the app that launched it, so Claude Code's
        hold-space voice mode asks as True. Without this key TCC refuses silently, no prompt. -->
   <key>NSMicrophoneUsageDescription</key><string>Programs you run in True, such as Claude Code voice mode, use the microphone to hear you.</string>
+  <!-- Bluetooth advertising (CBPeripheralManager) only notices an unpaired iPhone nearby so the pairing card can appear. -->
+  <key>NSBluetoothAlwaysUsageDescription</key><string>True uses Bluetooth only to notice your iPhone nearby so the pairing code can appear.</string>
 </dict>
 </plist>
 PLIST
