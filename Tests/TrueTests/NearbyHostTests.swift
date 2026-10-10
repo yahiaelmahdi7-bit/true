@@ -41,7 +41,7 @@ import TrueRemoteClient
         let remote = RemoteAccess(); let fake = FakeAdvertiser()
         remote.nearby = make(fake)
         remote.syncNearby()   // Remote Access is off in a fresh instance's defaults
-        #expect(!remote.enabled ? !fake.isAdvertising : true)
+        #expect(remote.enabled || !fake.isAdvertising)
     }
 
     @Test func notifyPairedIsForwarded() {

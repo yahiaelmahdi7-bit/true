@@ -30,7 +30,9 @@ final class RemoteAccess {
     /// "Show a pairing card when my iPhone is nearby" (default ON): gates Bluetooth advertising while Remote Access is on.
     private(set) var nearbyCard = UserDefaults.standard.object(forKey: NearbyHost.cardKey) as? Bool ?? true
     /// Where a phone's Bluetooth hello goes. Production: the floating card; tests replace it.
-    @ObservationIgnored var onNearbyHello: (NearbyPairing.Hello) -> Void = { _ in }
+    @ObservationIgnored var onNearbyHello: (NearbyPairing.Hello) -> Void = {
+        NearbyPairCardController.shared.present(phoneName: $0.name, phoneID: $0.id)
+    }
     @ObservationIgnored lazy var nearby = NearbyHost(
         advertiser: CoreBluetoothAdvertiser(),
         computerName: { Host.current().localizedName ?? ProcessInfo.processInfo.hostName },
