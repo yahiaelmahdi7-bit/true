@@ -38,6 +38,7 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_CFBundleDisplayName: "True"
         INFOPLIST_KEY_NSCameraUsageDescription: "True uses the camera only to scan the pairing code shown on your Mac."
+        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: "True uses Bluetooth only to find your Mac when you first pair."
         TARGETED_DEVICE_FAMILY: "1"
       configs:
         Debug:

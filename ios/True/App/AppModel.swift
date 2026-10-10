@@ -25,6 +25,10 @@ final class AppModel {
     var selectedTab = "hub"
     /// A `true://pair` link without a code (Mac had none live): PairView prefills the address from it.
     var pendingPairLink: PairLink?
+    /// A Mac found over Bluetooth while the Pair screen is up (nil when none is in range).
+    var nearbyMac: NearbyPairing.NearbyMac?
+    var bluetoothState: BluetoothState = .unknown
+    private var scanner: NearbyScanning?
     private var pollTask: Task<Void, Never>?
     private let store = KeychainTokenStore()
 
@@ -50,6 +54,33 @@ final class AppModel {
         }
     }
 
+    /// Scan only while the Pair screen is showing and the phone is unpaired. Bluetooth permission is asked on first call.
+    func startNearbyScan() {
+        guard !paired else { return }
+        if scanner == nil {
+            #if DEBUG
+            if let s = uiState, s.hasPrefix("pair-nearby") {
+                scanner = FakeNearbyScanner(state: s == "pair-nearby-bt-off" ? .poweredOff : .poweredOn,
+                                            mac: s == "pair-nearby-bt-off" ? nil : .init(name: "Yahia's MacBook", address: "yoshii-mac.tail1234.ts.net:8444"))
+            }
+            #endif
+            #if targetEnvironment(simulator)
+            // The simulator has no Bluetooth; don't ask for a permission it can never grant.
+            if scanner == nil { return }
+            #endif
+            if scanner == nil { scanner = CoreBluetoothScanner() }
+            scanner?.onState = { [weak self] in self?.bluetoothState = $0 }
+            scanner?.onMac = { [weak self] in self?.nearbyMac = $0 }
+            scanner?.onPaired = { [weak self] in self?.nearbyMac = nil }
+        }
+        scanner?.start()
+    }
+
+    func stopNearbyScan() {
+        scanner?.stop()
+        nearbyMac = nil
+    }
+
     private func attach(_ url: URL) {
         session = RemoteSession(baseURL: url, store: store)
         paired = store.load() != nil
@@ -64,6 +95,7 @@ final class AppModel {
             try await s.pair(code: code)
             SharedConfig.baseURL = url
             session = s; paired = true; hub = nil; failCount = 0
+            stopNearbyScan()
             startPolling()
             if UserDefaults.standard.string(forKey: "autoPair") == nil { Background.requestAuthorization() }
             return nil
