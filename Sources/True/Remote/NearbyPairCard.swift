@@ -34,7 +34,7 @@ struct NearbyPairCardView: View {
         VStack(spacing: 12) {
             if paired {
                 Spacer()
-                Image(systemName: "checkmark.circle.fill").font(.system(size: 56)).foregroundStyle(.green)
+                Image(systemName: "checkmark.circle.fill").font(.system(size: 56)).foregroundStyle(.tint)
                     .symbolEffect(.bounce, value: paired)
                 Text("Paired with \(phoneName)").font(.headline).lineLimit(2).multilineTextAlignment(.center)
                 Text("From now on it works from anywhere.").font(.caption).foregroundStyle(.secondary)

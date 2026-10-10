@@ -59,6 +59,7 @@ final class RemoteServer: @unchecked Sendable {
         guard !running else { return true }
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return false }
+        _ = fcntl(fd, F_SETFD, FD_CLOEXEC)   // pane shells are forked from this process; they must never inherit the listener
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, socklen_t(MemoryLayout<Int32>.size))
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
@@ -97,6 +98,7 @@ final class RemoteServer: @unchecked Sendable {
             guard poll(&p, 1, 500) > 0 else { continue }
             let c = accept(fd, nil, nil)
             if c < 0 { continue }
+            _ = fcntl(c, F_SETFD, FD_CLOEXEC)
             lock.lock()
             let full = open.count >= Self.maxConnections
             if !full { open.insert(c) }
