@@ -78,6 +78,7 @@ struct PaneView: View {
                     }.padding(.horizontal)
                 } else {
                     ComposerBar(draft: draftBinding, composer: composer, isClaude: isClaude, focused: $fieldFocused,
+                                paneId: route.id, attachments: model.attachments(for: route.id),
                                 onKeys: { setKeys(true) }, onSend: { send(.prompt) },
                                 onKey: { controller.sendKey($0) }, onIntent: { send($0) })
                         .background(Color.black.ignoresSafeArea(edges: .bottom))

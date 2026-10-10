@@ -24,6 +24,8 @@ final class AppModel {
     /// Pane composer state, in memory only: unsent drafts and the Compose/Keys choice per pane id.
     var paneDrafts: [String: String] = [:]
     var paneKeysMode: [String: Bool] = [:]
+    /// Attachments picked for a pane prompt, per pane id; cleared on a successful send.
+    var paneAttachments: [String: [PaneAttachment]] = [:]
     var showComposer = false
     var selectedTab = "hub"
     /// A `true://pair` link without a code (Mac had none live): PairView prefills the address from it.
