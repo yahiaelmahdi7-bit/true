@@ -133,6 +133,15 @@ private func session(_ t: StubTransport, token: String? = "tok", store: InMemory
 
     /// The Mac sends builders `elapsed` in seconds and seats a label; a number must never fail the whole snapshot
     /// (that read as "Mac asleep or offline" on the phone, Run 30).
+    @Test func hubRowDecodesQuestionFieldsWhenPresent() throws {
+        let json = #"{"kind":"seat","id":"seat-a","name":"a","status":"Needs you","statusKey":"needsYou","pane":"P","question":"Run it?","tool":"Bash","detail":"ls"}"#
+        let row = try JSONDecoder().decode(HubRow.self, from: Data(json.utf8))
+        #expect(row.question == "Run it?" && row.tool == "Bash" && row.detail == "ls")
+        let bare = #"{"kind":"seat","id":"seat-b","name":"b"}"#
+        let old = try JSONDecoder().decode(HubRow.self, from: Data(bare.utf8))
+        #expect(old.question == nil && old.tool == nil && old.detail == nil)
+    }
+
     @Test func hubElapsedDecodesSecondsOrText() throws {
         let h = try JSONDecoder().decode(HubSnapshot.self, from: Data(sampleHub.utf8))
         let rows = h.projects.flatMap(\.rows)

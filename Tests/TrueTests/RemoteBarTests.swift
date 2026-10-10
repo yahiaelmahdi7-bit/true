@@ -292,6 +292,21 @@ func answer(_ kind: String, danger: Double? = nil, judged: Bool = true) -> JevRe
         #expect((json["summary"] as? String) != nil)
     }
 
+    @Test func needsYouSeatRowCarriesTheQuestion() throws {
+        let cfo = Agent(name: "cfo", role: .lead, repo: "/p/one", model: .opus, effort: .medium, permission: .acceptEdits)
+        let pane = UUID()
+        let groups = HubModel.build(seats: [cfo], seatStatus: { _ in .needsYou }, seatAwake: { _ in true }, peers: [],
+                                    builders: [], now: now, seatsOnly: false, hasGit: { _ in false })
+        let long = String(repeating: "x", count: 500)
+        let json = RemoteHubJSON.make(groups: groups, seatStatus: { _ in .needsYou }, seatPane: { _ in pane },
+                                      ask: { $0 == pane ? (long, "Bash", nil) : nil }, now: now)
+        let rows = try #require(json["projects"] as? [[String: Any]]).flatMap { ($0["rows"] as? [[String: Any]]) ?? [] }
+        let row = try #require(rows.first { $0["name"] as? String == "cfo" })
+        #expect((row["question"] as? String)?.count == 300)
+        #expect(row["tool"] as? String == "Bash")
+        #expect(row["detail"] == nil)
+    }
+
     @Test func ackValidatesTheIdAndWritesMeta() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ack-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

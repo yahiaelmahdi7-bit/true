@@ -41,13 +41,21 @@ final class PhoneBuilders: @unchecked Sendable {
 /// The Hub as JSON, from the Mac Hub's own groups (HubModel.build): same grouping, order, counts and status labels.
 enum RemoteHubJSON {
     static func make(groups: [HubProjectGroup], seatStatus: (String) -> AgentStatus, seatPane: (String) -> UUID?,
+                     ask: (UUID) -> (question: String, tool: String?, detail: String?)? = { _ in nil },
                      now: Double) -> [String: Any] {
         let projects: [[String: Any]] = groups.map { g in
             var rows: [[String: Any]] = g.seats.map { a in
                 let st = seatStatus(a.name)
                 var r: [String: Any] = ["kind": "seat", "id": "seat-\(a.name)", "name": a.name, "status": st.label,
                                         "statusKey": st.rawValue, "model": a.model.rawValue]
-                if let p = seatPane(a.name) { r["pane"] = p.uuidString }
+                if let p = seatPane(a.name) {
+                    r["pane"] = p.uuidString
+                    if st == .needsYou, let q = ask(p) {
+                        r["question"] = String(q.question.prefix(300))
+                        if let t = q.tool, !t.isEmpty { r["tool"] = String(t.prefix(300)) }
+                        if let d = q.detail, !d.isEmpty { r["detail"] = String(d.prefix(300)) }
+                    }
+                }
                 return r
             }
             rows += g.background.map { b in
@@ -192,7 +200,9 @@ struct RemoteCommandsLive: RemoteCommands {
             let now = Date().timeIntervalSince1970
             let groups = HubModel.build(seats: reg.crew, seatStatus: { reg.statusOf($0) }, seatAwake: { reg.isAwake($0) },
                                         peers: hub.peers, builders: hub.builders, now: now)
-            let obj: [String: Any] = RemoteHubJSON.make(groups: groups, seatStatus: { reg.statusOf($0) }, seatPane: { reg.panes[$0] }, now: now)
+            let obj: [String: Any] = RemoteHubJSON.make(groups: groups, seatStatus: { reg.statusOf($0) }, seatPane: { reg.panes[$0] },
+                                                 ask: { id in NeedsYouQueue.shared.rows.first { $0.paneID == id }.map { ($0.question, $0.tool, $0.detail) } },
+                                                 now: now)
             return (try? JSONSerialization.data(withJSONObject: obj)) ?? Data("{}".utf8)
         }
     }

@@ -73,13 +73,19 @@ public struct HubRow: Codable, Equatable, Sendable, Identifiable {
     public var acked: Bool?
     public var branch: String?
     public var updated: Double?
+    /// Needs-you rows only: what the pane is asking (≤ 300 chars each, all optional).
+    public var question: String?
+    public var tool: String?
+    public var detail: String?
 
     public init(kind: String, id: String, name: String, status: String, statusKey: String, model: String? = nil,
                 pane: String? = nil, cwd: String? = nil, elapsed: String? = nil, builderId: String? = nil,
-                acked: Bool? = nil, branch: String? = nil, updated: Double? = nil) {
+                acked: Bool? = nil, branch: String? = nil, updated: Double? = nil,
+                question: String? = nil, tool: String? = nil, detail: String? = nil) {
         self.kind = kind; self.id = id; self.name = name; self.status = status; self.statusKey = statusKey
         self.model = model; self.pane = pane; self.cwd = cwd; self.elapsed = elapsed; self.builderId = builderId
         self.acked = acked; self.branch = branch; self.updated = updated
+        self.question = question; self.tool = tool; self.detail = detail
     }
 
     public init(from d: Decoder) throws {
@@ -96,6 +102,9 @@ public struct HubRow: Codable, Equatable, Sendable, Identifiable {
         acked = try c.decodeIfPresent(Bool.self, forKey: .acked)
         branch = try c.decodeIfPresent(String.self, forKey: .branch)
         updated = try c.decodeIfPresent(Double.self, forKey: .updated)
+        question = try c.decodeIfPresent(String.self, forKey: .question)
+        tool = try c.decodeIfPresent(String.self, forKey: .tool)
+        detail = try c.decodeIfPresent(String.self, forKey: .detail)
         if let text = try? c.decodeIfPresent(String.self, forKey: .elapsed) { elapsed = text }
         else if let secs = try? c.decodeIfPresent(Double.self, forKey: .elapsed) { elapsed = Self.elapsedLabel(secs) }
         else { elapsed = nil }
