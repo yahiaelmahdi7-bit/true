@@ -76,4 +76,40 @@ protocol RemoteBackend: Sendable {
     /// nil when the pane does not exist (closed, or never was).
     func snapshot(pane: UUID) -> (cols: Int, rows: Int, bytes: [UInt8])?
     func input(pane: UUID, bytes: [UInt8]) -> Bool
+    /// One whole prompt (or control) through PaneDelivery. Returns the `PaneDelivery.Outcome` raw value, nil for an unknown pane.
+    /// `attachments` are resolved file paths, pasted ahead of the text.
+    func paneInput(pane: UUID, intent: PaneInputIntent, text: String, attachments: [String]) -> String?
+}
+
+extension RemoteBackend {
+    func paneInput(pane: UUID, intent: PaneInputIntent, text: String, attachments: [String]) -> String? { nil }
+}
+
+/// What the phone composer may ask for. Wire names are the raw values.
+enum PaneInputIntent: String, Sendable, CaseIterable {
+    case prompt, stage, control, submitOnly, approve, deny
+
+    var deliveryIntent: PaneDelivery.Intent {
+        switch self {
+        case .prompt: return .prompt
+        case .stage: return .stage
+        case .control: return .control
+        case .submitOnly: return .submitOnly
+        case .approve: return .answer(approve: true)
+        case .deny: return .answer(approve: false)
+        }
+    }
+}
+
+extension PaneDelivery.Outcome {
+    var wire: String {
+        switch self {
+        case .landed: return "landed"
+        case .staged: return "staged"
+        case .unverified: return "unverified"
+        case .stuckInComposer: return "stuckInComposer"
+        case .noPane: return "noPane"
+        case .promptGone: return "promptGone"
+        }
+    }
 }

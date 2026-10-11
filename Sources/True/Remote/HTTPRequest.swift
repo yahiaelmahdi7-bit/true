@@ -25,6 +25,10 @@ struct HTTPRequest: Equatable {
     static let maxBody = 4 * 1024
     /// POST routes whose body is read after authentication, under their own caps (drop 200 MB streamed, clip 1 MB).
     static let bodyRoutes: Set<String> = ["/api/drop", "/api/clip"]
+    /// The pane composer posts whole prompts (≤ 64 KB), so it streams too.
+    static func isBodyRoute(_ path: String) -> Bool {
+        bodyRoutes.contains(path) || (path.hasPrefix("/api/pane/") && path.hasSuffix("/input"))
+    }
     static let singletonHeaders: Set<String> = ["tailscale-user-login", "host", "origin", "authorization"]
 
     /// Parse as much of `bytes` as forms one request. `.needMore` until the head (and any body) is complete.
@@ -53,7 +57,7 @@ struct HTTPRequest: Equatable {
                     p.count == 2 ? (String(p[1]).removingPercentEncoding ?? String(p[1])) : ""
             }
         }
-        if first[0] == "POST", bodyRoutes.contains(String(comps[0])) {
+        if first[0] == "POST", isBodyRoute(String(comps[0])) {
             let len = headers["transfer-encoding"] == nil ? (headers["content-length"].flatMap { Int($0) } ?? -1) : -1
             let have = Array(bytes[(end + 4)...].prefix(max(len, 0)))
             var r = HTTPRequest(method: String(first[0]), path: String(comps[0]), query: query, headers: headers, body: have)

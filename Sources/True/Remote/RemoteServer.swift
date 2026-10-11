@@ -24,11 +24,11 @@ final class RemoteServer: @unchecked Sendable {
 
     let codes: PairingCodes
     let devices: DeviceStore
-    private let backend: RemoteBackend
+    let backend: RemoteBackend
     private let allowedLogin: @Sendable () -> String?
     private let dnsName: @Sendable () -> String?
     private let wsAuthTimeout: TimeInterval
-    private let files: RemoteFiles
+    let files: RemoteFiles
     private let dropDeadline: TimeInterval
     let commands: RemoteCommands
     let bar: RemoteBar
@@ -206,7 +206,7 @@ final class RemoteServer: @unchecked Sendable {
     static let noOriginRoutes: Set<String> = ["/api/drop", "/api/clip"]
     /// Every API route this server answers (the test asserts none of them reads the Mac clipboard or a Mac path).
     static let routeTable: [String] = [
-        "POST /pair", "GET /api/tabs", "WS /api/pane/<uuid>", "POST /api/drop", "POST /api/clip",
+        "POST /pair", "GET /api/tabs", "WS /api/pane/<uuid>", "POST /api/pane/<uuid>/input", "POST /api/drop", "POST /api/clip",
         "GET /api/shots", "GET /api/shots/<id>", "GET /api/shots/<id>/thumb", "GET /api/inbox", "GET /api/inbox/<id>", "DELETE /api/inbox/<id>",
         "GET /api/hub", "GET /api/hub/builder/<id>", "POST /api/hub/builder/<id>/ack",
         "POST /api/route", "POST /api/route/<routeId>/slot", "POST /api/run", "GET /api/recent",
@@ -250,6 +250,7 @@ final class RemoteServer: @unchecked Sendable {
             _ = send(fd, HTTPResponse.make(status: 200, reason: "OK", body: [UInt8](backend.tabsJSON()),
                                            contentType: "application/json")); return
         }
+        if req.method == "POST", req.path.hasPrefix("/api/pane/"), req.path.hasSuffix("/input") { handlePaneInput(fd, req); return }
         if req.method == "POST", req.path == "/api/drop" { handleDrop(fd, req); return }
         if req.method == "POST", req.path == "/api/clip" { handleClip(fd, req); return }
         if req.method == "GET", req.path == "/api/shots" { handleShotsList(fd); return }
