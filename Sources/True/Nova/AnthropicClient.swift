@@ -10,7 +10,7 @@ enum AnthropicRequest {
     static let version = "2023-06-01"
     static let maxTokens = 4096
 
-    /// `tools` are custom tool dicts (already `strict` + `additionalProperties:false`). The cache breakpoints sit on the
+    /// `tools` are custom tool dicts (`additionalProperties:false`, not `strict`). The cache breakpoints sit on the
     /// stable prefix only: the last tool and the system block. Volatile data (roster, focus, reflex prior) is user-turn.
     static func body(system: String, tools: [[String: Any]], messages: [[String: Any]], effort: String,
                      computerToolset: Bool = false, stream: Bool = true) -> [String: Any] {
@@ -49,6 +49,20 @@ struct SSEEvent: Equatable, @unchecked Sendable { let event: String; let data: [
 struct SSEParser {
     private var event = ""
     private var data = ""
+    private var pending: [UInt8] = []
+    /// Raw bytes in. The live wire MUST come through here, not `bytes.lines`: AsyncLineSequence drops empty lines,
+    /// and the blank line is what closes an SSE frame (every frame then fused into one unparseable blob: silent brain).
+    mutating func feed(byte: UInt8) -> SSEEvent? {
+        guard byte == 0x0A else { pending.append(byte); return nil }
+        if pending.last == 0x0D { pending.removeLast() }
+        defer { pending.removeAll(keepingCapacity: true) }
+        return feed(line: String(decoding: pending, as: UTF8.self))
+    }
+    /// End of stream: flush a last unterminated line, then close the open frame.
+    mutating func finish() -> SSEEvent? {
+        if !pending.isEmpty { _ = feed(byte: 0x0A) }
+        return feed(line: "")
+    }
     mutating func feed(line: String) -> SSEEvent? {
         if line.isEmpty {
             defer { event = ""; data = "" }
@@ -127,7 +141,7 @@ protocol MessagesTransport: Sendable {
 
 struct LiveMessagesTransport: MessagesTransport {
     func stream(body: [String: Any]) -> AsyncThrowingStream<SSEEvent, Error> {
-        let payload = (try? JSONSerialization.data(withJSONObject: body)) ?? Data()
+        let payload = (try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])) ?? Data()   // same bytes every launch: prompt cache hits
         return AsyncThrowingStream { cont in
             let task = Task {
                 do {
@@ -141,8 +155,8 @@ struct LiveMessagesTransport: MessagesTransport {
                             if code == 429 || code >= 500, attempt == 0 { attempt = 1; try await Task.sleep(for: .milliseconds(800)); continue }
                             if code != 200 { throw BrainError.http(code) }     // 400s are never retried
                             var p = SSEParser()
-                            for try await line in bytes.lines { if let e = p.feed(line: line) { cont.yield(e) } }
-                            if let e = p.feed(line: "") { cont.yield(e) }
+                            for try await b in bytes { if let e = p.feed(byte: b) { cont.yield(e) } }
+                            if let e = p.finish() { cont.yield(e) }
                             cont.finish(); return
                         } catch let e as URLError where attempt == 0 && e.code != .cancelled {
                             attempt = 1; try await Task.sleep(for: .milliseconds(800))

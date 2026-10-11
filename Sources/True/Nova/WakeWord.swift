@@ -85,6 +85,8 @@ final class WakeListener: ObservableObject {
     private let log = Logger(subsystem: "net.prismlens.axon", category: "wake")
 
     static var authorized: Bool { SFSpeechRecognizer.authorizationStatus() == .authorized }
+    /// Never asked yet — the owner must call `requestAuthorization`, or `begin()` no-ops silently forever.
+    static var undetermined: Bool { SFSpeechRecognizer.authorizationStatus() == .notDetermined }
 
     /// Request Speech Recognition authorization (its own TCC prompt, separate from the microphone).
     /// The completion runs on the main actor, so the owner can touch its state from it directly.
@@ -209,8 +211,12 @@ final class WakeListener: ObservableObject {
         let sink = TapSink(req)
         self.sink = sink
         let input = audio.inputNode
-        // C1: echo cancellation so Nova's own voice isn't heard as the user. Best effort; failure keeps the mic gate in NovaEngine.
-        try? input.setVoiceProcessingEnabled(true)
+        // NO voice processing on this always-on engine (Yahia, 2026-10-11). Run 26c's C1 enabled it for echo
+        // cancellation, but Apple's voice-processing unit ducks every other app for as long as it is live — and this
+        // mic is live all the time, so a film became inaudible. Own-voice defence is the mic gate in NovaEngine
+        // (`NovaApproval.micGated` + `NovaLiveTurn.spentCount`: words heard while Nova speaks never address a command).
+        // Explicitly OFF, not merely unset: a rebuilt engine can inherit the unit's state from the shared input device.
+        if input.isVoiceProcessingEnabled { try? input.setVoiceProcessingEnabled(false) }
         // THE CRASH GUARD. `outputFormat(forBus:)` reports 0 Hz / 0 channels while the input device
         // is absent or still coming back — and handing that to `installTap` raises an Objective-C
         // exception that Swift cannot catch, aborting the whole app (see AudioSafety.swift; this is

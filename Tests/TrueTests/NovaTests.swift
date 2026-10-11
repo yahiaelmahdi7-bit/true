@@ -80,9 +80,10 @@ import Foundation
         #expect(last["type"] as? String == "computer_toolset_20260801")
         #expect(last["name"] == nil)
     }
-    @Test func customToolsStrict() {
+    /// Not `strict` (an ~11 s grammar compile per new schema bytes); closed schemas + local `validate` instead.
+    @Test func customToolsClosedNotStrict() {
         for t in NovaToolSchemas.all {
-            #expect(t["strict"] as? Bool == true)
+            #expect(t["strict"] == nil)
             #expect((t["input_schema"] as? [String: Any])?["additionalProperties"] as? Bool == false)
         }
     }
@@ -152,6 +153,24 @@ data: {"type":"message_stop"}
         #expect(acc.stopReason == "tool_use")
         #expect(acc.finished)
         #expect(acc.text == "Opening Safari.")
+    }
+    /// The live wire path: byte-fed, CRLF-tolerant, blank lines kept (bytes.lines dropped them → zero events, silent brain).
+    @Test func byteFedStream() async throws {
+        var p = SSEParser(), acc = MessageAccumulator(), spoken = "", n = 0
+        for b in Array(sseFixture.replacingOccurrences(of: "\n", with: "\r\n").utf8) {
+            if let e = p.feed(byte: b) { n += 1; if let t = acc.apply(e) { spoken += t } }
+        }
+        if let e = p.finish() { n += 1; _ = acc.apply(e) }
+        #expect(n == SSEParser.parse(sseFixture).count)
+        #expect(spoken == "Opening Safari.")
+        #expect(acc.toolUses.count == 1 && acc.stopReason == "tool_use" && acc.finished)
+        // Why the byte path exists: Foundation's line reader skips the frame-closing blank lines.
+        var viaLines = 0
+        let f = FileManager.default.temporaryDirectory.appendingPathComponent("sse-\(UUID().uuidString).txt")
+        try sseFixture.write(to: f, atomically: true, encoding: .utf8); defer { try? FileManager.default.removeItem(at: f) }
+        var lp = SSEParser()
+        for try await l in f.lines { if lp.feed(line: l) != nil { viaLines += 1 } }
+        #expect(viaLines < n)
     }
     @Test func errorEvent() {
         var acc = MessageAccumulator()
@@ -279,5 +298,30 @@ private func verdict(kind: NovaReflex.Kind = .deskControl, kc: Double = 0.95, ad
 @Suite struct NovaKeyTests {
     @Test func noKeyMeansReflexOnly() {
         #expect(NovaEngine.setupLine == "security add-generic-password -s net.prismlens.true -a anthropic -U -w")
+    }
+}
+
+@Suite struct NovaLocalAnswerTests {
+    @Test func timeAndDateAnsweredLocally() {
+        let d = ISO8601DateFormatter().date(from: "2026-10-11T07:40:00Z")!
+        #expect(NovaEngine.localAnswer("What time is it?", now: d)?.hasPrefix("It's ") == true)
+        #expect(NovaEngine.localAnswer("what's the date", now: d)?.contains("October") == true)
+        #expect(NovaEngine.localAnswer("what time is the meeting", now: d) == nil)
+        #expect(NovaEngine.localAnswer("open spotify", now: d) == nil)
+    }
+}
+
+@Suite struct NovaWakeQuestionReachesTurn {
+    /// A question after the wake name must survive the turn filter and the instant lane as unhandled words (→ local answer / brain).
+    @Test func questionStaysUnhandled() {
+        for phrase in ["Nova what time is it", "hey Nova what time is it", "Nova, what's the time", "Nova what time is it right now"] {
+            var live = NovaLiveTurn(); var s = NovaInstantSession(apps: AppIndex.scan(running: []), panes: ["true-cto"])
+            var partial = ""; var out: [String] = []
+            for w in phrase.split(separator: " ") {
+                partial += (partial.isEmpty ? "" : " ") + w
+                if let words = live.ingest(partial, gated: false, novaSpeaking: false) { _ = s.feed(words.joined(separator: " "), now: Date()); out = words }
+            }
+            #expect(!out.isEmpty && !s.unhandled.isEmpty, "\(phrase)")
+        }
     }
 }

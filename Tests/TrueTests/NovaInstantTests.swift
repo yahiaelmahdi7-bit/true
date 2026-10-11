@@ -69,6 +69,39 @@ private func acts(_ steps: [NovaInstantSession.Step]) -> [InstantVerb] { steps.c
         #expect(t.command(in: "blah blah Nova open Safari", novaSpeaking: false) == ["open", "Safari"])
         #expect(t.command(in: "blah blah Nova open Safari and then nova volume up", novaSpeaking: false) == ["volume", "up"])
     }
+    /// Live 2026-10-11: every "Hey Nova" came back as "Hangover", and "Dia" as "dear".
+    @Test func fusedHangoverWakesOnlyAtASentenceStart() {
+        #expect(NovaAddress.heardWakeName(in: "Hangover can you pull up"))
+        #expect(NovaAddress.heardWakeName(in: "the YouTube tab on dear Hangover what time is it"))
+        #expect(!NovaAddress.heardWakeName(in: "I have a hangover"))
+        #expect(!NovaAddress.heardWakeName(in: "hangover cure"))                // recognizer didn't judge it a sentence start
+        #expect(!NovaAddress.heardWakeName(in: "let's watch The Hangover"))
+        var t = NovaLiveTurn()
+        #expect(t.command(in: "Hangover what time is it", novaSpeaking: false) == ["what", "time", "is", "it"])
+        #expect(t.command(in: "I have a hangover today", novaSpeaking: false) == nil)
+        #expect(NovaAddress.indexAfterLastName(in: ["hangover", "open", "safari"]) == nil)   // no case info = fused tier off
+        #expect(!NovaAddress.read("Hangover open Safari").namedNova)             // never redirects dictation
+        #expect(NovaTabs.parse(["pull", "up", "the", "youtube", "tab", "on", "dear"]) == .init(query: "youtube", browser: "Dia"))
+    }
+    /// Live 2026-10-11: inside ONE stream the recognizer starts its text over after a pause; the 2nd "Hey Nova" was deaf.
+    @Test func recognizerRestartAfterAPauseResetsTheFloor() {
+        var t = NovaLiveTurn()
+        let t0 = Date()
+        #expect(t.ingest("Hey Nova what time is it", gated: false, novaSpeaking: false, generation: 1, now: t0) == ["what", "time", "is", "it"])
+        t.endTurn(wordCount: 6)
+        #expect(t.ingest("Hey", gated: false, novaSpeaking: false, generation: 1, now: t0.addingTimeInterval(4)) == nil)
+        #expect(t.ingest("Hey Nova what time is it", gated: false, novaSpeaking: false, generation: 1, now: t0.addingTimeInterval(4.5)) == ["what", "time", "is", "it"])
+    }
+    /// P1 still holds: a finished command re-transcribed (fewer words, same letters) or a shrink with no pause never re-fires.
+    @Test func revisionsKeepTheFloor() {
+        var t = NovaLiveTurn()
+        let t0 = Date()
+        _ = t.ingest("Hey Nova what time is it", gated: false, novaSpeaking: false, generation: 1, now: t0)
+        t.endTurn(wordCount: 6)
+        #expect(t.ingest("Hey Nova what time's it", gated: false, novaSpeaking: false, generation: 1, now: t0.addingTimeInterval(2)) == nil)
+        #expect(t.ingest("Hey", gated: false, novaSpeaking: false, generation: 1, now: t0.addingTimeInterval(2.3)) == nil)
+        #expect(t.ingest("Hey Nova what time is it", gated: false, novaSpeaking: false, generation: 1, now: t0.addingTimeInterval(2.6)) == nil)
+    }
     @Test func novaOwnSpeechIgnoredButStopBargesIn() {
         var t = NovaLiveTurn()
         #expect(t.command(in: "nova open safari", novaSpeaking: true) == nil)

@@ -68,8 +68,9 @@ final class NovaEngine: ObservableObject {
                                        cancelled: { Task.isCancelled })
     /// Eager (mid-speech) hands: read-only tools only; anything that changes something is held for the final run (M1).
     private lazy var eagerHands = NovaHands(approve: { _ in false }, cancelled: { Task.isCancelled }, eager: true,
-                                            onHeld: { [weak self] in Task { @MainActor in self?.eagerHeld = true } })
+                                            onHeld: { [weak self] in Task { @MainActor in self?.eagerHeld = true; self?.eagerTask?.cancel() } })   // live 2026-10-11: held open_url was retried 6-7x
     private var run: [String: Any] = [:]
+    private var recordFrom = 0   // `lines` already written to a run record: ambient utterances don't reset `lines`, so a record takes only what's new
     private var speechBuf = ""
     private var utterSeen = false
     private var utterCard: UUID?
@@ -93,7 +94,20 @@ final class NovaEngine: ObservableObject {
     }
     func stop() { wake.stop(); keys.stop(); running = false; state = .idle }
     private func startWake() {
-        if NovaSettings.wakeWord, !muted, WakeListener.authorized { wake.extraContext = Self.contextNames(); wake.start() }
+        guard !muted else { return }
+        if WakeListener.authorized {
+            if NovaSettings.wakeWord { wake.extraContext = Self.contextNames(); wake.start() }
+        } else if WakeListener.undetermined {
+            // Speech Recognition is its own TCC prompt (not the mic's) and nothing else asks for it: the Axon port
+            // dropped the caller, so the wake word and push-to-talk stayed deaf with no prompt and no log line.
+            Self.log.info("speech recognition not yet authorized — requesting")
+            wake.requestAuthorization { [weak self] ok in
+                Self.log.info("speech recognition \(ok ? "granted" : "declined", privacy: .public)")
+                if ok { self?.startWake() }
+            }
+        } else {
+            Self.log.info("speech recognition denied — wake word and push-to-talk are off (System Settings → Privacy → Speech Recognition)")
+        }
     }
 
     /// Recognizer bias: running apps first (recent), then installed, then the True roster. Capped at ~60.
@@ -141,7 +155,7 @@ final class NovaEngine: ObservableObject {
     private func beginTurn() {
         guard !turnActive else { return }
         turnActive = true; turnStart = Date(); lastChange = Date(); lastCommand = ""; lastWordEnd = nil; tellTurn.reset(); tellUndone = false
-        state = .listening; transcript = ""; lines = []; directDone = []
+        state = .listening; transcript = ""; lines = []; recordFrom = 0; directDone = []
         eagerHeld = false; hands.resetTurn(); eagerHands.resetTurn()
         eager = NovaEagerTurn(); eagerTask?.cancel(); eagerTask = nil
         NSSound(named: "Tink")?.play()
@@ -282,6 +296,9 @@ final class NovaEngine: ObservableObject {
     func utterance(_ raw: String, source: NovaReflex.Source, already: [String] = [], eager: Bool = false) async {
         let reading = NovaAddress.read(raw)
         if reading.isSummons { say("Yes?"); state = .idle; return }
+        if !eager, source == .take, let a = Self.localAnswer(reading.rest) {   // time/date: on the Mac, 0 ms, no network
+            transcript = reading.rest; say(a); state = .done; record(text: reading.rest, path: "local", reflexMs: 0, brainMs: 0); return
+        }
         let text = eager ? raw : reading.rest
         if !eager { transcript = text }; if source == .take { state = .thinking }
         let t0 = Date()
@@ -311,27 +328,33 @@ final class NovaEngine: ObservableObject {
             brain: { [weak self] in
                 guard let self, source == .take, hasKey else { return }
                 let b0 = Date()
+                let heard = Task { @MainActor in   // never dead air: soft cue if no words or act by 0.8 s
+                    try? await Task.sleep(for: .milliseconds(800))
+                    if !Task.isCancelled, self.speechBuf.isEmpty, !self.speaking { NSSound(named: "Morse")?.play() }
+                }
+                defer { heard.cancel() }
                 let brain = HaikuBrain(effort: NovaSettings.effort)
                 let done = already.isEmpty ? nil : "Already done: " + already.joined(separator: ", ")
-                let user = [done, "Agents: \(roster)", "In front: \(focus)", "User said: \(text)"].compactMap { $0 }.joined(separator: "\n")
+                let user = [done, "Now: \(Self.clock())", "Agents: \(roster)", "In front: \(focus)", "User said: \(text)"].compactMap { $0 }.joined(separator: "\n")
                 await MainActor.run { self.speechBuf = "" }
                 let out = await brain.respond(user: user, runner: h) { u in
                     Task { @MainActor in
                         switch u.kind {
                         case .text(let s):
+                            heard.cancel()
                             self.speechBuf += s
                             while let r = self.speechBuf.firstIndex(where: { ".!?".contains($0) }) {
                                 let sentence = String(self.speechBuf[...r]).trimmingCharacters(in: .whitespacesAndNewlines)
                                 self.speechBuf = String(self.speechBuf[self.speechBuf.index(after: r)...]); if !sentence.isEmpty { self.say(sentence) }
                             }
-                        case .toolStart(let n, let s): self.state = .acting; self.lines.append(.init(text: s, ok: nil, tool: n))
+                        case .toolStart(let n, let s): heard.cancel(); self.state = .acting; self.lines.append(.init(text: s, ok: nil, tool: n))
                         case .toolEnd(_, let ok): if let i = self.lines.lastIndex(where: { $0.ok == nil }) { self.lines[i].ok = ok }
                         }
                     }
                 }
                 await MainActor.run { if !self.speechBuf.trimmingCharacters(in: .whitespaces).isEmpty { self.say(self.speechBuf) }; self.speechBuf = "" }
                 if case .failed(let m) = out, m != "cancelled" { await MainActor.run { self.notice = "Brain: \(m)" } }
-                await MainActor.run { self.run["brain_ms"] = Int(Date().timeIntervalSince(b0) * 1000); self.run["brain_outcome"] = "\(out)" }
+                await MainActor.run { self.run["brain_ms"] = Int(Date().timeIntervalSince(b0) * 1000); self.run["brain_outcome"] = out.label }
             })
         _ = verdict; _ = tools
         recent = Array((recent + ["USER: \(text)"]).suffix(6))
@@ -339,6 +362,24 @@ final class NovaEngine: ObservableObject {
         state = .done
         record(text: text, path: "\(path)", reflexMs: reflexMs, brainMs: brainMs)
         try? await Task.sleep(for: .seconds(3)); if state == .done { state = .idle }
+    }
+
+    /// Questions the Mac answers itself. Whole-utterance match only, so "what time is the meeting" still goes to the brain.
+    nonisolated static func localAnswer(_ text: String, now: Date = Date()) -> String? {
+        let t = text.lowercased().filter { $0.isLetter || $0 == " " || $0 == "'" }.split(separator: " ").joined(separator: " ")
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
+        let time: Set = ["what time is it", "what's the time", "whats the time", "what is the time", "time", "the time", "what time it is"]
+        let date: Set = ["what day is it", "what's the date", "whats the date", "what is the date", "what's today", "what is today",
+                         "what's today's date", "what is today's date", "date", "what date is it", "what day is today"]
+        if time.contains(t) { f.dateFormat = "h:mm a"; return "It's \(f.string(from: now))." }
+        if date.contains(t) { f.dateFormat = "EEEE, d MMMM"; return "It's \(f.string(from: now))." }
+        return nil
+    }
+
+    /// Local time for the brain's user turn: "what time / what day" answers in one round, no `date` tool call.
+    nonisolated static func clock(_ d: Date = Date()) -> String {
+        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "EEEE d MMMM yyyy, HH:mm zzz"
+        return f.string(from: d)
     }
 
     private func begin(_ summary: String, tool: String = "") {
@@ -370,22 +411,25 @@ final class NovaEngine: ObservableObject {
 
     private func flushRecord(path: String) { record(path: path, reflexMs: 0, brainMs: 0) }
     private func record(text: String = "", path: String, reflexMs: Int, brainMs: Int) {
-        let tools = lines.map { ($0.tool.isEmpty ? "tool" : $0.tool, $0.ok) }
+        let tools = lines.dropFirst(recordFrom).map { ($0.tool.isEmpty ? "tool" : $0.tool, $0.ok) }
         Self.log.info("utterance path=\(path, privacy: .public) reflex_ms=\(reflexMs) brain_ms=\(brainMs) tools=\(tools.count) gate=\(self.pending == nil ? "clear" : "pending", privacy: .public)")
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".true/nova/runs")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let obj = Self.runObject(path: path, reflexMs: reflexMs, brainMs: brainMs, clauseMs: runner.timings.last?.clauseToActMs,
-                                 wordMs: runner.timings.last?.wordToActMs, tools: tools)
+                                 wordMs: runner.timings.last?.wordToActMs, tools: tools,
+                                 brainOutcome: run["brain_outcome"] as? String)
         if let d = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]) {
             let f = dir.appendingPathComponent("\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8)).json")
             FileManager.default.createFile(atPath: f.path, contents: d, attributes: [.posixPermissions: 0o600])
         }
-        run = [:]
+        run = [:]; recordFrom = lines.count
     }
     /// The run record: tool names and ok flags only (M3/L4). Static so a test can prove no command text or transcript hash leaks.
-    nonisolated static func runObject(path: String, reflexMs: Int, brainMs: Int, clauseMs: Int?, wordMs: Int?, tools: [(String, Bool?)]) -> [String: Any] {
+    nonisolated static func runObject(path: String, reflexMs: Int, brainMs: Int, clauseMs: Int?, wordMs: Int?, tools: [(String, Bool?)],
+                                     brainOutcome: String? = nil) -> [String: Any] {
         ["at": ISO8601DateFormatter().string(from: Date()), "path": path, "reflex_ms": reflexMs, "brain_ms": brainMs,
          "clause_to_act_ms": clauseMs as Any? ?? NSNull(), "word_to_act_ms": wordMs as Any? ?? NSNull(),
+         "brain_outcome": brainOutcome as Any? ?? NSNull(),
          "tools": tools.map { ["tool": $0.0, "ok": $0.1 as Any? ?? NSNull()] }]
     }
 }

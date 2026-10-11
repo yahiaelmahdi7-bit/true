@@ -71,6 +71,16 @@ enum NovaAddress {
         "over", "noah", "noa", "hover", "ova", "nope",
     ]
 
+    /// Greeting and name fused into ONE real word: Apple's on-device model writes "Hey Nova" as "Hangover"
+    /// (measured 2026-10-11, every "Hey Nova" in a live test). Being English, it counts only where the recognizer
+    /// itself judged a sentence START (capitalised) and no article sits in front: "Hangover, what time is it"
+    /// wakes; "I have a hangover" and "watch The Hangover" never do. Spotter + live-stream slicing only, like `weakNames`.
+    static let fusedNames: Set<String> = ["hangover"]
+    private static let fusedBlockers: Set<String> = ["a", "an", "the", "my", "your", "his", "her", "their", "our", "this", "that", "no"]
+    static func isFusedCall(_ words: [String], at i: Int, capitalized: Bool) -> Bool {
+        capitalized && fusedNames.contains(words[i]) && (i == 0 || !fusedBlockers.contains(words[i - 1]))
+    }
+
     /// Decoration between a greeting and the name — "hey **there** Nova". Only ever consumed once a
     /// greeting has been seen, so a sentence merely starting with one of these is left alone.
     private static let greetedFillers: Set<String> = ["there", "um", "uh", "so", "yo", "hey"]
@@ -208,10 +218,10 @@ enum NovaAddress {
     /// boundary on the name — which is what keeps "supernova" and "casanova" from waking her while
     /// still allowing the recognizer's habit of hanging a letter off the end ("novas", "novah").
     static func heardWakeName(in transcript: String) -> Bool {
-        let letters = String(transcript.lowercased().map { $0.isLetter ? $0 : " " })
-        let words = letters.split(separator: " ").map(String.init)
+        let cased = String(transcript.map { $0.isLetter ? $0 : " " }).split(separator: " ").map(String.init)
+        let words = cased.map { $0.lowercased() }
         guard !words.isEmpty else { return false }
-        let tail = Array(words.suffix(8))
+        let tail = Array(words.suffix(8)), caps = cased.suffix(8).map { $0.first?.isUppercase == true }
 
         for (i, word) in tail.enumerated() {
             // Strong tier — the name on its own is enough.
@@ -222,18 +232,21 @@ enum NovaAddress {
             // Weak tier — a real English word, so it only counts as her name when someone is
             // plainly calling out: the token immediately before it must be a greeting.
             if i > 0, weakNames.contains(word), greetings.contains(tail[i - 1]) { return true }
+            if isFusedCall(tail, at: i, capitalized: caps[i]) { return true }
         }
         return false
     }
 
     /// Run 26b: index just past the LAST wake name in `words` (lowercased letter tokens), or nil. Same three tiers as
     /// `heardWakeName`, but over the whole running transcript so the live stream can slice off the command after it.
-    static func indexAfterLastName(in words: [String]) -> Int? {
+    /// `capitalized[i]` = the ORIGINAL token began upper-case (the fused tier needs it); omitted = fused tier off.
+    static func indexAfterLastName(in words: [String], capitalized: [Bool] = []) -> Int? {
         var last: Int?
         for (i, word) in words.enumerated() {
             if isStrongName(word) { last = i + 1 }
             else if i + 1 < words.count, splitNames.contains(where: { $0[0] == word && $0[1] == words[i + 1] }) { last = i + 2 }
             else if i > 0, weakNames.contains(word), greetings.contains(words[i - 1]) { last = i + 1 }
+            else if i < capitalized.count, isFusedCall(words, at: i, capitalized: capitalized[i]) { last = i + 1 }
         }
         return last
     }

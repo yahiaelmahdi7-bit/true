@@ -20,8 +20,27 @@ struct NovaLiveTurn {
         for (i, t) in segmentStarts.enumerated() where windows.contains(where: { t >= $0.start && t <= $0.end.addingTimeInterval(tail) }) { n = i + 1 }
         return n
     }
-    private mutating func sync(_ generation: Int) {
+    /// The last partial and when it arrived. On-device recognition STARTS THE TEXT OVER after a pause, with no final and
+    /// no new stream (live 2026-10-11: "Hey nova what time is it" … pause … "No", "Open Safari"), so the floor must reset
+    /// then too — otherwise every later "Hey Nova" lands at or below it and Nova stays deaf until the stream ends.
+    private var prev: [String] = []
+    private var prevAt = Date.distantPast
+    static let restartGap: TimeInterval = 1.0
+
+    /// A partial after a pause that is much SHORTER than the one before is a fresh transcript. A revision ("no va" ->
+    /// "nova", "time is" -> "time's") keeps most of the letters, so it never resets the floor (P1 still holds).
+    static func restarted(from old: [String], to new: [String], gap: TimeInterval) -> Bool {
+        guard gap >= restartGap, new.count < old.count else { return false }
+        let letters = { (t: [String]) in Double(norm(t).joined().count) }
+        return letters(new) < 0.6 * letters(old)
+    }
+
+    private mutating func sync(_ generation: Int, _ toks: [String], now: Date) {
         if generation != gen { gen = generation; floor = 0; hotkeyBase = nil }   // a new stream restarted the transcript
+        else if Self.restarted(from: prev, to: toks, gap: now.timeIntervalSince(prevAt)) {
+            floor = 0; if hotkeyBase != nil { hotkeyBase = 0 }   // same stream, text started over: every word is new
+        }
+        prev = toks; prevAt = now
     }
 
     static func tokens(_ text: String) -> [String] {
@@ -37,25 +56,26 @@ struct NovaLiveTurn {
 
     /// The addressed command words in this partial, or nil when nothing is addressed to Nova (ambient speech), or
     /// when Nova itself is speaking (self-speech is never a command; only "stop" barges in — see `isBargeIn`).
-    mutating func command(in text: String, novaSpeaking: Bool, generation: Int = 0) -> [String]? {
+    mutating func command(in text: String, novaSpeaking: Bool, generation: Int = 0, now: Date = Date()) -> [String]? {
         let toks = Self.tokens(text)
-        sync(generation)
+        sync(generation, toks, now: now)
         if novaSpeaking { return nil }
         if let b = hotkeyBase { return Array(toks.dropFirst(min(b, toks.count))) }
-        guard let i = NovaAddress.indexAfterLastName(in: Self.norm(toks)), i > floor else { return nil }
+        guard let i = NovaAddress.indexAfterLastName(in: Self.norm(toks), capitalized: toks.map { $0.first?.isUppercase == true }), i > floor else { return nil }
         return Array(toks.dropFirst(i))
     }
 
     /// Engine entry point for every partial. `gated` = Nova speaking or in its echo tail.
-    mutating func ingest(_ text: String, gated: Bool, novaSpeaking: Bool, generation: Int = 0) -> [String]? {
-        sync(generation)
+    mutating func ingest(_ text: String, gated: Bool, novaSpeaking: Bool, generation: Int = 0, now: Date = Date()) -> [String]? {
+        let toks = Self.tokens(text)
+        sync(generation, toks, now: now)
         if gated {
             // Nova's own words (and the echo tail) are spent: a "nova" in them must never address a later command (P1).
-            let n = Self.tokens(text).count
+            let n = toks.count
             if hotkeyBase != nil { hotkeyBase = n } else { floor = n }
             return nil
         }
-        return command(in: text, novaSpeaking: novaSpeaking, generation: generation)
+        return command(in: text, novaSpeaking: novaSpeaking, generation: generation, now: now)
     }
 
     /// "stop" in the last two words while Nova is talking.

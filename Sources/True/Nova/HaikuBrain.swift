@@ -34,7 +34,18 @@ final class HaikuBrain: @unchecked Sendable {
         self.transport = transport; self.tools = tools; self.effort = effort; self.computerToolset = computerToolset
     }
 
-    enum Outcome: Equatable { case done(String), refusal, truncated, roundCap, failed(String) }
+    enum Outcome: Equatable { case done(String), refusal, truncated, roundCap, failed(String) 
+        /// For the run record: never the spoken text (M3), only how the turn ended and the transport/API error.
+        var label: String {
+            switch self {
+            case .done(let t): return t.isEmpty ? "done_empty" : "done"
+            case .refusal: return "refusal"
+            case .truncated: return "truncated"
+            case .roundCap: return "round_cap"
+            case .failed(let m): return "failed: " + m.prefix(80)
+            }
+        }
+    }
 
     /// `user` carries the volatile bits (reflex prior, roster, focus) so the cached prefix stays stable.
     func respond(user: String, runner: NovaToolRunner, onUpdate: @escaping @Sendable (BrainUpdate) -> Void) async -> Outcome {
@@ -52,7 +63,9 @@ final class HaikuBrain: @unchecked Sendable {
                     if let t = acc.apply(e) { onUpdate(BrainUpdate(kind: .text(t))) }
                     if let err = acc.error { return .failed(err) }
                 }
-            } catch { return .failed((error as? BrainError).map { "\($0)" } ?? error.localizedDescription) }
+            } catch {
+                if Task.isCancelled { return .failed("cancelled") }
+                return .failed((error as? BrainError).map { "\($0)" } ?? error.localizedDescription) }
             history.append(["role": "assistant", "content": acc.content])
             switch acc.stopReason {
             case "refusal": return .refusal
@@ -80,10 +93,11 @@ final class HaikuBrain: @unchecked Sendable {
     }
 }
 
-/// Custom tool schemas (all `strict` + `additionalProperties:false`) and input validation.
+/// Custom tool schemas (`additionalProperties:false`) and input validation. NOT `strict`: the API compiles a grammar per
+/// exact schema bytes, ~11 s on a miss (measured 2026-10-11), and `validate` already checks every input before it runs.
 enum NovaToolSchemas {
     private static func tool(_ name: String, _ desc: String, _ props: [String: [String: Any]], required: [String]) -> [String: Any] {
-        ["name": name, "description": desc, "strict": true,
+        ["name": name, "description": desc,
          "input_schema": ["type": "object", "properties": props, "required": required, "additionalProperties": false] as [String: Any]]
     }
     nonisolated(unsafe) private static let str: [String: Any] = ["type": "string"]

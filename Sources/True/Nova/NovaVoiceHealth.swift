@@ -95,6 +95,11 @@ final class NovaVoiceHealth: ObservableObject {
     func shouldAnnounceOnce() -> Bool {
         guard fault != .healthy, !spokenThisLaunch else { return false }
         spokenThisLaunch = true
+        // A missing premium voice is cosmetic and only he can fix it: once EVER, not every relaunch (Settings keeps showing it).
+        if fault == .compactSystemVoice {
+            if UserDefaults.standard.bool(forKey: "nova.voiceNotice.compactSpoken") { return false }
+            UserDefaults.standard.set(true, forKey: "nova.voiceNotice.compactSpoken")
+        }
         return true
     }
 

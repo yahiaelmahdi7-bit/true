@@ -14,10 +14,11 @@ enum InstantVerb: Equatable {
     case media(String)              // play_pause | next | previous
     case scroll(up: Bool), screenshot
     case openSite(name: String, url: String)
+    case switchTab(query: String, browser: String?)
 
     /// Acts that can be taken back with "no / undo". Scroll and screenshot are not undoable.
     var undoable: Bool {
-        switch self { case .scroll, .screenshot: return false; default: return true }
+        switch self { case .scroll, .screenshot, .switchTab: return false; default: return true }
     }
     var spoken: String {
         switch self {
@@ -33,6 +34,7 @@ enum InstantVerb: Equatable {
         case .scroll(let up): return up ? "scrolled up" : "scrolled down"
         case .screenshot: return "took a screenshot"
         case .openSite(let n, _): return "opened \(n)"
+        case .switchTab(let q, _): return "pulled up \(q)"
         }
     }
 }
@@ -42,7 +44,7 @@ struct AppIndex {
     let names: [String]
     private let byNorm: [String: String]
     static let aliases: [String: String] = [
-        "chrome": "Google Chrome", "google chrome": "Google Chrome", "code": "Visual Studio Code", "vs code": "Visual Studio Code",
+        "chrome": "Google Chrome", "google chrome": "Google Chrome", "dear": "Dia", "code": "Visual Studio Code", "vs code": "Visual Studio Code",
         "vscode": "Visual Studio Code", "visual studio code": "Visual Studio Code", "settings": "System Settings",
         "system preferences": "System Settings", "preferences": "System Settings", "imessage": "Messages", "word": "Microsoft Word",
         "excel": "Microsoft Excel", "powerpoint": "Microsoft PowerPoint", "term": "Terminal", "activity monitor": "Activity Monitor",
@@ -145,6 +147,8 @@ enum NovaInstant {
         var w = wordsIn
         while let f = w.first, fillers.contains(f) { w.removeFirst() }
         while let l = w.last, ["please", "now", "app", "for", "me"].contains(l) { w.removeLast() }
+        // "pull up the youtube tab [on dia]": checked first (longer than the 7-word cap); no browser named = wait the prefix beat so "on dia" can land
+        if let t = NovaTabs.parse(w) { return .act(.switchTab(query: t.query, browser: t.browser), ambiguous: t.browser == nil) }
         guard !w.isEmpty, w.count <= 7 else { return .none }
         let core = w.filter { !["the", "a", "it", "my"].contains($0) }
         let c = core.joined(separator: " ")
@@ -340,4 +344,95 @@ struct NovaTellTurn {
         return t
     }
     mutating func reset() { sent = false }
+}
+
+/// "pull up the youtube tab on dia": local words -> (query, browser), then browser/tab resolution as PURE functions.
+/// The AppleScript never contains his words: tabs are listed with a fixed script, matched in Swift, focused by number.
+enum NovaTabs {
+    static let browsers = ["Dia", "Google Chrome", "Safari", "Arc", "Brave Browser"]   // fallback order when none is named/frontmost
+    static let spokenBrowsers: [String: String] = [
+        "dia": "Dia", "dear": "Dia", "chrome": "Google Chrome", "google chrome": "Google Chrome", "safari": "Safari", "arc": "Arc",
+        "brave": "Brave Browser", "brave browser": "Brave Browser",
+    ]
+    static let verbs: [[String]] = [["pull", "up"], ["switch", "to"], ["go", "to"], ["show", "me"], ["bring", "up"], ["jump", "to"], ["show"], ["open"], ["find"]]
+    private static let lead: Set<String> = ["the", "my", "a", "an", "that"]
+
+    struct Parsed: Equatable { let query: String; let browser: String? }
+
+    /// nil until "<verb> [the] <query> tab[s]" is complete and what follows is nothing or a whole "on|in <browser>".
+    static func parse(_ w: [String]) -> Parsed? {
+        guard w.count <= 12, let v = verbs.first(where: { w.count > $0.count && Array(w.prefix($0.count)) == $0 }) else { return nil }
+        var rest = Array(w.dropFirst(v.count))
+        while let f = rest.first, lead.contains(f) { rest.removeFirst() }
+        // No "tab" said: "pull up youtube on dia" (live 2026-10-11) counts only with a whole browser phrase at the end.
+        guard let t = rest.firstIndex(where: { $0 == "tab" || $0 == "tabs" }) else {
+            guard let o = rest.lastIndex(where: { ["on", "in"].contains($0) }), o >= 1, o <= 3,
+                  let b = spokenBrowsers[rest[(o + 1)...].joined(separator: " ")] else { return nil }
+            return Parsed(query: rest[..<o].joined(separator: " "), browser: b)
+        }
+        guard t >= 1, t <= 4 else { return nil }
+        let query = rest[..<t].joined(separator: " ")
+        let after = Array(rest[(t + 1)...])
+        if after.isEmpty { return Parsed(query: query, browser: nil) }
+        guard after.count >= 2, ["on", "in"].contains(after[0]), let b = spokenBrowsers[after.dropFirst().joined(separator: " ")] else { return nil }
+        return Parsed(query: query, browser: b)
+    }
+
+    /// Named browser (must be running) > frontmost app if a supported browser > first running in `browsers` order.
+    static func resolveBrowser(named: String?, frontmost: String?, running: [String]) -> String? {
+        if let named { return running.contains(named) ? named : nil }
+        if let f = frontmost, browsers.contains(f), running.contains(f) { return f }
+        return browsers.first { running.contains($0) }
+    }
+
+    struct Tab: Equatable { let window: Int; let tab: Int; let title: String; let url: String }
+    static let fieldSep = "\u{1F}", recordSep = "\u{1E}"
+
+    /// Fixed script (browser name only comes from `browsers`): one record per tab = window, tab, title, URL.
+    static func listScript(_ b: String) -> String? {
+        guard browsers.contains(b) else { return nil }
+        let title = b == "Safari" ? "name" : "title"
+        return """
+        set fs to (ASCII character 31)
+        set rs to (ASCII character 30)
+        set out to ""
+        tell application "\(b)"
+          set wi to 0
+          repeat with w in windows
+            set wi to wi + 1
+            set ti to 0
+            repeat with t in tabs of w
+              set ti to ti + 1
+              set out to out & wi & fs & ti & fs & (\(title) of t) & fs & (URL of t) & rs
+            end repeat
+          end repeat
+        end tell
+        return out
+        """
+    }
+
+    /// Focus by number only. Dia has a `focus` command; Chromium browsers set the active tab index; Safari sets current tab.
+    static func focusScript(_ b: String, window w: Int, tab t: Int) -> String? {
+        guard browsers.contains(b), w >= 1, t >= 1 else { return nil }
+        switch b {
+        case "Dia": return "tell application \"Dia\"\nfocus tab \(t) of window \(w)\nactivate\nend tell"
+        case "Safari": return "tell application \"Safari\"\nset current tab of window \(w) to tab \(t) of window \(w)\nset index of window \(w) to 1\nactivate\nend tell"
+        default: return "tell application \"\(b)\"\nset active tab index of window \(w) to \(t)\nset index of window \(w) to 1\nactivate\nend tell"
+        }
+    }
+
+    static func parseList(_ out: String) -> [Tab] {
+        out.components(separatedBy: recordSep).compactMap { rec in
+            let f = rec.components(separatedBy: fieldSep)
+            guard f.count >= 4, let w = Int(f[0].trimmingCharacters(in: .whitespacesAndNewlines)), let t = Int(f[1]) else { return nil }
+            return Tab(window: w, tab: t, title: f[2], url: f[3])
+        }
+    }
+
+    /// First title containing the query (case/punctuation-insensitive), else first URL containing it.
+    static func pick(_ query: String, in tabs: [Tab]) -> Tab? {
+        let q = AppIndex.norm(query)
+        guard !q.isEmpty else { return nil }
+        return tabs.first { AppIndex.norm($0.title).contains(q) } ?? tabs.first { AppIndex.norm($0.url).contains(q) }
+    }
 }
