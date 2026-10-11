@@ -13,6 +13,14 @@ import Testing
 
     private func id(_ w: NSWindow?) -> ObjectIdentifier? { w.map(ObjectIdentifier.init) }
 
+    @Test func onlyTheMainWindowLosesItsButtons() {
+        let main = window("True"), settings = window("True Settings"), remote = window("Remote Access")
+        #expect(MainWindow.shouldHideButtons(window: ObjectIdentifier(main), main: id(main)))
+        #expect(!MainWindow.shouldHideButtons(window: ObjectIdentifier(settings), main: id(main)))
+        #expect(!MainWindow.shouldHideButtons(window: ObjectIdentifier(remote), main: id(main)))
+        #expect(!MainWindow.shouldHideButtons(window: ObjectIdentifier(settings), main: nil))
+    }
+
     @Test func mainWindowSnapshots() {
         let main = window("True")
         #expect(MainWindow.shouldSnapshot(closing: id(main), main: id(main)))

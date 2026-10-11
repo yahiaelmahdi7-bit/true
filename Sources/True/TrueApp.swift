@@ -123,7 +123,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil,
                                                queue: .main) { n in
             guard let w = n.object as? NSWindow else { return }
-            Task { @MainActor in WindowChrome.hideButtons(w) }
+            Task { @MainActor in
+                guard MainWindow.shouldHideButtons(window: ObjectIdentifier(w),
+                                                   main: MainWindow.current.map(ObjectIdentifier.init)) else { return }
+                WindowChrome.hideButtons(w)
+            }
         }
         // The only launch-time side effect of Agents mode: a listening socket. It is event-driven
         // (blocks in accept) and costs nothing until an awake agent's hook rings it; it wakes nobody.

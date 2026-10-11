@@ -31,6 +31,11 @@ enum MainWindow {
         guard let closing, let main else { return false }
         return closing == main
     }
+
+    /// Only the main window goes buttonless; Settings and Remote Access keep their close button.
+    nonisolated static func shouldHideButtons(window: ObjectIdentifier, main: ObjectIdentifier?) -> Bool {
+        window == main
+    }
 }
 
 /// Zero-size probe for the main scene's root view: reports its window to ``MainWindow`` once it is in one.
