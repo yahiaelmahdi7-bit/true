@@ -23,7 +23,9 @@ private func gitItem(_ id: String) -> InboxItem {
         for i in 0..<3 { file.append(InboxEvent(.created, id: "g\(i)", at: 1000, item: gitItem("g\(i)"))) }
         var deps = WatcherStore.Deps()
         deps.root = root
-        deps.git = { _ in Thread.sleep(forTimeInterval: 0.3); return nil }
+        let calls = Box(0), onMain = Box(0)
+        deps.git = { _ in calls.mutate { $0 += 1 }; if Thread.isMainThread { onMain.mutate { $0 += 1 } }
+                          Thread.sleep(forTimeInterval: 0.3); return nil }
         deps.enabled = { true }
         let store = WatcherStore(deps: deps)
 
@@ -31,17 +33,11 @@ private func gitItem(_ id: String) -> InboxItem {
         store.checkStuck(builders: [])
         #expect(Date().timeIntervalSince(t0) < 0.010, "checkStuck must return immediately")
 
-        // Ping the main actor while the check runs: a 10 ms sleep must wake on time.
-        var worst = 0.0
-        for _ in 0..<5 {
-            let s = Date()
-            try await Task.sleep(nanoseconds: 10_000_000)
-            worst = max(worst, Date().timeIntervalSince(s) - 0.010)
-        }
-        // Run alone this is ~2 ms (the 20 ms bar); the bound is 250 ms so other suites hogging the main actor in a full run
-        // cannot flake it, and it is still below one 300 ms git call (blocked code measured 1117 ms).
-        #expect(worst < 0.250, "main actor stalled \(Int(worst * 1000)) ms during the check")
+        // The rule itself, not a stopwatch: wall-clock pings flaked in full runs, where other @MainActor
+        // suites hold the main thread for 250-390 ms regardless of this check (6 of 12 runs, 2026-10-11).
         await store.checkTask?.value
+        #expect(calls.value > 0, "the check never ran git, so the test proves nothing")
+        #expect(onMain.value == 0, "git ran on the main thread \(onMain.value) time(s)")
     }
 
     /// A tick that arrives while a check is still running is skipped, not queued.
