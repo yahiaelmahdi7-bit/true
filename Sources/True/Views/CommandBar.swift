@@ -59,7 +59,7 @@ struct CommandBarCard: View {
                     .padding(.horizontal, 16).padding(.vertical, 10)
             }
         }
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.45), radius: 30, y: 12)
     }
 

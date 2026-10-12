@@ -24,7 +24,7 @@ struct TrayPanelRoot: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .glassEffect(.regular.tint(.black.opacity(0.7)), in: Self.shape)
+        .glassSurface(Self.shape, tint: .black.opacity(0.7), hairline: false)
         .overlay(Self.shape.strokeBorder(Theme.hairline, lineWidth: 0.5))
         .overlay(alignment: .bottom) { Toast(controller: controller, watcher: watcher) }
         .preferredColorScheme(.dark)

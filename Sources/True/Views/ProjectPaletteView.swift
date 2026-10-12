@@ -38,7 +38,7 @@ struct ProjectPaletteView: View {
             Divider().opacity(0.5)
             footer
         }
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .glassSurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .shadow(color: .black.opacity(0.45), radius: 30, y: 12)
         .background {
             // Key equivalents that work while the text field has focus: ⌘↩ and Esc.

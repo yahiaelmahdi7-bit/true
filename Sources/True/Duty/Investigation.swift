@@ -5,8 +5,8 @@ import Foundation
 enum Investigation {
     typealias Runner = @Sendable (_ argv: [String], _ cwd: String, _ stdin: String, _ env: [String: String]) async -> (Int32, String)
 
-    static let hookPath = "/Users/y/Projects/jev-tools/burn/agent-burn.ts"
-    static let mcpServerPath = "/Users/y/Projects/jev-tools/bin/jev-files-mcp"
+    static let hookPath = NSHomeDirectory() + "/Projects/jev-tools/burn/agent-burn.ts"
+    static let mcpServerPath = NSHomeDirectory() + "/Projects/jev-tools/bin/jev-files-mcp"
     static let forbiddenTools = ["Bash", "Edit", "Write", "WebFetch", "MultiEdit", "NotebookEdit", "WebSearch"]
 
     struct Paths: Sendable {

@@ -6,16 +6,20 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CONFIG="${1:-debug}"
-APP="True.app"
+APP="${TRUE_APP_OUT:-True.app}"   # make-kit.sh points this at dist/
 BIN="True"
 BUNDLE_ID="net.prismlens.true"
 VERSION="0.1.0"
 
-echo "==> swift build ($CONFIG)..."
-nice -n 10 swift build -j 4 -c "$CONFIG"
-
-BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
-BIN_PATH="$BIN_DIR/$BIN"
+# make-kit.sh passes a prebuilt (universal) binary and asks for ad-hoc signing: TRUE_PREBUILT_BIN, TRUE_SIGN=adhoc.
+if [ -n "${TRUE_PREBUILT_BIN:-}" ]; then
+  BIN_PATH="$TRUE_PREBUILT_BIN"
+else
+  echo "==> swift build ($CONFIG)..."
+  nice -n 10 swift build -j 4 -c "$CONFIG"
+  BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
+  BIN_PATH="$BIN_DIR/$BIN"
+fi
 [ -f "$BIN_PATH" ] || { echo "ERROR: build product not found at $BIN_PATH"; exit 1; }
 
 echo "==> assembling $APP ..."
@@ -39,7 +43,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>${BIN}</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>LSMinimumSystemVersion</key><string>26.0</string>
+  <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <!-- macOS charges a child process's mic use to the app that launched it, so Claude Code's
@@ -57,7 +61,7 @@ PLIST
 # requirement cert-based, so "Allow" survives rebuilds. Same identity and reasoning as deck/build.sh.
 IDENTITY="Deck Signing"
 KEYCHAIN="$HOME/Library/Keychains/deck-signing.keychain-db"
-if security find-certificate -c "$IDENTITY" "$KEYCHAIN" >/dev/null 2>&1; then
+if [ "${TRUE_SIGN:-}" != "adhoc" ] && security find-certificate -c "$IDENTITY" "$KEYCHAIN" >/dev/null 2>&1; then
   # The signing keychain has a blank password and relocks itself; unlock it here or macOS pops a
   # password dialog that the Mac login password does not satisfy.
   security unlock-keychain -p "" "$KEYCHAIN" >/dev/null 2>&1 || true
@@ -65,8 +69,10 @@ if security find-certificate -c "$IDENTITY" "$KEYCHAIN" >/dev/null 2>&1; then
   codesign --verify --strict "$APP"
   echo "    signed with '$IDENTITY' (permission grants survive rebuilds)"
 else
-  echo "WARNING: no '$IDENTITY' certificate in $KEYCHAIN -- falling back to ad-hoc."
-  echo "         Every permission popup will return after this build. See deck/build.sh to recreate it."
+  [ "${TRUE_SIGN:-}" = "adhoc" ] || {
+    echo "WARNING: no '$IDENTITY' certificate in $KEYCHAIN -- falling back to ad-hoc."
+    echo "         Every permission popup will return after this build. See deck/build.sh to recreate it."; }
   codesign --force --deep --sign - "$APP" >/dev/null 2>&1 && echo "    ad-hoc signed"
+  codesign --verify --strict "$APP"
 fi
 echo "OK: built $APP (not launched)"

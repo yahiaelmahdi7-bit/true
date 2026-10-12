@@ -41,7 +41,7 @@ struct CleanerSheet: View {
             .disabled(cleaner.running)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
-        .glassEffect(.regular, in: Rectangle())
+        .glassSurface(Rectangle(), hairline: false)
     }
 
     // MARK: List
@@ -243,7 +243,7 @@ struct CleanerSheet: View {
             Button("Close") { cleaner.close() }.keyboardShortcut(.cancelAction)
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
-        .glassEffect(.regular, in: Rectangle())
+        .glassSurface(Rectangle(), hairline: false)
     }
 }
 

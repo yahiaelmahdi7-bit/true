@@ -27,7 +27,7 @@ struct HubOverlay: View {
                     HubPanel(registry: registry)
                         .frame(width: min(HubPanelContent.width, geo.size.width - 2 * Self.margin),
                                height: min(geo.size.height * Self.heightShare, Self.maxHeight))
-                        .glassEffect(.regular.tint(.black.opacity(0.7)), in: Self.shape)
+                        .glassSurface(Self.shape, tint: .black.opacity(0.7), hairline: false)
                         .overlay(Self.shape.strokeBorder(Theme.hubCardStroke, lineWidth: 0.5))
                         .shadow(color: .black.opacity(0.45), radius: 30, y: 12)
                         // Swallow clicks on the card so they never reach the scrim or the terminal.

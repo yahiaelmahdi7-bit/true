@@ -17,7 +17,7 @@ private struct BackdropBlur: NSViewRepresentable {
 private extension View {
     /// Dark-tinted glass with a hairline edge: legible over a bright wallpaper as well as a dark one.
     func chromeGlass<S: InsettableShape>(_ shape: S, tint: Double = 0.4) -> some View {
-        glassEffect(.regular.tint(Color.black.opacity(tint)), in: shape)
+        glassSurface(shape, tint: Color.black.opacity(tint), hairline: false)
             .overlay(shape.strokeBorder(.white.opacity(0.14), lineWidth: 0.5))
     }
 }
@@ -74,7 +74,7 @@ struct ShotsOverlayRoot: View {
     }
 
     private var header: some View {
-        GlassEffectContainer(spacing: 12) {
+        GlassContainer(spacing: 12) {
             HStack(spacing: 10) {
                 Text("Shots").font(.title3.weight(.semibold))
                 Text("\(c.entries.count)").font(.callout.monospacedDigit()).foregroundStyle(.white.opacity(0.72))
@@ -153,7 +153,7 @@ struct ShotsOverlayRoot: View {
             .overlay {
                 Label("Drop images to add", systemImage: "square.and.arrow.down")
                     .font(.title3.weight(.medium)).padding(.horizontal, 22).padding(.vertical, 12)
-                    .glassEffect(.regular, in: .capsule)
+                    .glassSurface(Capsule())
             }
             .padding(14).allowsHitTesting(false).transition(.opacity)
     }
@@ -163,7 +163,7 @@ struct ShotsOverlayRoot: View {
             HStack(spacing: 12) {
                 Text(text).font(.callout)
                 if text == "Removed from tray" {
-                    Button("Undo") { c.undoRemove() }.buttonStyle(.glass).controlSize(.small)
+                    Button("Undo") { c.undoRemove() }.glassButtonStyle().controlSize(.small)
                 }
             }
             .foregroundStyle(.white)
@@ -209,7 +209,7 @@ private struct ShotTile: View {
             .overlay(alignment: .topTrailing) {
                 if entry.kind == .markup {
                     Image(systemName: "pencil.tip").font(.system(size: 10, weight: .bold)).padding(5)
-                        .glassEffect(.regular, in: .circle).padding(8)
+                        .glassSurface(Circle()).padding(8)
                 }
             }
             .scaleEffect(lifted ? 1.04 : 1)
@@ -358,7 +358,7 @@ private struct ShotViewer: View {
             if reduceTransparency {
                 Capsule().fill(Color(white: 0.12))
             } else {
-                Capsule().fill(.clear).glassEffect(.regular.tint(Color.black.opacity(0.55)), in: .capsule)
+                Capsule().fill(.clear).glassSurface(Capsule(), tint: Color.black.opacity(0.55), hairline: false)
             }
         }
         .overlay(Capsule().strokeBorder(.white.opacity(0.2), lineWidth: 0.75))
@@ -380,7 +380,7 @@ private struct RoundButton: View {
         }
         .buttonStyle(.plain)
         .background {
-            if dark { Circle().fill(.clear).glassEffect(.regular.tint(Color.black.opacity(0.5)), in: .circle) }
+            if dark { Circle().fill(.clear).glassSurface(Circle(), tint: Color.black.opacity(0.5), hairline: false) }
             else { Circle().fill(Color(white: 0.12)) }
         }
         .overlay(Circle().strokeBorder(.white.opacity(0.2), lineWidth: 0.75))
@@ -438,7 +438,7 @@ private struct DownloadsGlassStrip: View {
     private var d: DownloadsWatcher { controller.downloads }
 
     var body: some View {
-        GlassEffectContainer(spacing: 10) {
+        GlassContainer(spacing: 10) {
             HStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Downloads").font(.callout.weight(.semibold))
@@ -531,7 +531,7 @@ struct ActionButton: View {
                 .offset(x: gone ? 26 : 0, y: gone ? -26 : 0)
                 .opacity(gone ? 0 : 1)
         }
-        .buttonStyle(.glass)
+        .glassButtonStyle()
         .buttonBorderShape(.circle)
         .onHover { if $0 && bounceOnHover && !reduceMotion { bounce += 1 } }
         .help(help)

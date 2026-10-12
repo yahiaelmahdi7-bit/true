@@ -229,7 +229,7 @@ struct MarkupEditor: View {
             if reduceTransparency {
                 Capsule().fill(Color(white: 0.12))
             } else {
-                Capsule().fill(.clear).glassEffect(.regular.tint(Color.black.opacity(0.55)), in: .capsule)
+                Capsule().fill(.clear).glassSurface(Capsule(), tint: Color.black.opacity(0.55), hairline: false)
             }
         }
         .overlay(Capsule().strokeBorder(.white.opacity(0.2), lineWidth: 0.75))
