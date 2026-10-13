@@ -102,6 +102,8 @@ final class TrueTerminalView: LocalProcessTerminalView {
     /// `setFrameSize` with `needsDisplay`, and deferring that to the next tick lets AppKit show the
     /// old contents scaled to the new bounds for a frame — a stretch/snap on every step.
     override func setNeedsDisplay(_ invalidRect: NSRect) {
+        // A background tab's pane never paints (see `setOnScreen`): it only remembers that it owes one.
+        guard isOnScreen else { owesRepaint = true; return }
         guard !isFlushingCoalesced, !inLiveResize, Thread.isMainThread, window != nil else {
             super.setNeedsDisplay(invalidRect)
             return
@@ -111,9 +113,43 @@ final class TrueTerminalView: LocalProcessTerminalView {
 
     /// Called by the coalescer on its tick with the unioned dirty rect for this pane.
     func flushCoalescedDisplay(_ rect: NSRect) {
+        lastCoalescedFlush = CACurrentMediaTime()
         isFlushingCoalesced = true
         super.setNeedsDisplay(rect)
         isFlushingCoalesced = false
+    }
+
+    // MARK: - Paint budget
+
+    /// False while this pane's tab is in the background.
+    ///
+    /// **The lag (2026-10-14).** All tabs stay mounted so their shells live, and a background tab was
+    /// only `.opacity(0)` — which hides pixels, not work. A `sample` with 10 panes across 3 tabs had
+    /// the main thread ~80% busy, ~57% of it in `TerminalView.draw`, mostly for the 6 panes nobody
+    /// could see: every claude spinner in a hidden tab cost exactly what a visible one did, and
+    /// keystrokes queued behind those paints. Hidden now means hidden: AppKit skips the view, PTY
+    /// output still parses (the screen must be current), and invalidations collapse into one
+    /// `owesRepaint` flag that the reveal pays off with a single full paint.
+    private(set) var isOnScreen = true
+    private(set) var owesRepaint = false
+    /// The visible tab's focused pane — the one being typed into. It paints every frame; the others
+    /// are paced (see ``FramePacing``).
+    var isFocusedPane = false
+    /// When the coalescer last released a paint for this pane (`CACurrentMediaTime`).
+    var lastCoalescedFlush: CFTimeInterval = 0
+
+    func setOnScreen(_ on: Bool) {
+        guard on != isOnScreen else { return }
+        isOnScreen = on
+        isHidden = !on
+        if !on {
+            TerminalRedrawCoalescer.shared.forget(self)
+        } else if owesRepaint {
+            owesRepaint = false
+            // Straight to AppKit, not the coalescer: this lands in the same transaction as the
+            // tab switch, so the revealed pane never shows a frame of what it looked like when hidden.
+            flushCoalescedDisplay(bounds)
+        }
     }
 
     // MARK: - Paste and drag-and-drop

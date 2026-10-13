@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-CONFIG="${1:-debug}"
+CONFIG="${1:-release}"   # release by default: a debug True drew its terminals ~unoptimized (2026-10-14 lag)
 APP="${TRUE_APP_OUT:-True.app}"   # make-kit.sh points this at dist/
 BIN="True"
 BUNDLE_ID="net.prismlens.true"

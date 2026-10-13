@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AppKit
 @testable import True
 
 private func tmp() -> URL {
@@ -117,5 +118,59 @@ private func gitItem(_ id: String) -> InboxItem {
     @Test func backgroundIsFine() async {
         let v = await Task.detached { OffMain.violatesNow() }.value
         #expect(!v)
+    }
+}
+
+/// The paint budget (2026-10-14): the focused pane paints every frame, other visible panes ≤30 Hz,
+/// background tabs not at all.
+@Suite struct FramePacingTests {
+    @Test func focusedPaneAlwaysPaints() {
+        #expect(FramePacing.shouldFlush(isFocused: true, now: 10, lastFlush: 10, focusedPaintingThisFrame: true))
+    }
+    @Test func backgroundPaneIsCappedAt30Hz() {
+        #expect(!FramePacing.shouldFlush(isFocused: false, now: 10.02, lastFlush: 10, focusedPaintingThisFrame: false))
+        #expect(FramePacing.shouldFlush(isFocused: false, now: 10.04, lastFlush: 10, focusedPaintingThisFrame: false))
+    }
+    @Test func backgroundYieldsToAKeystrokeFrameButOnlyBriefly() {
+        #expect(!FramePacing.shouldFlush(isFocused: false, now: 10.05, lastFlush: 10, focusedPaintingThisFrame: true))
+        #expect(FramePacing.shouldFlush(isFocused: false, now: 10.11, lastFlush: 10, focusedPaintingThisFrame: true))
+    }
+    @Test func idleBackgroundPanePaintsAtOnce() {
+        #expect(FramePacing.shouldFlush(isFocused: false, now: 500, lastFlush: 0, focusedPaintingThisFrame: true))
+    }
+}
+
+@MainActor @Suite struct HiddenPaneTests {
+    /// A background tab's pane swallows invalidations (no AppKit paint) and owes one repaint.
+    @Test func hiddenPaneDoesNotPaint() {
+        let term = TrueTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        term.setOnScreen(false)
+        #expect(term.isHidden)
+        term.needsDisplay = false
+        term.setNeedsDisplay(NSRect(x: 0, y: 0, width: 400, height: 20))
+        #expect(term.owesRepaint)
+        #expect(!term.needsDisplay, "a hidden pane reached AppKit's paint queue")
+    }
+
+    /// Revealing it pays the debt with one paint, in the same pass as the tab switch.
+    @Test func revealPaysTheOwedRepaint() {
+        let term = TrueTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        term.setOnScreen(false)
+        term.setNeedsDisplay(NSRect(x: 0, y: 0, width: 400, height: 20))
+        #expect(term.lastCoalescedFlush == 0)
+        term.setOnScreen(true)
+        #expect(!term.isHidden)
+        #expect(!term.owesRepaint)
+        // A windowless view never reports `needsDisplay`, so assert the flush itself ran.
+        #expect(term.lastCoalescedFlush > 0)
+    }
+
+    /// Nothing changed while hidden → the reveal paints nothing.
+    @Test func cleanRevealPaintsNothing() {
+        let term = TrueTerminalView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        term.setOnScreen(false)
+        term.needsDisplay = false
+        term.setOnScreen(true)
+        #expect(!term.needsDisplay)
     }
 }

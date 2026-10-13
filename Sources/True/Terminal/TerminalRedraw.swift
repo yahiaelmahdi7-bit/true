@@ -156,13 +156,47 @@ final class TerminalRedrawCoalescer: @unchecked Sendable {
         } else {
             floodSkip = 0
         }
-        // Swap first: a flush can invalidate again (a caret repaint), and that belongs to the NEXT
-        // frame, not this one — otherwise a self-feeding pane could spin inside a single tick.
-        let batch = pending
-        pending.removeAll(keepingCapacity: true)
-        for (_, entry) in batch {
-            guard let view = entry.view, view.window != nil else { continue }
-            view.flushCoalescedDisplay(entry.rect)
+        // Pick this frame's paints, and take them out of `pending` BEFORE flushing: a flush can
+        // invalidate again (a caret repaint), and that belongs to the NEXT frame, not this one —
+        // otherwise a self-feeding pane could spin inside a single tick. Panes not due yet keep
+        // their unioned rect and wait; nothing is dropped.
+        let now = CACurrentMediaTime()
+        let focusedPainting = pending.values.contains { $0.view?.isFocusedPane == true }
+        var due: [(TrueTerminalView, NSRect)] = []
+        for (key, entry) in pending {
+            guard let view = entry.view, view.window != nil, view.isOnScreen else {
+                pending.removeValue(forKey: key)
+                continue
+            }
+            if FramePacing.shouldFlush(isFocused: view.isFocusedPane, now: now,
+                                       lastFlush: view.lastCoalescedFlush,
+                                       focusedPaintingThisFrame: focusedPainting) {
+                due.append((view, entry.rect))
+                pending.removeValue(forKey: key)
+            }
         }
+        for (view, rect) in due { view.flushCoalescedDisplay(rect) }
+    }
+}
+
+/// Who paints on a given display-link frame. Pure, so the policy is tested without a display.
+///
+/// The pane being typed into is the only one whose latency anyone feels, so it paints on every
+/// frame. Every other visible pane — a claude seat spinning beside you — is capped at 30 Hz, which
+/// is smooth for a spinner or scrolling log and a quarter of the draws at 120 Hz. And when the
+/// focused pane IS painting, a recently-painted background pane waits (up to `maxDeferral`), so a
+/// keystroke's frame carries the keystroke and not four other panes' text layout. The deferral is
+/// bounded so a focused pane that streams nonstop can slow its neighbours but never freeze them.
+enum FramePacing {
+    static let backgroundInterval: CFTimeInterval = 1.0 / 30.0
+    static let maxDeferral: CFTimeInterval = 0.1
+
+    static func shouldFlush(isFocused: Bool, now: CFTimeInterval, lastFlush: CFTimeInterval,
+                            focusedPaintingThisFrame: Bool) -> Bool {
+        if isFocused { return true }
+        let waited = now - lastFlush
+        if waited < backgroundInterval { return false }
+        if focusedPaintingThisFrame, waited < maxDeferral { return false }
+        return true
     }
 }

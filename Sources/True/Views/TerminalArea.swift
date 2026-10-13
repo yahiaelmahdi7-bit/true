@@ -37,7 +37,8 @@ private struct TabContent: View {
             ForEach(tab.tree.leafIDs.sorted { $0.uuidString < $1.uuidString }, id: \.self) { id in
                 if let r = layout.panes[id] {
                     let focused = visible && tab.focusedPane == id
-                    EmbeddedTerminal(paneID: id, startDir: tab.cwds[id] ?? NSHomeDirectory(), isFocused: focused)
+                    EmbeddedTerminal(paneID: id, startDir: tab.cwds[id] ?? NSHomeDirectory(), isFocused: focused,
+                                     isVisible: visible)
                         .opacity(PaneDrag.shared.pane == id ? 0.35 : (focused || tab.tree.leafIDs.count == 1 ? 1 : 0.6))
                         .padding(Theme.paneInsets)
                         .frame(width: r.width, height: r.height)

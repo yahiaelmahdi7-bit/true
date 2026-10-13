@@ -38,6 +38,8 @@ struct EmbeddedTerminal: NSViewRepresentable {
     let paneID: UUID
     let startDir: String
     let isFocused: Bool
+    /// Its tab is the selected one. A background tab's pane keeps its shell but does not paint.
+    let isVisible: Bool
 
     @AppStorage(TerminalSettings.fontFamilyKey) private var family = TerminalSettings.systemMono
     @AppStorage(TerminalSettings.fontSizeKey) private var fontSize = TerminalSettings.defaultFontSize
@@ -113,10 +115,14 @@ struct EmbeddedTerminal: NSViewRepresentable {
         term.startProcess(executable: shell, args: args,
                           environment: env.map { "\($0.key)=\($0.value)" },
                           execName: nil, currentDirectory: dir)
+        term.isFocusedPane = isFocused
+        term.setOnScreen(isVisible)
         return term
     }
 
     func updateNSView(_ term: TrueTerminalView, context: Context) {
+        term.isFocusedPane = isFocused
+        term.setOnScreen(isVisible)
         let font = TerminalSettings.font(family: family, size: fontSize)
         if term.font != font { term.font = font }
         let style = (TerminalSettings.Cursor(rawValue: cursor) ?? .steadyBlock).style
