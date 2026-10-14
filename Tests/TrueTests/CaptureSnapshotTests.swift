@@ -190,4 +190,56 @@ struct CaptureSnapshotTests {
             CaptureNotice(symbol: "keyboard", text: "macOS still owns ⌘⇧4", button: "Open Keyboard Shortcuts", action: {}, dismiss: {}).padding(20)
         }
     }
+
+    // MARK: smart selection (11–14 are SYNTHETIC: fake chains over a fake desktop; no live AX / Vision on a real screen)
+
+    private let pickWin = CGRect(x: 40, y: 40, width: 660, height: 532)
+    private var pickChain: [PickElement] {
+        SmartPickLogic.clean([
+            PickElement(frame: CGRect(x: 70, y: 124, width: 200, height: 24), kind: .text),
+            PickElement(frame: CGRect(x: 56, y: 88, width: 330, height: 330), kind: .list),
+            PickElement(frame: CGRect(x: 40, y: 66, width: 660, height: 46), kind: .toolbar),
+        ], window: pickWin)
+    }
+
+    @Test func smartHoverElement() throws {
+        let v = CaptureView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760), still: screenImage(1200, 760), windows: [])
+        v.previewPick(chain: pickChain, level: 0, cursor: CGPoint(x: 150, y: 136))
+        try write(v, size: NSSize(width: 1200, height: 760), "11-smart-hover-element")
+    }
+
+    @Test func smartGrownToParent() throws {
+        let v = CaptureView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760), still: screenImage(1200, 760), windows: [])
+        v.previewPick(chain: pickChain, level: 1, cursor: CGPoint(x: 150, y: 136))
+        try write(v, size: NSSize(width: 1200, height: 760), "12-smart-grown-to-parent")
+    }
+
+    @Test func accessibilityNotice() throws {
+        try snapshot("13-accessibility-notice", width: 560, height: 90) {
+            CaptureNotice(symbol: "hand.raised", text: "Turn on Accessibility for exact picks", button: "Open Settings", action: {}, dismiss: {}).padding(20)
+        }
+    }
+
+    @Test func imageFallbackBoxes() throws {
+        let (img, _) = syntheticCanvasImage(1200, 760)
+        let boxes = SmartPickLogic.filterBoxes(ImageBoxDetector.detect(img), screen: CGSize(width: 1200, height: 760))
+        let v = CaptureView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760), still: img, windows: [])
+        let cursor = CGPoint(x: 200, y: 150)
+        let chain = SmartPickLogic.chain(ax: [], window: CGRect(x: 0, y: 0, width: 1200, height: 760), boxes: boxes, at: cursor)
+        v.previewPick(chain: chain, level: 0, cursor: cursor)
+        let dashed = DashedBoxes(boxes: boxes); dashed.frame = v.bounds; v.addSubview(dashed)
+        try write(v, size: NSSize(width: 1200, height: 760), "14-image-fallback-boxes")
+    }
+}
+
+/// Still-only: thin dashed outlines of every detected candidate box.
+private final class DashedBoxes: NSView {
+    let boxes: [CGRect]
+    init(boxes: [CGRect]) { self.boxes = boxes; super.init(frame: .zero) }
+    required init?(coder: NSCoder) { fatalError() }
+    override var isFlipped: Bool { true }
+    override func draw(_ dirty: NSRect) {
+        NSColor.systemOrange.setStroke()
+        for b in boxes { let p = NSBezierPath(rect: b); p.lineWidth = 1.5; p.setLineDash([5, 4], count: 2, phase: 0); p.stroke() }
+    }
 }

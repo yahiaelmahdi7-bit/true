@@ -289,3 +289,127 @@ private func px(_ b: [UInt8], _ w: Int, _ x: Int, _ y: Int) -> [UInt8] { Array(b
         #expect(p[1] > 200 && p[2] > 200 && p[3] < p[1] - 30)
     }
 }
+
+
+/// A canvas-like image: a flat dark page with a few drawn panels (no AX tree would describe these).
+func syntheticCanvasImage(_ w: Int = 800, _ h: Int = 500) -> (image: CGImage, boxes: [CGRect]) {
+    let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                        bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
+    ctx.translateBy(x: 0, y: CGFloat(h)); ctx.scaleBy(x: 1, y: -1)   // top-left coordinates
+    ctx.setFillColor(CGColor(gray: 0.1, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+    let boxes = [CGRect(x: 60, y: 60, width: 300, height: 180), CGRect(x: 420, y: 80, width: 280, height: 120), CGRect(x: 120, y: 290, width: 520, height: 150)]
+    for (i, b) in boxes.enumerated() {
+        ctx.setFillColor(CGColor(gray: 0.28 + CGFloat(i) * 0.08, alpha: 1)); ctx.fill(b)
+        ctx.setStrokeColor(CGColor(gray: 0.85, alpha: 1)); ctx.setLineWidth(3); ctx.stroke(b)
+    }
+    return (ctx.makeImage()!, boxes)
+}
+
+private func el(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ k: PickKind = .section) -> PickElement {
+    PickElement(frame: CGRect(x: x, y: y, width: w, height: h), kind: k)
+}
+
+@Suite struct SmartPickTests {
+    let win = CGRect(x: 0, y: 0, width: 800, height: 600)
+
+    @Test func cleanDropsTinyAndClampsAndEndsWithWindow() {
+        let out = SmartPickLogic.clean([el(10, 10, 1, 40), el(20, 20, 0, 0), el(700, 500, 400, 300, .image)], window: win)
+        #expect(out.count == 2)
+        #expect(out[0].frame == CGRect(x: 700, y: 500, width: 100, height: 100))
+        #expect(out[0].kind == .image)
+        #expect(out.last?.kind == .window && out.last?.frame == win)
+    }
+    @Test func cleanMergesNearDuplicatesKeepingSpecificName() {
+        let out = SmartPickLogic.clean([el(100, 100, 200, 100), el(101, 99, 199, 101, .button), el(50, 50, 400, 300)], window: win)
+        #expect(out.count == 3)
+        #expect(out[0].kind == .button)
+    }
+    @Test func cleanMergesOuterIntoWindow() {
+        let out = SmartPickLogic.clean([el(100, 100, 200, 100), el(1, 1, 798, 599)], window: win)
+        #expect(out.count == 2 && out[1].kind == .window)
+    }
+    @Test func coordinateFlipAcrossScreens() {
+        let r = CGRect(x: 2000, y: 100, width: 300, height: 200)
+        #expect(SmartPickLogic.toOverlay(r, displayOrigin: CGPoint(x: 1440, y: 0)) == CGRect(x: 560, y: 100, width: 300, height: 200))
+        // a screen left of / above the primary has a negative origin
+        #expect(SmartPickLogic.toOverlay(CGRect(x: -1500, y: -900, width: 100, height: 50), displayOrigin: CGPoint(x: -1920, y: -1080))
+                == CGRect(x: 420, y: 180, width: 100, height: 50))
+        let p = CGPoint(x: 420, y: 180), o = CGPoint(x: -1920, y: -1080)
+        #expect(SmartPickLogic.toOverlay(CGRect(origin: SmartPickLogic.toGlobal(p, displayOrigin: o), size: .zero), displayOrigin: o).origin == p)
+    }
+    @Test func axChainWinsOverImageBoxes() {
+        let ax = [el(100, 100, 50, 20, .button), el(0, 0, 800, 600, .window)]
+        let out = SmartPickLogic.chain(ax: ax, window: win, boxes: [CGRect(x: 90, y: 90, width: 200, height: 200)], at: CGPoint(x: 110, y: 110))
+        #expect(out == ax)
+    }
+    @Test func imageFallbackWhenAXOnlyHasWindow() {
+        let boxes = [CGRect(x: 50, y: 50, width: 300, height: 300), CGRect(x: 100, y: 100, width: 100, height: 100)]
+        let out = SmartPickLogic.chain(ax: [el(0, 0, 800, 600, .window)], window: win, boxes: boxes, at: CGPoint(x: 120, y: 120))
+        #expect(out.map(\.kind) == [.area, .area, .window])
+        #expect(out[0].frame == boxes[1])
+        let none = SmartPickLogic.chain(ax: [], window: win, boxes: [], at: CGPoint(x: 5, y: 5))
+        #expect(none.map(\.kind) == [.window])
+    }
+    @Test func pickerGrowShrinkClampAndWindowJump() {
+        var p = SmartPicker([el(10, 10, 20, 20, .button), el(0, 0, 100, 100), el(0, 0, 800, 600, .window)])
+        p.shrink(); #expect(p.level == 0)
+        p.grow(); p.grow(); p.grow(); #expect(p.level == 2 && p.current?.kind == .window)
+        p.shrink(); #expect(p.level == 1)
+        p.jumpToWindow(); #expect(p.level == 2)
+        p.replace([el(10, 10, 20, 20, .button), el(0, 0, 50, 50), el(0, 0, 800, 600, .window)])   // same innermost → keep level
+        #expect(p.level == 2)
+        p.replace([el(300, 300, 20, 20), el(0, 0, 800, 600, .window)])                               // new element → reset
+        #expect(p.level == 0)
+    }
+    @Test func clickVersusDrag() {
+        #expect(SmartPickLogic.isClick(down: CGPoint(x: 10, y: 10), up: CGPoint(x: 12, y: 11)))
+        #expect(!SmartPickLogic.isClick(down: CGPoint(x: 10, y: 10), up: CGPoint(x: 14, y: 10)))
+    }
+    @Test func namesArePlainEnglish() {
+        let roles = ["AXButton", "AXStaticText", "AXImage", "AXToolbar", "AXList", "AXTabGroup", "AXMenu", "AXWebArea", "AXWindow", "AXSplitGroup", "AXGroup", "AXWeird", nil]
+        for r in roles {
+            let n = PickKind.from(role: r).rawValue
+            #expect(!n.hasPrefix("AX") && !n.isEmpty)
+        }
+        #expect(PickKind.from(role: "AXSplitGroup", subrole: "AXSidebar") == .sidebar)
+        #expect(PickKind.from(role: "AXGroup") == .section)
+    }
+    @Test func filterBoxesDropsTinyWholeScreenAndDuplicates() {
+        let screen = CGSize(width: 800, height: 600)
+        let out = SmartPickLogic.filterBoxes([
+            CGRect(x: 0, y: 0, width: 800, height: 600), CGRect(x: 5, y: 5, width: 10, height: 10),
+            CGRect(x: 100, y: 100, width: 200, height: 100), CGRect(x: 101, y: 100, width: 199, height: 101),
+            CGRect(x: 400, y: 300, width: 100, height: 100),
+        ], screen: screen)
+        #expect(out.count == 2)
+    }
+    @Test func detectorFindsDrawnBoxes() {
+        let (img, boxes) = syntheticCanvasImage()
+        let found = ImageBoxDetector.detect(img)
+        // Vision is heuristic: require that most drawn panels are matched, loosely.
+        let hits = boxes.filter { b in found.contains { SmartPickLogic.iou($0, b) > 0.7 } }
+        #expect(hits.count >= 2, "matched \(hits.count)/3, found \(found)")
+    }
+}
+
+@Suite struct HighlighterAt55Tests {
+    private func run(_ base: CGColor, textGray: CGFloat?) -> (hl: [UInt8], text: [UInt8]) {
+        let ctx = CGContext(data: nil, width: 80, height: 40, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
+        ctx.setFillColor(base); ctx.fill(CGRect(x: 0, y: 0, width: 80, height: 40))
+        if let g = textGray { ctx.setFillColor(CGColor(gray: g, alpha: 1)); ctx.fill(CGRect(x: 30, y: 0, width: 20, height: 40)) }
+        var d = MarkupDoc()
+        d.add(Stroke(mark: .highlight([CGPoint(x: 5, y: 20), CGPoint(x: 75, y: 20)]), color: .amber, width: 4))
+        let out = pixels(MarkupRender.render(base: ctx.makeImage()!, doc: d)!)
+        return (px(out, 80, 10, 20), px(out, 80, 40, 20))
+    }
+    @Test func alphaIsAboutFiftyFivePercent() { #expect(abs(MarkupRender.highlightAlpha - 0.55) < 0.001) }
+    @Test func darkReadsYellowNotOlive() {
+        let p = run(CGColor(srgbRed: 0.08, green: 0.09, blue: 0.12, alpha: 1), textGray: nil).hl
+        #expect(p[1] > 110 && p[2] > 95 && Int(p[1]) > Int(p[3]) * 3)
+    }
+    @Test func textStaysVisibleThroughHighlightOnLight() {
+        let r = run(CGColor(srgbRed: 0.96, green: 0.96, blue: 0.97, alpha: 1), textGray: 0.1)
+        #expect(Int(r.text[2]) < Int(r.hl[2]) - 80)   // dark text still clearly darker than the highlight around it
+    }
+}
