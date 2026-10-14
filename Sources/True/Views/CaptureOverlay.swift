@@ -256,11 +256,22 @@ struct CapturePermissionPrompt: View {
     let openSettings: () -> Void
     let dismiss: () -> Void
     var body: some View {
+        CaptureNotice(symbol: "rectangle.dashed.badge.record", text: "True needs Screen Recording to capture.",
+                      button: "Open Settings", action: openSettings, dismiss: dismiss)
+    }
+}
+
+/// One-line notice used by the permission prompt and the "macOS still owns ⌘⇧4" notice.
+struct CaptureNotice: View {
+    let symbol: String, text: String, button: String
+    let action: () -> Void
+    let dismiss: () -> Void
+    var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "rectangle.dashed.badge.record").font(.system(size: 16)).foregroundStyle(Theme.hubSecondary)
-            Text("True needs Screen Recording to capture.").font(.system(size: 13)).foregroundStyle(Theme.text)
-            Button(action: openSettings) {
-                Text("Open Settings").font(.system(size: 12, weight: .semibold)).foregroundStyle(.black)
+            Image(systemName: symbol).font(.system(size: 16)).foregroundStyle(Theme.hubSecondary)
+            Text(text).font(.system(size: 13)).foregroundStyle(Theme.text)
+            Button(action: action) {
+                Text(button).font(.system(size: 12, weight: .semibold)).foregroundStyle(.black)
                     .padding(.horizontal, 12).frame(height: 26).background(.white, in: .capsule)
             }.buttonStyle(.plain)
             Button(action: dismiss) { Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.hubSecondary).frame(width: 24, height: 24) }
@@ -365,6 +376,28 @@ final class CaptureController {
         }
     }
 
+    // MARK: shortcut notice
+
+    private var shortcutNotice: NSPanel?
+
+    /// Shows "macOS still owns ⌘⇧4" while macOS's own area-screenshot shortcut is on; hides it once it's off.
+    func refreshShortcutNotice() {
+        guard SystemShortcut.areaScreenshotOwnedByMacOS() else { shortcutNotice?.orderOut(nil); shortcutNotice = nil; noticeDismissed = false; return }
+        guard shortcutNotice == nil, !noticeDismissed else { return }
+        let host = NSHostingView(rootView: CaptureNotice(symbol: "keyboard", text: "macOS still owns ⌘⇧4", button: "Open Keyboard Shortcuts", action: {
+            if let u = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") { NSWorkspace.shared.open(u) }
+        }, dismiss: { [weak self] in self?.noticeDismissed = true; self?.shortcutNotice?.orderOut(nil); self?.shortcutNotice = nil }))
+        let size = host.fittingSize
+        let p = NSPanel(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        p.isOpaque = false; p.backgroundColor = .clear; p.level = .floating; p.hasShadow = true
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        p.contentView = host
+        if let s = NSScreen.main { p.setFrameOrigin(CGPoint(x: s.frame.midX - size.width / 2, y: s.frame.maxY - size.height - 90)) }
+        p.orderFrontRegardless()
+        shortcutNotice = p
+    }
+    private var noticeDismissed = false
+
     // MARK: permission
 
     private func showPrompt() {
@@ -388,28 +421,34 @@ final class CaptureController {
 
 // MARK: - Global hotkey
 
-/// ⌃⌥⌘A (see `CaptureHotKey`) from any app. Shares the Carbon event target with `ShotsHotKeyRegistrar`, so each
-/// handler checks the hot-key id and passes on anything that isn't its own.
+/// ⌘⇧4 (primary) and ⌃⌥⌘A (backup) — see `CaptureHotKey` — from any app. Shares the Carbon event target with
+/// `ShotsHotKeyRegistrar`, so each handler checks the hot-key id and passes on anything that isn't its own.
 @MainActor
 final class CaptureHotKeyRegistrar {
     static let shared = CaptureHotKeyRegistrar()
-    static let id: UInt32 = 2
-    private var ref: EventHotKeyRef?
+    private var refs: [EventHotKeyRef?] = []
     private var handler: EventHandlerRef?
 
     func register() {
-        guard ref == nil else { return }
+        guard refs.isEmpty else { return }
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
             var hk = EventHotKeyID()
             GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
                               MemoryLayout<EventHotKeyID>.size, nil, &hk)
-            guard hk.id == CaptureHotKeyRegistrar.id else { return OSStatus(eventNotHandledErr) }
+            guard hk.signature == OSType(0x54524350), CaptureHotKey.all.contains(where: { $0.id == hk.id }) else { return OSStatus(eventNotHandledErr) }
             Task { @MainActor in CaptureController.shared.start() }
             return noErr
         }, 1, &spec, nil, &handler)
-        RegisterEventHotKey(CaptureHotKey.carbonKeyCode, CaptureHotKey.carbonModifiers,
-                            EventHotKeyID(signature: OSType(0x54524350), id: Self.id),   // 'TRCP'
-                            GetApplicationEventTarget(), 0, &ref)
+        for c in CaptureHotKey.all {
+            var ref: EventHotKeyRef?
+            RegisterEventHotKey(c.carbonKeyCode, c.carbonModifiers, EventHotKeyID(signature: OSType(0x54524350), id: c.id),   // 'TRCP'
+                                GetApplicationEventTarget(), 0, &ref)
+            refs.append(ref)
+        }
+        CaptureController.shared.refreshShortcutNotice()
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            Task { @MainActor in CaptureController.shared.refreshShortcutNotice() }
+        }
     }
 }

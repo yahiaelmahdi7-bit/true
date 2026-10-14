@@ -53,7 +53,7 @@ struct TrueApp: App {
                 Button("Focus Down") { model.moveFocus(.down) }.keyboardShortcut(.downArrow, modifiers: [.command, .option])
                 Divider()
                 Button("Capture Screen") { CaptureController.shared.start() }
-                    .keyboardShortcut(CaptureHotKey.keyEquivalent, modifiers: CaptureHotKey.eventModifiers)
+                    .keyboardShortcut(CaptureHotKey.primary.keyEquivalent, modifiers: CaptureHotKey.primary.modifiers)
                 Button("Screenshots…") { TrayPanelController.shared.toggleExpanded() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                 Button("Show Shots") { ShotsOverlayController.shared.toggle() }

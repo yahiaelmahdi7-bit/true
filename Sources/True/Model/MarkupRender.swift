@@ -19,6 +19,14 @@ enum MarkupRender {
         }
     }
 
+    /// Highlighter is a plain alpha blend of a BRIGHT colour (no multiply/darken), so yellow stays yellow on dark
+    /// and light content alike. The house amber is orange; as a marker it becomes a true yellow.
+    static let highlightAlpha: CGFloat = 0.4
+    static func highlightRGB(_ s: Stroke) -> RGBA {
+        if s.custom == nil, s.color == .amber { return RGBA(r: 1.0, g: 0.86, b: 0.10) }
+        return rgb(s)
+    }
+
     private static func cg(_ c: RGBA, alpha: CGFloat = 1) -> CGColor {
         CGColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: c.a * alpha)
     }
@@ -59,7 +67,7 @@ enum MarkupRender {
         case .pen(let pts):
             ctx.addPath(smoothPath(pts)); ctx.strokePath()
         case .highlight(let pts):
-            ctx.setStrokeColor(cg(rgb(s), alpha: 0.35)); ctx.setLineWidth(s.width * Stroke.highlightFactor)
+            ctx.setStrokeColor(cg(highlightRGB(s), alpha: highlightAlpha)); ctx.setLineWidth(s.width * Stroke.highlightFactor)
             ctx.addPath(smoothPath(pts)); ctx.strokePath()
         case .line(let a, let b):
             ctx.move(to: a); ctx.addLine(to: b); ctx.strokePath()
