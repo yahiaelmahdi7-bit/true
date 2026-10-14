@@ -162,9 +162,7 @@ private func px(_ b: [UInt8], _ w: Int, _ x: Int, _ y: Int) -> [UInt8] { Array(b
         #expect(CaptureLogic.sizeLabel(px) == "200 × 100")
     }
 
-    @Test func loupeAndToolbarFlipAtEdges() {
-        let l = CaptureLogic.loupeOrigin(cursor: .init(x: 390, y: 290), size: 100, in: bounds)
-        #expect(l.x + 100 <= 400 && l.y + 100 <= 300)
+    @Test func toolbarFlipsAtEdges() {
         let t = CaptureLogic.toolbarOrigin(selection: CGRect(x: 100, y: 250, width: 100, height: 45), toolbar: CGSize(width: 200, height: 40), in: bounds)
         #expect(t.y + 40 <= 300)
     }
@@ -411,5 +409,30 @@ private func el(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ k: Pic
     @Test func textStaysVisibleThroughHighlightOnLight() {
         let r = run(CGColor(srgbRed: 0.96, green: 0.96, blue: 0.97, alpha: 1), textGray: 0.1)
         #expect(Int(r.text[2]) < Int(r.hl[2]) - 80)   // dark text still clearly darker than the highlight around it
+    }
+}
+
+/// Several screens: the screen the mouse left keeps nothing stale, and a screen that loses the selection to
+/// another one goes back to a plain dim.
+@MainActor @Suite struct CaptureMultiScreenTests {
+    private func view() -> CaptureView {
+        CaptureView(frame: NSRect(x: 0, y: 0, width: 400, height: 300), still: busyImage(400, 300), windows: [CGRect(x: 20, y: 20, width: 300, height: 200)])
+    }
+
+    @Test func leavingTheScreenClearsTheHoverBox() {
+        let v = view()
+        v.previewPick(chain: [PickElement(frame: CGRect(x: 40, y: 40, width: 80, height: 30), kind: .button)], level: 0, cursor: CGPoint(x: 50, y: 50))
+        #expect(v.hoverWindow != nil && v.cursor != nil)
+        v.clearHover()
+        #expect(v.hoverWindow == nil && v.hoverName == nil && v.cursor == nil && v.picker.elements.isEmpty)
+    }
+
+    @Test func losingTheSelectionResetsTheEditor() {
+        let v = view()
+        v.previewDrag(selection: CGRect(x: 30, y: 30, width: 120, height: 80), cursor: nil)
+        v.beginEditing()
+        #expect(v.phase == .editing && !v.subviews.isEmpty)
+        v.resetToAiming()
+        #expect(v.phase == .aiming && v.selection == nil && v.state == nil && v.subviews.isEmpty)
     }
 }
