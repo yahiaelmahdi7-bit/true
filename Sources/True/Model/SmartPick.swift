@@ -5,6 +5,7 @@ import Vision
 enum PickKind: String, Sendable {
     case button = "Button", text = "Text", image = "Image", toolbar = "Toolbar", sidebar = "Sidebar", list = "List"
     case tabs = "Tabs", menu = "Menu", section = "Section", page = "Page", window = "Window", area = "Area"
+    case pane = "Pane", bar = "Bar"   // image regions only: a full-height column / a full-width strip
 
     static func from(role: String?, subrole: String? = nil) -> PickKind {
         let r = role ?? "", sub = subrole ?? ""
@@ -65,9 +66,57 @@ enum SmartPickLogic {
         abs(a.minX - b.minX) <= tol && abs(a.minY - b.minY) <= tol && abs(a.maxX - b.maxX) <= tol && abs(a.maxY - b.maxY) <= tol
     }
 
-    /// The final chain for the cursor: Accessibility's when it found anything finer than the window, otherwise the
-    /// image-detected boxes under the cursor (smallest first, kept inside the window) then the window.
+    /// The final chain for the cursor, innermost → outermost, window last. Merges the Accessibility elements and the
+    /// image-detected layout regions that contain `p` into ONE nested chain, so a coarse AX element never hides finer
+    /// image regions. Near-duplicates (every edge within 3 pt) merge and the AX name wins over "Area"; a box that does
+    /// not contain the previous kept one (within ~3 pt) is dropped, so every level nests in the next.
     static func chain(ax: [PickElement], window: CGRect?, boxes: [CGRect], at p: CGPoint) -> [PickElement] {
+        guard let w = window ?? ax.last?.frame else {
+            return containing(p, in: boxes).map { PickElement(frame: $0, kind: .area) }
+        }
+        let slack: CGFloat = 3
+        let wide = w.insetBy(dx: -2, dy: -2)
+        var cands: [PickElement] = ax.filter { $0.frame.insetBy(dx: -1, dy: -1).contains(p) && wide.contains($0.frame) && !nearlyEqual($0.frame, w, tol: slack) }
+        for b in containing(p, in: boxes) where wide.contains(b) && !nearlyEqual(b, w, tol: slack) {
+            cands.append(PickElement(frame: b, kind: regionKind(b, window: w)))
+        }
+        // Smallest first; on equal size the AX element sorts ahead of the image region.
+        let axFrames = Set(ax.map { FrameKey($0.frame) })
+        cands.sort {
+            let a0 = $0.frame.width * $0.frame.height, a1 = $1.frame.width * $1.frame.height
+            if abs(a0 - a1) > 1 { return a0 < a1 }
+            return axFrames.contains(FrameKey($0.frame)) && !axFrames.contains(FrameKey($1.frame))
+        }
+        var out: [PickElement] = []
+        for c in cands {
+            guard let last = out.last else { out.append(c); continue }
+            if nearlyEqual(last.frame, c.frame, tol: slack) {
+                if isGeneric(last.kind) && !isGeneric(c.kind) || last.kind == .section && c.kind != .section { out[out.count - 1].kind = c.kind }
+            } else if c.frame.insetBy(dx: -slack, dy: -slack).contains(last.frame) {
+                out.append(c)
+            }
+        }
+        out.append(PickElement(frame: w, kind: .window))
+        return out
+    }
+
+    private struct FrameKey: Hashable {
+        var x, y, w, h: Int
+        init(_ r: CGRect) { x = Int(r.minX.rounded()); y = Int(r.minY.rounded()); w = Int(r.width.rounded()); h = Int(r.height.rounded()) }
+    }
+    private static func isGeneric(_ k: PickKind) -> Bool { k == .area || k == .pane || k == .bar }
+
+    /// Plain label for an image region, from its shape against the window: a full-height column is a Pane,
+    /// a full-width strip is a Bar, everything else is an Area.
+    static func regionKind(_ r: CGRect, window w: CGRect) -> PickKind {
+        if r.height >= w.height * 0.85 && r.width <= w.width * 0.85 { return .pane }
+        if r.width >= w.width * 0.85 && r.height <= w.height * 0.3 { return .bar }
+        return .area
+    }
+
+    /// The pre-Run-28 chain (Accessibility replaces image boxes whenever it found anything finer than the window).
+    /// Kept only as the baseline for the region eval.
+    static func legacyChain(ax: [PickElement], window: CGRect?, boxes: [CGRect], at p: CGPoint) -> [PickElement] {
         if ax.count > 1 { return ax }
         let inside = containing(p, in: boxes).filter { b in window.map { $0.insetBy(dx: -2, dy: -2).contains(b) } ?? true }
         let areas = inside.map { PickElement(frame: $0, kind: .area) }
@@ -114,11 +163,12 @@ struct SmartPicker: Equatable, Sendable {
     mutating func shrink() { if level > 0 { level -= 1 } }
     mutating func jumpToWindow() { level = max(elements.count - 1, 0) }
 
-    /// A new chain for a moved cursor keeps the user's level when the element under the cursor is the same.
+    /// A new chain keeps the user on the same FRAME when it is still in it (so an Accessibility answer never makes the
+    /// box jump), otherwise the smallest level.
     mutating func replace(_ new: [PickElement]) {
-        let same = new.first?.frame == elements.first?.frame
+        let cur = current?.frame
         elements = new
-        level = same ? min(level, max(new.count - 1, 0)) : 0
+        level = cur.flatMap { c in new.firstIndex { SmartPickLogic.nearlyEqual($0.frame, c, tol: 2) } } ?? 0
     }
 }
 

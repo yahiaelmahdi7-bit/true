@@ -7,7 +7,7 @@ enum CaptureOutcome { case cancel, copy(AnnotationState), save(AnnotationState),
 
 // MARK: - The per-screen overlay view
 
-/// One screen's frozen still, dimmed, with the region picker (drag / snap / loupe) and — once a region is
+/// One screen's frozen still, dimmed, with the region picker (drag / snap) and — once a region is
 /// chosen — the annotation editor sitting exactly over the chosen pixels.
 final class CaptureView: NSView {
     enum Phase { case aiming, dragging, editing }
@@ -16,7 +16,12 @@ final class CaptureView: NSView {
     /// Window frames in this view's coordinates (top-left), front to back.
     var windows: [CGRect]
     var onOutcome: (CaptureOutcome) -> Void = { _ in }
+    /// The mouse is over this screen while it aims: the controller hands it the keyboard.
     var onActivate: () -> Void = {}
+    /// This screen just took the selection: the controller clears every other screen.
+    var onEngage: () -> Void = {}
+    /// False while another screen holds a selection that already has marks — this one then stays a plain dim.
+    var mayAim: () -> Bool = { true }
 
     private(set) var phase: Phase = .aiming
     private(set) var selection: CGRect?
@@ -88,7 +93,6 @@ final class CaptureView: NSView {
                 label(CaptureLogic.sizeLabel(CaptureLogic.pixelRect(s, viewSize: whole.size, imageSize: imageSize)), above: s)
             }
         }
-        if phase != .editing, let c = cursor { drawLoupe(at: c, in: g) }
     }
 
     /// Small plain-name chip (Button, Area, Window…) beside the size label.
@@ -114,38 +118,11 @@ final class CaptureView: NSView {
         return pill
     }
 
-    private func drawLoupe(at c: CGPoint, in g: CGContext) {
-        let size: CGFloat = 112, cells = 15
-        let o = CaptureLogic.loupeOrigin(cursor: c, size: size, in: bounds0)
-        let box = CGRect(origin: o, size: CGSize(width: size, height: size))
-        let sx = imageSize.width / bounds.width, sy = imageSize.height / bounds.height
-        let px = CGPoint(x: c.x * sx, y: c.y * sy)
-        let src = CGRect(x: (px.x - CGFloat(cells) / 2).rounded(), y: (px.y - CGFloat(cells) / 2).rounded(), width: CGFloat(cells), height: CGFloat(cells))
-        g.saveGState()
-        let clip = NSBezierPath(roundedRect: box, xRadius: 14, yRadius: 14)
-        clip.addClip()
-        NSColor.black.setFill(); box.fill()
-        if let piece = still.cropping(to: src.intersection(CGRect(origin: .zero, size: imageSize))) {
-            let visible = src.intersection(CGRect(origin: .zero, size: imageSize))
-            let k = size / CGFloat(cells)
-            let dst = CGRect(x: box.minX + (visible.minX - src.minX) * k, y: box.minY + (visible.minY - src.minY) * k,
-                             width: visible.width * k, height: visible.height * k)
-            NSGraphicsContext.current?.imageInterpolation = .none
-            NSImage(cgImage: piece, size: dst.size).draw(in: dst, from: .zero, operation: .copy, fraction: 1, respectFlipped: true, hints: nil)
-        }
-        g.restoreGState()
-        let cell = size / CGFloat(cells)
-        let mid = CGRect(x: box.minX + cell * CGFloat(cells / 2), y: box.minY + cell * CGFloat(cells / 2), width: cell, height: cell)
-        NSColor.white.setStroke(); let m = NSBezierPath(rect: mid); m.lineWidth = 1.5; m.stroke()
-        NSColor.black.withAlphaComponent(0.6).setStroke(); let m2 = NSBezierPath(rect: mid.insetBy(dx: -1, dy: -1)); m2.lineWidth = 0.75; m2.stroke()
-        NSColor.white.withAlphaComponent(0.9).setStroke()
-        let ring = NSBezierPath(roundedRect: box, xRadius: 14, yRadius: 14); ring.lineWidth = 1.5; ring.stroke()
-    }
-
     // MARK: mouse
 
     override func mouseMoved(with e: NSEvent) {
         guard phase != .editing else { return }
+        guard mayAim() else { clearHover(); return }
         let p = convert(e.locationInWindow, from: nil)
         cursor = p
         updatePick(at: p)
@@ -153,10 +130,28 @@ final class CaptureView: NSView {
         needsDisplay = true
     }
 
+    /// The mouse left for another screen: drop the hover box so nothing stale stays behind.
+    override func mouseExited(with e: NSEvent) { clearHover() }
+
+    func clearHover() {
+        guard phase == .aiming else { return }
+        cursor = nil; lastAX = []; pickSeq += 1   // also voids any Accessibility answer still in flight
+        picker = SmartPicker(); syncHover(); needsDisplay = true
+    }
+
+    /// Another screen took the selection: back to a plain dim, editor and handles gone.
+    func resetToAiming() {
+        canvasHost?.removeFromSuperview(); toolbarHost?.removeFromSuperview(); handleLayer?.removeFromSuperview()
+        canvasHost = nil; toolbarHost = nil; handleLayer = nil
+        phase = .aiming; selection = nil; state = nil; anchor = nil; activeHandle = nil
+        clearHover()
+        window?.invalidateCursorRects(for: self)
+    }
+
     /// Instant answer from what is already known (window frames + image boxes + the last AX chain if it still covers
     /// the cursor), then a latest-wins Accessibility query off the main thread that refines it.
     private func updatePick(at p: CGPoint) {
-        let ax = lastAX.first?.frame.contains(p) == true ? lastAX : []
+        let ax = lastAX.filter { $0.frame.contains(p) }   // ancestors that still cover the cursor
         setPick(SmartPickLogic.chain(ax: ax, window: CaptureLogic.windowRect(at: p, in: windows), boxes: imageBoxes, at: p))
         guard axTrusted else { return }
         pickSeq += 1
@@ -199,7 +194,8 @@ final class CaptureView: NSView {
     }
 
     override func mouseDown(with e: NSEvent) {
-        guard phase != .editing else { return }
+        guard phase != .editing, mayAim() else { return }
+        onEngage()
         let p = convert(e.locationInWindow, from: nil)
         downPoint = p; anchor = p; dragged = false; lastPoint = p
         selection = nil
@@ -246,7 +242,8 @@ final class CaptureView: NSView {
         case 48: picker.jumpToWindow(); syncHover(); needsDisplay = true      // tab: straight to window level
         case 49: spaceHeld = true                                      // space: move instead of resize
         case 3 where !e.modifierFlags.contains(.command):             // F: whole screen
-            selection = bounds0; beginEditing()
+            guard mayAim() else { return }
+            onEngage(); selection = bounds0; beginEditing()
         case 123, 124, 125, 126:
             guard let s = selection else { return }
             let step: CGFloat = e.modifierFlags.contains(.shift) ? 10 : 1
@@ -500,6 +497,9 @@ final class CaptureController {
             p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
             p.contentView = view
             p.setFrame(screen.frame, display: false)
+            view.onActivate = { [weak self, weak p] in p.map { self?.activate($0) } }
+            view.onEngage = { [weak self, weak view] in view.map { self?.engage($0) } }
+            view.mayAim = { [weak self, weak view] in view.map { self?.mayAim($0) ?? true } ?? true }
             made.append(p)
         }
         guard !made.isEmpty else { throw CocoaError(.fileReadUnknown) }
@@ -511,8 +511,8 @@ final class CaptureController {
         for (view, img, scale) in views {   // image-fallback boxes: once per screen, off the main thread
             Task.detached(priority: .userInitiated) { [weak view] in
                 let size = await MainActor.run { view?.bounds.size ?? .zero }
-                let boxes = ImageBoxDetector.detect(img).map { CGRect(x: $0.minX / scale, y: $0.minY / scale, width: $0.width / scale, height: $0.height / scale) }
-                let kept = SmartPickLogic.filterBoxes(boxes, screen: size)
+                let boxes = LayoutRegions.detect(img, scale: scale).map { CGRect(x: $0.minX / scale, y: $0.minY / scale, width: $0.width / scale, height: $0.height / scale) }
+                let kept = SmartPickLogic.filterBoxes(boxes, screen: size, minSide: 20)
                 await MainActor.run { view?.imageBoxes = kept }
             }
         }
@@ -539,6 +539,28 @@ final class CaptureController {
         if let s = NSScreen.main { p.setFrameOrigin(CGPoint(x: s.frame.midX - size.width / 2, y: s.frame.maxY - size.height - 90)) }
         p.orderFrontRegardless()
         axNotice = p
+    }
+
+    // MARK: several screens — one selection at a time
+
+    private var views: [CaptureView] { panels.compactMap { $0.contentView as? CaptureView } }
+
+    /// The keyboard follows the mouse between screens until one of them holds a selection.
+    private func activate(_ p: CapturePanel) {
+        guard !p.isKeyWindow, !views.contains(where: { $0.phase != .aiming }) else { return }
+        p.makeKey()
+        if let v = p.contentView { p.makeFirstResponder(v) }
+    }
+
+    /// A screen took the selection: every other screen goes back to a plain dim.
+    private func engage(_ view: CaptureView) {
+        for v in views where v !== view { v.resetToAiming() }
+        if let w = view.window, !w.isKeyWindow { w.makeKey(); w.makeFirstResponder(view) }
+    }
+
+    /// Marks on one screen lock the capture there; until then any screen can take over.
+    private func mayAim(_ view: CaptureView) -> Bool {
+        !views.contains { $0 !== view && $0.state?.hasMarks == true }
     }
 
     func close() {

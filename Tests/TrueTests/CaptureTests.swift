@@ -162,9 +162,7 @@ private func px(_ b: [UInt8], _ w: Int, _ x: Int, _ y: Int) -> [UInt8] { Array(b
         #expect(CaptureLogic.sizeLabel(px) == "200 × 100")
     }
 
-    @Test func loupeAndToolbarFlipAtEdges() {
-        let l = CaptureLogic.loupeOrigin(cursor: .init(x: 390, y: 290), size: 100, in: bounds)
-        #expect(l.x + 100 <= 400 && l.y + 100 <= 300)
+    @Test func toolbarFlipsAtEdges() {
         let t = CaptureLogic.toolbarOrigin(selection: CGRect(x: 100, y: 250, width: 100, height: 45), toolbar: CGSize(width: 200, height: 40), in: bounds)
         #expect(t.y + 40 <= 300)
     }
@@ -337,10 +335,19 @@ private func el(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ k: Pic
         let p = CGPoint(x: 420, y: 180), o = CGPoint(x: -1920, y: -1080)
         #expect(SmartPickLogic.toOverlay(CGRect(origin: SmartPickLogic.toGlobal(p, displayOrigin: o), size: .zero), displayOrigin: o).origin == p)
     }
-    @Test func axChainWinsOverImageBoxes() {
+    @Test func axNameWinsOverAreaAndChainNests() {
         let ax = [el(100, 100, 50, 20, .button), el(0, 0, 800, 600, .window)]
-        let out = SmartPickLogic.chain(ax: ax, window: win, boxes: [CGRect(x: 90, y: 90, width: 200, height: 200)], at: CGPoint(x: 110, y: 110))
-        #expect(out == ax)
+        let out = SmartPickLogic.chain(ax: ax, window: win, boxes: [CGRect(x: 90, y: 90, width: 200, height: 200), CGRect(x: 99, y: 99, width: 52, height: 22)], at: CGPoint(x: 110, y: 110))
+        #expect(out.map(\.kind) == [.button, .area, .window])
+        #expect(out[0].frame == ax[0].frame)
+        for i in 1..<out.count { #expect(out[i].frame.insetBy(dx: -3, dy: -3).contains(out[i - 1].frame)) }
+    }
+    @Test func coarseAXPageNeverHidesFinerImageRegions() {
+        let page = el(0, 40, 800, 560, .section)
+        let boxes = [CGRect(x: 50, y: 50, width: 300, height: 300), CGRect(x: 100, y: 100, width: 100, height: 100)]
+        let out = SmartPickLogic.chain(ax: [page, el(0, 0, 800, 600, .window)], window: win, boxes: boxes, at: CGPoint(x: 120, y: 120))
+        #expect(out.map(\.frame) == [boxes[1], boxes[0], page.frame, win])
+        #expect(out.last?.kind == .window)
     }
     @Test func imageFallbackWhenAXOnlyHasWindow() {
         let boxes = [CGRect(x: 50, y: 50, width: 300, height: 300), CGRect(x: 100, y: 100, width: 100, height: 100)]
@@ -350,6 +357,19 @@ private func el(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ k: Pic
         let none = SmartPickLogic.chain(ax: [], window: win, boxes: [], at: CGPoint(x: 5, y: 5))
         #expect(none.map(\.kind) == [.window])
     }
+    @Test func regionKindsAreLabelledByShape() {
+        #expect(SmartPickLogic.regionKind(CGRect(x: 0, y: 0, width: 200, height: 600), window: win) == .pane)
+        #expect(SmartPickLogic.regionKind(CGRect(x: 0, y: 0, width: 800, height: 40), window: win) == .bar)
+        #expect(SmartPickLogic.regionKind(CGRect(x: 10, y: 10, width: 200, height: 100), window: win) == .area)
+    }
+    @Test func replaceKeepsTheSameFrameOtherwiseLevelZero() {
+        let inner = el(100, 100, 100, 100, .area), mid = el(50, 50, 300, 300, .area), w = el(0, 0, 800, 600, .window)
+        var pk = SmartPicker([inner, mid, w], level: 1)
+        pk.replace([inner, el(51, 49, 299, 301, .section), w])      // mid reappears named, within tolerance
+        #expect(pk.level == 1 && pk.current?.kind == .section)
+        pk.replace([el(10, 10, 20, 20, .button), w])                 // frame gone
+        #expect(pk.level == 0)
+    }
     @Test func pickerGrowShrinkClampAndWindowJump() {
         var p = SmartPicker([el(10, 10, 20, 20, .button), el(0, 0, 100, 100), el(0, 0, 800, 600, .window)])
         p.shrink(); #expect(p.level == 0)
@@ -358,7 +378,9 @@ private func el(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ k: Pic
         p.jumpToWindow(); #expect(p.level == 2)
         p.replace([el(10, 10, 20, 20, .button), el(0, 0, 50, 50), el(0, 0, 800, 600, .window)])   // same innermost → keep level
         #expect(p.level == 2)
-        p.replace([el(300, 300, 20, 20), el(0, 0, 800, 600, .window)])                               // new element → reset
+        p.replace([el(300, 300, 20, 20), el(0, 0, 800, 600, .window)])                               // window frame survives → stays on it
+        #expect(p.level == 1 && p.current?.kind == .window)
+        p.replace([el(300, 300, 20, 20), el(0, 0, 640, 480, .window)])                               // frame gone → smallest
         #expect(p.level == 0)
     }
     @Test func clickVersusDrag() {
@@ -411,5 +433,30 @@ private func el(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ k: Pic
     @Test func textStaysVisibleThroughHighlightOnLight() {
         let r = run(CGColor(srgbRed: 0.96, green: 0.96, blue: 0.97, alpha: 1), textGray: 0.1)
         #expect(Int(r.text[2]) < Int(r.hl[2]) - 80)   // dark text still clearly darker than the highlight around it
+    }
+}
+
+/// Several screens: the screen the mouse left keeps nothing stale, and a screen that loses the selection to
+/// another one goes back to a plain dim.
+@MainActor @Suite struct CaptureMultiScreenTests {
+    private func view() -> CaptureView {
+        CaptureView(frame: NSRect(x: 0, y: 0, width: 400, height: 300), still: busyImage(400, 300), windows: [CGRect(x: 20, y: 20, width: 300, height: 200)])
+    }
+
+    @Test func leavingTheScreenClearsTheHoverBox() {
+        let v = view()
+        v.previewPick(chain: [PickElement(frame: CGRect(x: 40, y: 40, width: 80, height: 30), kind: .button)], level: 0, cursor: CGPoint(x: 50, y: 50))
+        #expect(v.hoverWindow != nil && v.cursor != nil)
+        v.clearHover()
+        #expect(v.hoverWindow == nil && v.hoverName == nil && v.cursor == nil && v.picker.elements.isEmpty)
+    }
+
+    @Test func losingTheSelectionResetsTheEditor() {
+        let v = view()
+        v.previewDrag(selection: CGRect(x: 30, y: 30, width: 120, height: 80), cursor: nil)
+        v.beginEditing()
+        #expect(v.phase == .editing && !v.subviews.isEmpty)
+        v.resetToAiming()
+        #expect(v.phase == .aiming && v.selection == nil && v.state == nil && v.subviews.isEmpty)
     }
 }

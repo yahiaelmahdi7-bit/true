@@ -123,14 +123,6 @@ enum CaptureLogic {
     /// "1280 × 720" — the live size readout (in pixels, what will be saved).
     static func sizeLabel(_ px: CGRect) -> String { "\(Int(px.width)) × \(Int(px.height))" }
 
-    /// Where the loupe sits: below-right of the cursor, flipping to the other side near an edge.
-    static func loupeOrigin(cursor: CGPoint, size: CGFloat, in bounds: CGRect, gap: CGFloat = 22) -> CGPoint {
-        var x = cursor.x + gap, y = cursor.y + gap
-        if x + size > bounds.maxX { x = cursor.x - gap - size }
-        if y + size > bounds.maxY { y = cursor.y - gap - size }
-        return CGPoint(x: max(bounds.minX, x), y: max(bounds.minY, y))
-    }
-
     /// Toolbar frame under the selection (or above when there is no room), centred and kept on screen.
     static func toolbarOrigin(selection: CGRect, toolbar: CGSize, in bounds: CGRect, gap: CGFloat = 10) -> CGPoint {
         var y = selection.maxY + gap
