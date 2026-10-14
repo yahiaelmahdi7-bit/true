@@ -21,7 +21,7 @@ enum MarkupRender {
 
     /// Highlighter is a plain alpha blend of a BRIGHT colour (no multiply/darken), so yellow stays yellow on dark
     /// and light content alike. The house amber is orange; as a marker it becomes a true yellow.
-    static let highlightAlpha: CGFloat = 0.4
+    static let highlightAlpha: CGFloat = 0.55
     static func highlightRGB(_ s: Stroke) -> RGBA {
         if s.custom == nil, s.color == .amber { return RGBA(r: 1.0, g: 0.86, b: 0.10) }
         return rgb(s)
