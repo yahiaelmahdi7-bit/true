@@ -34,6 +34,7 @@ final class AnnotationState {
     private enum Drag {
         case draw(start: CGPoint), move(index: Int, original: Stroke, start: CGPoint)
         case resize(index: Int, original: Stroke, handle: Int)
+        case cropResize(RectHandle, original: CGRect)
     }
 
     let image: CGImage
@@ -121,6 +122,9 @@ final class AnnotationState {
             doc.add(Stroke(mark: .step(at: p), color: color, width: strokeWidth, custom: custom))
         case .pen, .highlight:
             pen = [p]; drag = .draw(start: p); updateDraft(to: p)
+        case .crop where doc.crop.flatMap({ RectHandle.hit(p, in: $0, slop: 10 / max(viewScale, 0.01)) }) != nil:
+            let c = doc.crop!
+            drag = .cropResize(RectHandle.hit(p, in: c, slop: 10 / max(viewScale, 0.01))!, original: c)
         case .arrow, .line, .rect, .ellipse, .censor, .crop:
             drag = .draw(start: p); updateDraft(to: p)
         }
@@ -133,6 +137,8 @@ final class AnnotationState {
             draft = o.translated(by: CGSize(width: p.x - start.x, height: p.y - start.y)); selected = i
         case .resize(_, let o, let h):
             draft = o.fitted(from: o.bounds, to: Self.resize(o.bounds, handle: h, to: p))
+        case .cropResize(let h, let o):
+            draftCrop = h.resized(o, to: p, bounds: CGRect(origin: .zero, size: imageSize))
         case nil: break
         }
     }
@@ -147,6 +153,8 @@ final class AnnotationState {
             } else if let d = draft, isMeaningful(d) { doc.add(d) }
         case .move(let i, _, _), .resize(let i, _, _):
             if let d = draft, d != doc.strokes[i] { doc.replace(at: i, with: d) }
+        case .cropResize:
+            if let c = draftCrop { doc.setCrop(CropMath.clamp(c, to: imageSize)) }
         case nil: break
         }
     }

@@ -197,3 +197,95 @@ private func px(_ b: [UInt8], _ w: Int, _ x: Int, _ y: Int) -> [UInt8] { Array(b
         #expect(FileManager.default.fileExists(atPath: store.root.appendingPathComponent(mk.file).path))
     }
 }
+
+// MARK: - Polish round
+
+@Suite struct SystemShortcutTests {
+    @Test func missingEntryMeansMacOSStillOwnsIt() {
+        #expect(SystemShortcut.isEnabled(30, in: nil))
+        #expect(SystemShortcut.isEnabled(30, in: ["31": ["enabled": false]]))
+    }
+    @Test func disabledEntryFreesTheShortcut() {
+        #expect(!SystemShortcut.isEnabled(30, in: ["30": ["enabled": false, "value": ["type": "standard"]]]))
+        #expect(!SystemShortcut.isEnabled(30, in: ["30": ["enabled": NSNumber(value: 0)]]))
+    }
+    @Test func enabledEntryKeepsMacOSInCharge() {
+        #expect(SystemShortcut.isEnabled(30, in: ["30": ["enabled": true]]))
+        #expect(SystemShortcut.isEnabled(30, in: ["30": ["enabled": NSNumber(value: 1)]]))
+        #expect(SystemShortcut.isEnabled(30, in: ["30": ["value": "x"]]))   // no flag → default on
+    }
+    @Test func hotkeysAreDistinct() {
+        #expect(CaptureHotKey.primary.id != CaptureHotKey.backup.id)
+        #expect(CaptureHotKey.all.count == 2)
+    }
+}
+
+@Suite struct RectHandleTests {
+    let r = CGRect(x: 100, y: 100, width: 200, height: 100)
+    let bounds = CGRect(x: 0, y: 0, width: 500, height: 400)
+
+    @Test func eightHandlesAtCornersAndMidpoints() {
+        #expect(RectHandle.allCases.count == 8)
+        #expect(RectHandle.topLeft.point(in: r) == CGPoint(x: 100, y: 100))
+        #expect(RectHandle.right.point(in: r) == CGPoint(x: 300, y: 150))
+        #expect(RectHandle.bottom.point(in: r) == CGPoint(x: 200, y: 200))
+    }
+    @Test func hitReachIsGenerous() {
+        #expect(RectHandle.hit(CGPoint(x: 108, y: 100), in: r) == .topLeft)   // 8 pt away still grabs
+        #expect(RectHandle.hit(CGPoint(x: 200, y: 160), in: r) == nil)
+    }
+    @Test func cornersAndEdgesResize() {
+        #expect(RectHandle.bottomRight.resized(r, to: CGPoint(x: 350, y: 260), bounds: bounds) == CGRect(x: 100, y: 100, width: 250, height: 160))
+        #expect(RectHandle.topLeft.resized(r, to: CGPoint(x: 60, y: 80), bounds: bounds) == CGRect(x: 60, y: 80, width: 240, height: 120))
+        #expect(RectHandle.right.resized(r, to: CGPoint(x: 400, y: 999), bounds: bounds) == CGRect(x: 100, y: 100, width: 300, height: 100))
+        #expect(RectHandle.top.resized(r, to: CGPoint(x: 0, y: 40), bounds: bounds) == CGRect(x: 100, y: 40, width: 200, height: 160))
+        #expect(RectHandle.left.resized(r, to: CGPoint(x: 20, y: 0), bounds: bounds) == CGRect(x: 20, y: 100, width: 280, height: 100))
+        #expect(RectHandle.bottom.resized(r, to: CGPoint(x: 0, y: 300), bounds: bounds) == CGRect(x: 100, y: 100, width: 200, height: 200))
+    }
+    @Test func clampsToBounds() {
+        let out = RectHandle.bottomRight.resized(r, to: CGPoint(x: 9000, y: -50), bounds: bounds)
+        #expect(bounds.contains(out) && out.maxX == 500)
+        let tl = RectHandle.topLeft.resized(r, to: CGPoint(x: -80, y: -80), bounds: bounds)
+        #expect(tl.minX == 0 && tl.minY == 0)
+    }
+    @Test func shiftKeepsSquare() {
+        let out = RectHandle.bottomRight.resized(r, to: CGPoint(x: 400, y: 160), square: true, bounds: bounds)
+        #expect(out.width == out.height && out.minX == 100 && out.minY == 100 && out.width == 300)
+        let tl = RectHandle.topLeft.resized(r, to: CGPoint(x: 40, y: 90), square: true, bounds: bounds)
+        #expect(tl.width == tl.height && tl.maxX == 300 && tl.maxY == 200)
+    }
+    @Test func squareStaysInsideBounds() {
+        let out = RectHandle.bottomRight.resized(r, to: CGPoint(x: 5000, y: 5000), square: true, bounds: bounds)
+        #expect(bounds.contains(out) && out.width == out.height)
+    }
+    @Test func draggingPastTheOppositeEdgeFlips() {
+        let out = RectHandle.right.resized(r, to: CGPoint(x: 40, y: 150), bounds: bounds)
+        #expect(out.minX == 40 && out.maxX == 100)
+    }
+    @Test func neverCollapsesBelowMinimum() {
+        let out = RectHandle.right.resized(r, to: CGPoint(x: 100, y: 150), bounds: bounds)
+        #expect(out.width >= 8)
+    }
+}
+
+@Suite struct HighlighterBlendTests {
+    private func rendered(_ base: CGColor, mark color: MarkupColor = .amber) -> [UInt8] {
+        let ctx = CGContext(data: nil, width: 80, height: 40, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
+        ctx.setFillColor(base); ctx.fill(CGRect(x: 0, y: 0, width: 80, height: 40))
+        var d = MarkupDoc()
+        d.add(Stroke(mark: .highlight([CGPoint(x: 5, y: 20), CGPoint(x: 75, y: 20)]), color: color, width: 4))
+        let out = MarkupRender.render(base: ctx.makeImage()!, doc: d)!
+        return px(pixels(out), 80, 40, 20)   // A, R, G, B
+    }
+
+    @Test func yellowOverDarkStaysYellow() {
+        let p = rendered(CGColor(srgbRed: 0.08, green: 0.09, blue: 0.12, alpha: 1))
+        #expect(p[1] > 80 && p[2] > 70)                  // R and G lifted
+        #expect(Int(p[1]) > Int(p[3]) * 2 && Int(p[2]) > Int(p[3]) * 2)   // clearly yellow: R,G ≫ B
+    }
+    @Test func yellowOverLightStaysYellow() {
+        let p = rendered(CGColor(srgbRed: 0.95, green: 0.95, blue: 0.96, alpha: 1))
+        #expect(p[1] > 200 && p[2] > 200 && p[3] < p[1] - 30)
+    }
+}

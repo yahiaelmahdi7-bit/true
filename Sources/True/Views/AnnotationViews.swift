@@ -68,8 +68,16 @@ struct AnnotationCanvas: View {
         if let c = state.cropShown {
             let r = CGRect(x: c.minX * k, y: c.minY * k, width: c.width * k, height: c.height * k)
             var dim = Path(CGRect(origin: .zero, size: size)); dim.addRect(r)
-            ctx.fill(dim, with: .color(.black.opacity(0.55)), style: FillStyle(eoFill: true))
+            ctx.fill(dim, with: .color(.black.opacity(0.5)), style: FillStyle(eoFill: true))
             ctx.stroke(Path(r), with: .color(.white), style: StrokeStyle(lineWidth: 1.5, dash: state.tool == .crop ? [] : [4, 3]))
+            if state.tool == .crop {
+                for h in RectHandle.allCases {
+                    let p = h.point(in: r)
+                    let box = CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)
+                    ctx.fill(Path(roundedRect: box, cornerRadius: 2), with: .color(.white))
+                    ctx.stroke(Path(roundedRect: box, cornerRadius: 2), with: .color(.black.opacity(0.5)), lineWidth: 0.75)
+                }
+            }
         }
         if let i = state.selected, state.doc.strokes.indices.contains(i) {
             let s = state.doc.strokes[i]
@@ -109,34 +117,42 @@ struct AnnotationToolbar: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            HStack(spacing: 2) {
-                ForEach(AnnotationTool.allCases, id: \.self) { t in
-                    ToolButton(tool: t, selected: state.tool == t) { state.tool = t }
+            // One row when it fits; otherwise the finish actions drop to their own right-aligned row.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 2) { toolsRow; divider; finishRow }
+                VStack(spacing: 6) {
+                    HStack(spacing: 2) { toolsRow }
+                    HStack(spacing: 2) { finishRow }.frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                divider
-                Button { stylePopover.toggle() } label: {
-                    HStack(spacing: 4) {
-                        Circle().fill(swiftColor(Stroke(mark: .pen([]), color: state.color, width: 1, custom: state.custom)))
-                            .frame(width: 14, height: 14).overlay(Circle().strokeBorder(.white.opacity(0.7), lineWidth: 1))
-                        Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
-                    }
-                    .foregroundStyle(Theme.hubSecondary).frame(width: 44, height: 28).contentShape(.rect)
-                }
-                .buttonStyle(.plain).help("Colour and size")
-                .popover(isPresented: $stylePopover, arrowEdge: .bottom) { StylePanel(state: state).padding(14) }
-                divider
-                IconButton(symbol: "arrow.uturn.backward", help: "Undo (⌘Z)") { state.undo() }
-                    .keyboardShortcut("z").disabled(!state.doc.canUndo).opacity(state.doc.canUndo ? 1 : 0.35)
-                IconButton(symbol: "arrow.uturn.forward", help: "Redo (⇧⌘Z)") { state.redo() }
-                    .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!state.doc.canRedo).opacity(state.doc.canRedo ? 1 : 0.35)
-                divider
-                ForEach(finish) { f in FinishButton(f: f) }
             }
             if let chips = chipRow { chips }
         }
         .padding(.horizontal, 8).padding(.vertical, 6)
         .background { if floating { floatingBackdrop } }
     }
+
+    @ViewBuilder private var toolsRow: some View {
+        ForEach(AnnotationTool.allCases, id: \.self) { t in
+            ToolButton(tool: t, selected: state.tool == t) { state.tool = t }
+        }
+        divider
+        Button { stylePopover.toggle() } label: {
+            HStack(spacing: 4) {
+                Circle().fill(swiftColor(Stroke(mark: .pen([]), color: state.color, width: 1, custom: state.custom)))
+                    .frame(width: 14, height: 14).overlay(Circle().strokeBorder(.white.opacity(0.7), lineWidth: 1))
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(Theme.hubSecondary).frame(width: 44, height: 28).contentShape(.rect)
+        }
+        .buttonStyle(.plain).help("Colour and size")
+        .popover(isPresented: $stylePopover, arrowEdge: .bottom) { StylePanel(state: state).padding(14) }
+        divider
+        IconButton(symbol: "arrow.uturn.backward", help: "Undo (⌘Z)") { state.undo() }
+            .keyboardShortcut("z").disabled(!state.doc.canUndo).opacity(state.doc.canUndo ? 1 : 0.35)
+        IconButton(symbol: "arrow.uturn.forward", help: "Redo (⇧⌘Z)") { state.redo() }
+            .keyboardShortcut("z", modifiers: [.command, .shift]).disabled(!state.doc.canRedo).opacity(state.doc.canRedo ? 1 : 0.35)
+    }
+    private var finishRow: some View { ForEach(finish) { f in FinishButton(f: f) } }
 
     private var divider: some View { Rectangle().fill(Theme.hairline).frame(width: 1, height: 18).padding(.horizontal, 5) }
 
@@ -211,6 +227,49 @@ private struct FinishButton: View {
     }
 }
 
+/// The "pick any colour" control: a multicolour ring the size of a swatch that opens the system colour panel,
+/// and shows the picked colour once there is one.
+struct CustomColorDot: View {
+    let custom: RGBA?
+    let pick: (RGBA) -> Void
+    var body: some View {
+        Button {
+            ColorPanelBridge.shared.open(current: custom, pick: pick)
+        } label: {
+            ZStack {
+                if let c = custom {
+                    Circle().fill(Color(.sRGB, red: c.r, green: c.g, blue: c.b, opacity: 1))
+                    Circle().strokeBorder(.white, lineWidth: 2).padding(-4)
+                } else {
+                    Circle().fill(AngularGradient(colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red], center: .center))
+                    Circle().fill(Color(white: 0.11)).padding(6)
+                }
+            }
+            .frame(width: 20, height: 20)
+            .overlay(Circle().strokeBorder(.white.opacity(0.25), lineWidth: 1))
+        }
+        .buttonStyle(.plain).help("Custom colour")
+    }
+}
+
+@MainActor
+final class ColorPanelBridge: NSObject {
+    static let shared = ColorPanelBridge()
+    private var pick: ((RGBA) -> Void)?
+    func open(current: RGBA?, pick: @escaping (RGBA) -> Void) {
+        self.pick = pick
+        let panel = NSColorPanel.shared
+        panel.showsAlpha = false
+        panel.setTarget(self); panel.setAction(#selector(changed(_:)))
+        if let c = current { panel.color = NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: 1) }
+        panel.orderFront(nil)
+    }
+    @objc private func changed(_ sender: NSColorPanel) {
+        let n = sender.color.usingColorSpace(.sRGB) ?? .red
+        pick?(RGBA(r: n.redComponent, g: n.greenComponent, b: n.blueComponent, a: 1))
+    }
+}
+
 /// Colour swatches + custom picker + stroke width + text size. Shown in the toolbar popover.
 struct StylePanel: View {
     @Bindable var state: AnnotationState
@@ -226,13 +285,7 @@ struct StylePanel: View {
                             .overlay(Circle().strokeBorder(.white, lineWidth: on ? 2 : 0).padding(-4))
                     }.buttonStyle(.plain).help(c.rawValue.capitalized)
                 }
-                ColorPicker("", selection: Binding(
-                    get: { state.custom.map { Color(.sRGB, red: $0.r, green: $0.g, blue: $0.b, opacity: $0.a) } ?? swatchColor(state.color) },
-                    set: { c in
-                        let n = NSColor(c).usingColorSpace(.sRGB) ?? .red
-                        state.custom = RGBA(r: n.redComponent, g: n.greenComponent, b: n.blueComponent, a: n.alphaComponent)
-                    }), supportsOpacity: false)
-                    .labelsHidden().frame(width: 28).help("Custom colour")
+                CustomColorDot(custom: state.custom) { state.custom = $0 }
             }
             slider("Stroke", value: $state.strokeWidth, range: 2...max(24, state.strokeWidth * 3), icon: "scribble")
             slider("Text size", value: $state.fontSize, range: 12...max(120, state.fontSize * 2), icon: "textformat.size")
@@ -313,8 +366,8 @@ struct MarkupEditor: View {
             switch style {
             case .compact:
                 VStack(spacing: 0) {
-                    ScrollView(.horizontal, showsIndicators: false) { AnnotationToolbar(state: state, finish: finish) }
-                        .frame(height: state.tool == .censor || state.tool == .rect || state.tool == .ellipse || state.tool == .crop ? 70 : TrayPanelController.zoomChrome)
+                    AnnotationToolbar(state: state, finish: finish).frame(maxWidth: .infinity)
+                        .frame(minHeight: TrayPanelController.zoomChrome)
                     AnnotationCanvas(state: state).padding([.horizontal, .bottom], 8)
                 }
             case .overlay(let insets):

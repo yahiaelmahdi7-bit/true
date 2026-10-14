@@ -31,6 +31,9 @@ final class CaptureView: NSView {
     private var lastPoint: CGPoint = .zero
     private var canvasHost: NSView?
     private var toolbarHost: NSView?
+    private var handleLayer: HandleOverlay?
+    private var activeHandle: RectHandle?
+    private var handleOrigin: CGRect = .zero
 
     init(frame: NSRect, still: CGImage, windows: [CGRect]) {
         self.still = still; self.windows = windows
@@ -201,9 +204,46 @@ final class CaptureView: NSView {
         phase = .dragging; self.selection = selection; self.cursor = cursor; needsDisplay = true
     }
 
+    /// Handles are live only while nothing has been drawn: marks lock the chosen region.
+    fileprivate var handlesActive: Bool { phase == .editing && state?.hasMarks == false }
+    fileprivate func handleAt(_ p: CGPoint) -> RectHandle? {
+        guard handlesActive, let s = selection else { return nil }
+        return RectHandle.hit(p, in: s)
+    }
+    fileprivate func beginResize(_ h: RectHandle) {
+        guard let s = selection else { return }
+        canvasHost?.removeFromSuperview(); toolbarHost?.removeFromSuperview()
+        canvasHost = nil; toolbarHost = nil
+        activeHandle = h; handleOrigin = s; phase = .dragging; dragged = true
+        window?.makeFirstResponder(self)
+        window?.invalidateCursorRects(for: self)
+        needsDisplay = true; handleLayer?.needsDisplay = true
+    }
+    fileprivate func continueResize(to p: CGPoint, square: Bool) {
+        guard let h = activeHandle else { return }
+        cursor = p
+        selection = h.resized(handleOrigin, to: p, square: square, bounds: bounds0)
+        needsDisplay = true; handleLayer?.needsDisplay = true
+    }
+    fileprivate func endResize() {
+        activeHandle = nil
+        beginEditing()
+    }
+    func refreshHandles() { handleLayer?.needsDisplay = true }
+
+    /// Stills/tests: selection with its resize handles, mid-drag of the bottom-right one.
+    func previewResize(selection: CGRect, cursor: CGPoint) {
+        phase = .dragging; self.selection = selection; self.cursor = cursor; activeHandle = .bottomRight
+        let layer = handleLayer ?? HandleOverlay(owner: self)
+        layer.frame = bounds0
+        if layer.superview == nil { addSubview(layer) }
+        handleLayer = layer; layer.needsDisplay = true; needsDisplay = true
+    }
+
     func beginEditing() {
         guard let sel = selection else { return }
         canvasHost?.removeFromSuperview(); toolbarHost?.removeFromSuperview()
+        handleLayer?.removeFromSuperview()
         phase = .editing
         let px = CaptureLogic.pixelRect(sel, viewSize: bounds.size, imageSize: imageSize)
         guard let crop = still.cropping(to: px) else { onOutcome(.cancel); return }
@@ -212,7 +252,8 @@ final class CaptureView: NSView {
 
         let canvas = NSHostingView(rootView: CaptureCanvasHost(state: st, onReturn: { [weak self] in self?.onOutcome(.save(st)) },
                                                                onEscape: { [weak self] in self?.onOutcome(.cancel) },
-                                                               onArrow: { [weak self] dx, dy in self?.nudgeSelection(CGSize(width: dx, height: dy)) ?? false }))
+                                                               onArrow: { [weak self] dx, dy in self?.nudgeSelection(CGSize(width: dx, height: dy)) ?? false },
+                                                               onMarksChanged: { [weak self] in self?.refreshHandles() }))
         canvas.frame = sel
         addSubview(canvas); canvasHost = canvas
 
@@ -220,9 +261,54 @@ final class CaptureView: NSView {
         let size = bar.fittingSize
         bar.frame = CGRect(origin: CaptureLogic.toolbarOrigin(selection: sel, toolbar: size, in: bounds0), size: size)
         addSubview(bar); toolbarHost = bar
+        let layer = HandleOverlay(owner: self); layer.frame = bounds0
+        addSubview(layer, positioned: .above, relativeTo: canvas); handleLayer = layer
         window?.makeFirstResponder(canvas)
         window?.invalidateCursorRects(for: self)
         needsDisplay = true
+    }
+}
+
+/// The 8 resize handles over the chosen region. Transparent to the mouse except right on a handle, and only
+/// while nothing has been drawn.
+final class HandleOverlay: NSView {
+    private weak var owner: CaptureView?
+    init(owner: CaptureView) { self.owner = owner; super.init(frame: .zero) }
+    required init?(coder: NSCoder) { fatalError() }
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        owner?.handleAt(convert(point, from: superview)) != nil ? self : nil
+    }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func draw(_ dirty: NSRect) {
+        guard let o = owner, let s = o.selection, o.handlesActive || o.phase == .dragging else { return }
+        for h in RectHandle.allCases {
+            let p = h.point(in: s)
+            let r = CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8)
+            let path = NSBezierPath(roundedRect: r, xRadius: 2, yRadius: 2)
+            NSColor.white.setFill(); path.fill()
+            NSColor.black.withAlphaComponent(0.5).setStroke(); path.lineWidth = 0.75; path.stroke()
+        }
+    }
+
+    private var grabbed: RectHandle?
+    override func mouseDown(with e: NSEvent) {
+        guard let o = owner, let h = o.handleAt(convert(e.locationInWindow, from: nil)) else { return }
+        grabbed = h; o.beginResize(h)
+    }
+    override func mouseDragged(with e: NSEvent) {
+        guard grabbed != nil else { return }
+        owner?.continueResize(to: convert(e.locationInWindow, from: nil), square: e.modifierFlags.contains(.shift))
+    }
+    override func mouseUp(with e: NSEvent) {
+        guard grabbed != nil else { return }
+        grabbed = nil; owner?.endResize()
+    }
+    override func resetCursorRects() {
+        guard let o = owner, o.handlesActive, let s = o.selection else { return }
+        for h in RectHandle.allCases { addCursorRect(CGRect(x: h.point(in: s).x - 8, y: h.point(in: s).y - 8, width: 16, height: 16), cursor: .crosshair) }
     }
 }
 
@@ -230,9 +316,11 @@ struct CaptureCanvasHost: View {
     let state: AnnotationState
     let onReturn: () -> Void, onEscape: () -> Void
     let onArrow: (CGFloat, CGFloat) -> Bool
+    var onMarksChanged: () -> Void = {}
     var body: some View {
         AnnotationCanvas(state: state, corner: 0)
             .annotationKeys(state, onReturn: onReturn, onEscape: onEscape, onArrow: onArrow)
+            .onChange(of: state.hasMarks) { _, _ in onMarksChanged() }
     }
 }
 

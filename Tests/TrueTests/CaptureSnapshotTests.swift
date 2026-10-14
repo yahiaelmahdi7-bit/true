@@ -137,9 +137,12 @@ struct CaptureSnapshotTests {
         }
     }
 
-    @Test func panelZoomMarkUp() throws {
+    /// Replica of the tray's zoom Mark up (the real ZoomPanel is private); same `AnnotationToolbar`.
+    /// Real width = 55% of the visible screen width (TrayPanelFrame.zoomSize): 792 on a 1440 pt screen, and
+    /// it shrinks (~520) when a tall image is height-limited.
+    private func panelStill(_ name: String, width: CGFloat) throws {
         let img = screenImage(800, 500)
-        try snapshot("08-panel-zoom-mark-up", width: 520, height: 400) {
+        try snapshot(name, width: width, height: 400) {
             VStack(spacing: 0) {
                 HStack(spacing: 4) {
                     IconButton(symbol: "chevron.left", help: "Back to all (Esc)") {}
@@ -149,9 +152,42 @@ struct CaptureSnapshotTests {
                     IconButton(symbol: "doc.on.doc", help: "Copy image (⌘C)") {}
                     IconButton(symbol: "paperplane", help: "Send to session") {}
                 }.padding(.horizontal, 10).frame(height: 40)
-                AnnotationToolbar(state: AnnotationState(image: img), finish: Array(fullActions.dropFirst().dropFirst()), floating: false)
+                AnnotationToolbar(state: AnnotationState(image: img), finish: fullActions, floating: false).frame(maxWidth: .infinity)
                 Image(decorative: img, scale: 1).resizable().aspectRatio(contentMode: .fit).padding(8)
             }
+        }
+    }
+    @Test func panelNarrow() throws { try panelStill("08a-panel-mark-up-narrow", width: 520) }
+    @Test func panelDefault() throws { try panelStill("08b-panel-mark-up-default", width: 792) }
+
+    @Test func highlighterOverLight() throws {
+        let ctx = CGContext(data: nil, width: 800, height: 300, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
+        ctx.translateBy(x: 0, y: 300); ctx.scaleBy(x: 1, y: -1)
+        ctx.setFillColor(CGColor(gray: 0.97, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: 800, height: 300))
+        for i in 0..<8 {
+            ctx.setFillColor(CGColor(gray: 0.15, alpha: 1))
+            ctx.fill(CGRect(x: 40, y: 40 + CGFloat(i) * 30, width: CGFloat(300 + (i * 70) % 380), height: 10))
+        }
+        let img = ctx.makeImage()!
+        var d = MarkupDoc()
+        let w = MarkupDoc.defaultWidth(forImage: CGSize(width: 800, height: 300))
+        d.add(Stroke(mark: .highlight([CGPoint(x: 40, y: 105), CGPoint(x: 200, y: 106), CGPoint(x: 380, y: 105)]), color: .amber, width: w))
+        d.add(Stroke(mark: .highlight([CGPoint(x: 40, y: 165), CGPoint(x: 300, y: 166)]), color: .green, width: w))
+        let out = try #require(MarkupRender.render(base: img, doc: d))
+        try write(NSImageView(image: NSImage(cgImage: out, size: NSSize(width: 800, height: 300))), size: NSSize(width: 800, height: 300), "04b-highlighter-light")
+    }
+
+    @Test func selectionWithHandles() throws {
+        let img = screenImage(1200, 760)
+        let v = CaptureView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760), still: img, windows: [])
+        v.previewResize(selection: CGRect(x: 300, y: 170, width: 560, height: 340), cursor: CGPoint(x: 860, y: 510))
+        try write(v, size: NSSize(width: 1200, height: 760), "09-selection-resize-handles")
+    }
+
+    @Test func shortcutNotice() throws {
+        try snapshot("10-cmd-shift-4-notice", width: 560, height: 90) {
+            CaptureNotice(symbol: "keyboard", text: "macOS still owns ⌘⇧4", button: "Open Keyboard Shortcuts", action: {}, dismiss: {}).padding(20)
         }
     }
 }
