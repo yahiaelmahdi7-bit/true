@@ -199,7 +199,7 @@ private struct FinishButton: View {
         let b = Button(action: f.action) {
             HStack(spacing: 4) {
                 if let s = f.symbol { Image(systemName: s).font(.system(size: 11, weight: .semibold)) }
-                Text(f.title).font(.system(size: 12, weight: f.primary ? .semibold : .medium))
+                Text(f.title).font(.system(size: 12, weight: f.primary ? .semibold : .medium)).lineLimit(1).fixedSize()
             }
             .foregroundStyle(f.primary ? Color.black : Theme.hubSecondary)
             .padding(.horizontal, 10).frame(height: 26)

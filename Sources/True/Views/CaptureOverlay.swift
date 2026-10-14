@@ -196,6 +196,11 @@ final class CaptureView: NSView {
         beginEditing(); return true
     }
 
+    /// Stills/tests: put the overlay in a given mid-drag state without events.
+    func previewDrag(selection: CGRect?, cursor: CGPoint?) {
+        phase = .dragging; self.selection = selection; self.cursor = cursor; needsDisplay = true
+    }
+
     func beginEditing() {
         guard let sel = selection else { return }
         canvasHost?.removeFromSuperview(); toolbarHost?.removeFromSuperview()
