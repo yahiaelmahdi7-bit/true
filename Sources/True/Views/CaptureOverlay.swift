@@ -151,7 +151,7 @@ final class CaptureView: NSView {
     /// Instant answer from what is already known (window frames + image boxes + the last AX chain if it still covers
     /// the cursor), then a latest-wins Accessibility query off the main thread that refines it.
     private func updatePick(at p: CGPoint) {
-        let ax = lastAX.first?.frame.contains(p) == true ? lastAX : []
+        let ax = lastAX.filter { $0.frame.contains(p) }   // ancestors that still cover the cursor
         setPick(SmartPickLogic.chain(ax: ax, window: CaptureLogic.windowRect(at: p, in: windows), boxes: imageBoxes, at: p))
         guard axTrusted else { return }
         pickSeq += 1
@@ -511,8 +511,8 @@ final class CaptureController {
         for (view, img, scale) in views {   // image-fallback boxes: once per screen, off the main thread
             Task.detached(priority: .userInitiated) { [weak view] in
                 let size = await MainActor.run { view?.bounds.size ?? .zero }
-                let boxes = ImageBoxDetector.detect(img).map { CGRect(x: $0.minX / scale, y: $0.minY / scale, width: $0.width / scale, height: $0.height / scale) }
-                let kept = SmartPickLogic.filterBoxes(boxes, screen: size)
+                let boxes = LayoutRegions.detect(img, scale: scale).map { CGRect(x: $0.minX / scale, y: $0.minY / scale, width: $0.width / scale, height: $0.height / scale) }
+                let kept = SmartPickLogic.filterBoxes(boxes, screen: size, minSide: 20)
                 await MainActor.run { view?.imageBoxes = kept }
             }
         }
