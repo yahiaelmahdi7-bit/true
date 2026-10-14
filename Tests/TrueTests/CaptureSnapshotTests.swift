@@ -222,13 +222,48 @@ struct CaptureSnapshotTests {
 
     @Test func imageFallbackBoxes() throws {
         let (img, _) = syntheticCanvasImage(1200, 760)
-        let boxes = SmartPickLogic.filterBoxes(ImageBoxDetector.detect(img), screen: CGSize(width: 1200, height: 760))
+        let boxes = SmartPickLogic.filterBoxes(LayoutRegions.detect(img), screen: CGSize(width: 1200, height: 760), minSide: 20)
         let v = CaptureView(frame: NSRect(x: 0, y: 0, width: 1200, height: 760), still: img, windows: [])
         let cursor = CGPoint(x: 200, y: 150)
         let chain = SmartPickLogic.chain(ax: [], window: CGRect(x: 0, y: 0, width: 1200, height: 760), boxes: boxes, at: cursor)
         v.previewPick(chain: chain, level: 0, cursor: cursor)
         let dashed = DashedBoxes(boxes: boxes); dashed.frame = v.bounds; v.addSubview(dashed)
         try write(v, size: NSSize(width: 1200, height: 760), "14-image-fallback-boxes")
+    }
+
+    /// A terminal-like window of four panes split by 1-px dividers: Accessibility reports only the window, the picture
+    /// has the panes. The hover lands on the pane under the cursor and is labelled "Pane".
+    @Test func smartRegionsPanes() throws {
+        let (w, h) = (1200, 760)
+        let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue)!
+        ctx.translateBy(x: 0, y: CGFloat(h)); ctx.scaleBy(x: 1, y: -1)
+        ctx.setFillColor(CGColor(srgbRed: 0.22, green: 0.25, blue: 0.32, alpha: 1)); ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        let win = CGRect(x: 60, y: 50, width: 1080, height: 660)
+        ctx.setFillColor(CGColor(gray: 0.07, alpha: 1)); ctx.fill(win)
+        let paneW = win.width / 4
+        for i in 0..<4 {
+            let x0 = win.minX + CGFloat(i) * paneW
+            for line in 0..<26 {
+                var x = x0 + 14
+                let y = win.minY + 22 + CGFloat(line) * 23
+                while x < x0 + paneW - 40 {
+                    let ww = CGFloat(10 + (Int(x) + line * 7 + i * 3) % 6 * 6)
+                    var sx = x
+                    while sx < x + ww { ctx.setFillColor(CGColor(gray: Int(sx) % 4 == 0 ? 0.8 : 0.36, alpha: 1)); ctx.fill(CGRect(x: sx, y: y + CGFloat(Int(sx * 7) % 3), width: 2, height: 9 + CGFloat(Int(sx * 5) % 4))); sx += 2 }
+                    x += ww + 7
+                }
+            }
+            if i > 0 { ctx.setFillColor(CGColor(gray: 0.42, alpha: 1)); ctx.fill(CGRect(x: x0 - 1, y: win.minY, width: 1, height: win.height)) }
+        }
+        let img = ctx.makeImage()!
+        let boxes = SmartPickLogic.filterBoxes(LayoutRegions.detect(img), screen: CGSize(width: w, height: h), minSide: 20)
+        let v = CaptureView(frame: NSRect(x: 0, y: 0, width: w, height: h), still: img, windows: [])
+        let cursor = CGPoint(x: win.minX + paneW * 1.5, y: 300)
+        let chain = SmartPickLogic.chain(ax: [], window: win, boxes: boxes, at: cursor)
+        #expect(chain.first?.kind == .pane, "chain: \(chain.map(\.kind)) boxes: \(boxes)")
+        v.previewPick(chain: chain, level: 0, cursor: cursor)
+        try write(v, size: NSSize(width: w, height: h), "15-smart-regions-panes")
     }
 }
 

@@ -115,9 +115,9 @@ enum LayoutRegions {
         /// Exclusion bands [start, end) along one axis, in region-local offsets, and how strong they are.
         /// Two rule groups a few px apart with nothing between them are the edges of two boxes with a gutter between
         /// (cards, panels). When any exist, cut ONLY there so each box stays whole; its inner rules wait for recursion.
-        func ruleBands(_ step: [Float], ink: [Int]) -> (bands: [(Int, Int)], score: Float) {
+        func ruleBands(_ step: [Float], ink: [Int], coverage: Float = Engine.coverage) -> (bands: [(Int, Int)], score: Float) {
             var hits: [Int] = []
-            for i in 1..<max(step.count, 1) where step[i] >= Engine.coverage { hits.append(i) }
+            for i in 1..<max(step.count, 1) where step[i] >= coverage { hits.append(i) }
             guard !hits.isEmpty else { return ([], 0) }
             var groups: [(Int, Int)] = []
             var a = hits[0], b = hits[0]
@@ -151,7 +151,7 @@ enum LayoutRegions {
                 if ink[i] <= tol {
                     var j = i
                     while j < ink.count, ink[j] <= tol { j += 1 }
-                    if j - i >= minGap, i > 0, j < ink.count { bands.append((i, j)); best = max(best, j - i) }
+                    if j - i >= minGap { bands.append((i, j)); best = max(best, j - i) }   // edge margins too: trims a block off a blank page
                     i = j
                 } else { i += 1 }
             }
@@ -159,14 +159,22 @@ enum LayoutRegions {
         }
 
         /// Split `r` along bands; the children are the shrink-wrapped, big-enough segments between them.
-        func children(of r: Region, rows: Bool, bands: [(Int, Int)]) -> [Region] {
+        func children(of r: Region, rows: Bool, bands: [(Int, Int)], keepBand: Bool = false, fullSpan: Bool = false) -> [Region] {
             var out: [Region] = []
             var start = 0
             let len = rows ? r.h : r.w
             func seg(_ a: Int, _ b: Int) {
                 guard b > a else { return }
                 let s = rows ? Region(x0: r.x0, y0: r.y0 + a, x1: r.x1, y1: r.y0 + b) : Region(x0: r.x0 + a, y0: r.y0, x1: r.x0 + b, y1: r.y1)
-                if let t = shrink(s), t.w >= minW, t.h >= minH { out.append(t) }
+                guard var t = shrink(s) else { return }
+                // A band cut by a rule or fill change IS the box (a toolbar, a pane): keep its edges, don't wrap its labels.
+                // Along the cut axis only the sides that touch a rule/fill change; and when the step runs (almost) edge to edge
+                // the whole segment is the box.
+                if keepBand {
+                    if rows { if a > 0 { t.y0 = s.y0 }; if b < len { t.y1 = s.y1 }; if fullSpan { t = s } }
+                    else { if a > 0 { t.x0 = s.x0 }; if b < len { t.x1 = s.x1 }; if fullSpan { t = s } }
+                }
+                if t.w >= minW, t.h >= minH { out.append(t) }
             }
             for (a, b) in bands { seg(start, a); start = b }
             seg(start, len)
@@ -179,7 +187,7 @@ enum LayoutRegions {
             let lh = lineHeight(pr.ink, tol: max(2, Int(0.015 * Double(region.w))))
 
             // Tier 1 — rules and fill changes. Stronger axis first.
-            let rr = ruleBands(pr.step, ink: pr.ink), rc = ruleBands(pc.step, ink: pc.ink)
+            let rr = ruleBands(pr.step, ink: pr.ink), rc = ruleBands(pc.step, ink: pc.ink, coverage: 0.5)   // short strips: a rounded box edge covers ~half the bar height
             let tier1: [(Bool, [(Int, Int)], Float)] = [(true, rr.bands, rr.score), (false, rc.bands, rc.score)]
                 .filter { !$0.1.isEmpty }.sorted { $0.2 > $1.2 }
             // Tier 2 — gutters, with gaps adaptive to the text line height.
@@ -188,8 +196,8 @@ enum LayoutRegions {
             let tier2: [(Bool, [(Int, Int)], Float)] = [(true, gr.bands, gr.score), (false, gc.bands, gc.score)]
                 .filter { !$0.1.isEmpty }.sorted { $0.2 > $1.2 }
 
-            for (rows, bands, _) in tier1 + tier2 {
-                let kids = children(of: region, rows: rows, bands: bands)
+            for (rows, bands, _, ruled) in tier1.map({ ($0.0, $0.1, $0.2, true) }) + tier2.map({ ($0.0, $0.1, $0.2, false) }) {
+                let kids = children(of: region, rows: rows, bands: bands, keepBand: ruled, fullSpan: ruled && (rows ? pr.step : pc.step).max() ?? 0 >= 0.9)
                 // Two or more pieces, or one piece that is clearly smaller than what it was cut from.
                 guard kids.count >= 2 || (kids.count == 1 && kids[0].w * kids[0].h * 100 <= region.w * region.h * 85) else { continue }
                 for k in kids { found.append(k) }

@@ -66,8 +66,12 @@ private func render(_ still: CGImage, scale: CGFloat, samples: [Sample], pick: (
             return Win(rect: CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0),
                        owner: w[kCGWindowOwnerName as String] as? String ?? "?")
         }
-        var report = "AX trusted: \(AXPick.trusted())\n"
-        var mis = (instant: 0, final: 0), areas: [CGFloat] = [], tiny = 0, total = 0
+        let old = env["TRUE_PICK_DIAG_MODE"] == "old"   // the pre-Run-28 pipeline, for comparison
+        let chainOf: ([PickElement], CGRect?, [CGRect], CGPoint) -> [PickElement] = old
+            ? { SmartPickLogic.legacyChain(ax: $0, window: $1, boxes: $2, at: $3) }
+            : { SmartPickLogic.chain(ax: $0, window: $1, boxes: $2, at: $3) }
+        var report = "mode: \(old ? "OLD" : "NEW")\nAX trusted: \(AXPick.trusted())\n"
+        var mis = (instant: 0, final: 0), areas: [CGFloat] = [], tiny = 0, total = 0, windowOnly = 0, chainLen = 0
         var n = 0
 
         for screen in NSScreen.screens {
@@ -81,9 +85,10 @@ private func render(_ still: CGImage, scale: CGFloat, samples: [Sample], pick: (
             let bounds = CGDisplayBounds(id), origin = bounds.origin
             let frames = wins.map { $0.rect.offsetBy(dx: -origin.x, dy: -origin.y) }
             let size = screen.frame.size
-            let boxes = SmartPickLogic.filterBoxes(ImageBoxDetector.detect(img).map {
+            let raw = old ? ImageBoxDetector.detect(img) : LayoutRegions.detect(img, scale: scale)
+            let boxes = SmartPickLogic.filterBoxes(raw.map {
                 CGRect(x: $0.minX / scale, y: $0.minY / scale, width: $0.width / scale, height: $0.height / scale)
-            }, screen: size)
+            }, screen: size, minSide: old ? 24 : 20)
             report += "\ndisplay \(id) bounds=\(fmt(bounds)) screen.frame=\(fmt(screen.frame)) scale=\(scale) still=\(img.width)x\(img.height) windows=\(frames.count) imageBoxes=\(boxes.count)\n"
 
             var samples: [Sample] = []
@@ -95,8 +100,8 @@ private func render(_ still: CGImage, scale: CGFloat, samples: [Sample], pick: (
                 let axWin = ax.window.map { SmartPickLogic.toOverlay($0, displayOrigin: origin) }
                 let axChain = axWin.map { w in SmartPickLogic.clean(ax.chain.map { PickElement(frame: SmartPickLogic.toOverlay($0.frame, displayOrigin: origin), kind: $0.kind) }, window: w) } ?? []
                 let win = CaptureLogic.windowRect(at: p, in: frames)
-                let instant = SmartPickLogic.chain(ax: [], window: win, boxes: boxes, at: p)
-                let final = SmartPickLogic.chain(ax: axChain, window: axWin ?? win, boxes: boxes, at: p)
+                let instant = chainOf([], win, boxes, p)
+                let final = chainOf(axChain, axWin ?? win, boxes, p)
                 let app = wins.first { $0.rect.contains(g) }?.owner ?? "-"
                 samples.append(Sample(n: n, p: p, app: app, instant: instant, final: final))
                 func l0(_ ch: [PickElement]) -> String {
@@ -106,6 +111,8 @@ private func render(_ still: CGImage, scale: CGFloat, samples: [Sample], pick: (
                 if let e = instant.first, !e.frame.contains(p) { mis.instant += 1 }
                 if let e = final.first {
                     if !e.frame.contains(p) { mis.final += 1 }
+                    if final.count == 1 { windowOnly += 1 }
+                    chainLen += final.count
                     areas.append(e.frame.width * e.frame.height); total += 1
                     if e.frame.width < 60 && e.frame.height < 30 { tiny += 1 }
                 }
@@ -115,7 +122,7 @@ private func render(_ still: CGImage, scale: CGFloat, samples: [Sample], pick: (
             try render(img, scale: CGFloat(img.width) / size.width, samples: samples, pick: { $0.instant }, to: dir.appendingPathComponent("display-\(id)-instant.png"))
         }
         let med = areas.sorted().isEmpty ? 0 : areas.sorted()[areas.count / 2]
-        report += "\nTOTALS samples=\(n) misplaced instant=\(mis.instant) final=\(mis.final) level0-median-area=\(Int(med)) pt2 level0-under-60x30=\(tiny)/\(total)\n"
+        report += "\nTOTALS samples=\(n) misplaced instant=\(mis.instant) final=\(mis.final) level0-median-area=\(Int(med)) pt2 level0-under-60x30=\(tiny)/\(total) window-only-chains=\(windowOnly)/\(total) mean-chain-length=\(total == 0 ? 0 : Double(chainLen) / Double(total))\n"
         try report.write(to: dir.appendingPathComponent("report.txt"), atomically: true, encoding: .utf8)
         print("SmartPick diagnostic output: \(dir.path)")
     }
