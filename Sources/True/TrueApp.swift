@@ -52,6 +52,8 @@ struct TrueApp: App {
                 Button("Focus Up") { model.moveFocus(.up) }.keyboardShortcut(.upArrow, modifiers: [.command, .option])
                 Button("Focus Down") { model.moveFocus(.down) }.keyboardShortcut(.downArrow, modifiers: [.command, .option])
                 Divider()
+                Button("Capture Screen") { CaptureController.shared.start() }
+                    .keyboardShortcut(CaptureHotKey.keyEquivalent, modifiers: CaptureHotKey.eventModifiers)
                 Button("Screenshots…") { TrayPanelController.shared.toggleExpanded() }
                     .keyboardShortcut("s", modifiers: [.command, .shift])
                 Button("Show Shots") { ShotsOverlayController.shared.toggle() }
@@ -169,6 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TrayPanelController.shared.start()
         // The Shots overlay's global hotkey: one Carbon registration at launch, no Accessibility permission, 0% idle.
         ShotsHotKeyRegistrar.shared.register()
+        CaptureHotKeyRegistrar.shared.register()
         // One vnode watch on our own executable (+ one stat on activation): 0% idle. It only flips a flag that
         // shows the "Restart to update" pill; it never restarts anything by itself.
         BuildFreshnessWatcher.shared.start()
