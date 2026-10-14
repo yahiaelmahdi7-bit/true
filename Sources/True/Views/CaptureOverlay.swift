@@ -23,7 +23,20 @@ final class CaptureView: NSView {
     private(set) var state: AnnotationState?
     var cursor: CGPoint?
     var hoverWindow: CGRect?
-    var snapOn = true
+    /// Plain-English name of what the hover is on ("Button", "Area", "Window"…).
+    var hoverName: String?
+    /// This screen's top-left in the global (AX / CGWindowList) space.
+    var displayOrigin: CGPoint = .zero
+    /// Window numbers of True's own overlay panels (evaluated lazily; excluded from AX hit-testing).
+    var overlayWindowNumbers: () -> Set<Int> = { [] }
+    /// Image-fallback candidate boxes in view points, set once the detector finishes.
+    var imageBoxes: [CGRect] = []
+    var axTrusted = false
+    private(set) var picker = SmartPicker()
+    private var lastAX: [PickElement] = []
+    private var pickSeq = 0
+    private var scrollAccum: CGFloat = 0
+    private let pickWorker = SmartPickWorker()
     private var anchor: CGPoint?
     private var downPoint: CGPoint?
     private var dragged = false
@@ -66,7 +79,8 @@ final class CaptureView: NSView {
             let path = CGPath(roundedRect: w.insetBy(dx: 1, dy: 1), cornerWidth: 8, cornerHeight: 8, transform: nil)
             g.setFillColor(NSColor(srgbRed: 0.04, green: 0.52, blue: 1, alpha: 0.16).cgColor); g.addPath(path); g.fillPath()
             g.setStrokeColor(NSColor(srgbRed: 0.04, green: 0.52, blue: 1, alpha: 1).cgColor); g.setLineWidth(2); g.addPath(path); g.strokePath()
-            label(CaptureLogic.sizeLabel(CaptureLogic.pixelRect(w, viewSize: whole.size, imageSize: imageSize)), above: w)
+            let pill = label(CaptureLogic.sizeLabel(CaptureLogic.pixelRect(w, viewSize: whole.size, imageSize: imageSize)), above: w)
+            if let n = hoverName { chip(n, after: pill) }
         }
         if let s = selection {
             g.setStrokeColor(NSColor.white.cgColor); g.setLineWidth(1); g.stroke(s.insetBy(dx: -0.5, dy: -0.5))
@@ -77,7 +91,19 @@ final class CaptureView: NSView {
         if phase != .editing, let c = cursor { drawLoupe(at: c, in: g) }
     }
 
-    private func label(_ text: String, above r: CGRect) {
+    /// Small plain-name chip (Button, Area, Window…) beside the size label.
+    private func chip(_ text: String, after pill: CGRect) {
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NSColor.black]
+        let s = NSAttributedString(string: text, attributes: attrs)
+        let sz = s.size()
+        let r = CGRect(x: pill.maxX + 6, y: pill.minY + (pill.height - sz.height - 4) / 2, width: sz.width + 14, height: sz.height + 4)
+        NSColor.white.setFill()
+        NSBezierPath(roundedRect: r, xRadius: r.height / 2, yRadius: r.height / 2).fill()
+        s.draw(at: NSPoint(x: r.minX + 7, y: r.minY + 2))
+    }
+
+    @discardableResult
+    private func label(_ text: String, above r: CGRect) -> CGRect {
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.white]
         let s = NSAttributedString(string: text, attributes: attrs)
         let sz = s.size()
@@ -85,6 +111,7 @@ final class CaptureView: NSView {
         NSColor.black.withAlphaComponent(0.72).setFill()
         NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2).fill()
         s.draw(at: NSPoint(x: pill.minX + 7, y: pill.minY + 3))
+        return pill
     }
 
     private func drawLoupe(at c: CGPoint, in g: CGContext) {
@@ -121,9 +148,54 @@ final class CaptureView: NSView {
         guard phase != .editing else { return }
         let p = convert(e.locationInWindow, from: nil)
         cursor = p
-        hoverWindow = snapOn ? CaptureLogic.windowRect(at: p, in: windows) : nil
+        updatePick(at: p)
         onActivate()
         needsDisplay = true
+    }
+
+    /// Instant answer from what is already known (window frames + image boxes + the last AX chain if it still covers
+    /// the cursor), then a latest-wins Accessibility query off the main thread that refines it.
+    private func updatePick(at p: CGPoint) {
+        let ax = lastAX.first?.frame.contains(p) == true ? lastAX : []
+        setPick(SmartPickLogic.chain(ax: ax, window: CaptureLogic.windowRect(at: p, in: windows), boxes: imageBoxes, at: p))
+        guard axTrusted else { return }
+        pickSeq += 1
+        let seq = pickSeq, origin = displayOrigin
+        pickWorker.request(seq: seq, point: SmartPickLogic.toGlobal(p, displayOrigin: origin), excluding: overlayWindowNumbers()) { [weak self] n, result in
+            Task { @MainActor in self?.applyAX(seq: n, result: result, point: p, origin: origin) }
+        }
+    }
+
+    private func applyAX(seq: Int, result: AXPick.Result, point p: CGPoint, origin: CGPoint) {
+        guard seq == pickSeq, phase == .aiming, cursor == p else { return }
+        let win = result.window.map { SmartPickLogic.toOverlay($0, displayOrigin: origin) }
+        let chain = result.chain.map { PickElement(frame: SmartPickLogic.toOverlay($0.frame, displayOrigin: origin), kind: $0.kind) }
+        lastAX = win.map { SmartPickLogic.clean(chain, window: $0) } ?? []
+        setPick(SmartPickLogic.chain(ax: lastAX, window: win ?? CaptureLogic.windowRect(at: p, in: windows), boxes: imageBoxes, at: p))
+        needsDisplay = true
+    }
+
+    private func setPick(_ chain: [PickElement]) {
+        picker.replace(chain); syncHover()
+    }
+    private func syncHover() {
+        hoverWindow = picker.current?.frame; hoverName = picker.current?.kind.rawValue
+    }
+
+    override func scrollWheel(with e: NSEvent) {
+        guard phase == .aiming, picker.elements.count > 1 else { return }
+        scrollAccum += e.hasPreciseScrollingDeltas ? e.scrollingDeltaY : e.scrollingDeltaY * 8
+        let step: CGFloat = 8
+        while abs(scrollAccum) >= step {
+            if scrollAccum > 0 { picker.grow(); scrollAccum -= step } else { picker.shrink(); scrollAccum += step }
+        }
+        syncHover(); needsDisplay = true
+    }
+
+    /// Stills/tests: aiming with a ready-made chain picked at `level`.
+    func previewPick(chain: [PickElement], level: Int, cursor: CGPoint?) {
+        phase = .aiming; selection = nil; self.cursor = cursor
+        picker = SmartPicker(chain, level: level); syncHover(); needsDisplay = true
     }
 
     override func mouseDown(with e: NSEvent) {
@@ -158,10 +230,10 @@ final class CaptureView: NSView {
         let p = convert(e.locationInWindow, from: nil)
         if dragged, let s = selection, s.width >= 6, s.height >= 6 {
             beginEditing()
-        } else if !dragged, snapOn, let w = CaptureLogic.windowRect(at: p, in: windows) {
+        } else if !dragged, let w = picker.current?.frame ?? CaptureLogic.windowRect(at: p, in: windows) {
             selection = w; beginEditing()
         } else {
-            phase = .aiming; selection = nil; hoverWindow = snapOn ? CaptureLogic.windowRect(at: p, in: windows) : nil
+            phase = .aiming; selection = nil; updatePick(at: p)
         }
         needsDisplay = true
     }
@@ -171,7 +243,7 @@ final class CaptureView: NSView {
     override func keyDown(with e: NSEvent) {
         switch e.keyCode {
         case 53: onOutcome(.cancel)                                   // esc
-        case 48: snapOn.toggle(); hoverWindow = snapOn ? cursor.flatMap { CaptureLogic.windowRect(at: $0, in: windows) } : nil; needsDisplay = true
+        case 48: picker.jumpToWindow(); syncHover(); needsDisplay = true      // tab: straight to window level
         case 49: spaceHeld = true                                      // space: move instead of resize
         case 3 where !e.modifierFlags.contains(.command):             // F: whole screen
             selection = bounds0; beginEditing()
@@ -401,6 +473,8 @@ final class CaptureController {
     private func present() async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
         var made: [CapturePanel] = []
+        var views: [(CaptureView, CGImage, CGFloat)] = []
+        let trusted = AXPick.trusted()
         let windowList = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
         for screen in NSScreen.screens {
             guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
@@ -416,6 +490,10 @@ final class CaptureController {
                 return CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0).offsetBy(dx: -origin.x, dy: -origin.y)
             }
             let view = CaptureView(frame: CGRect(origin: .zero, size: screen.frame.size), still: img, windows: frames)
+            view.displayOrigin = origin
+            view.axTrusted = trusted
+            view.overlayWindowNumbers = { [weak self] in Set((self?.panels ?? []).map(\.windowNumber)) }
+            views.append((view, img, screen.backingScaleFactor))
             view.onOutcome = { [weak self] in self?.handle($0) }
             let p = CapturePanel(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             p.level = .screenSaver; p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = false
@@ -430,11 +508,43 @@ final class CaptureController {
         for p in made { p.orderFrontRegardless() }
         underMouse.makeKey()
         if let v = underMouse.contentView { underMouse.makeFirstResponder(v) }
+        for (view, img, scale) in views {   // image-fallback boxes: once per screen, off the main thread
+            Task.detached(priority: .userInitiated) { [weak view] in
+                let size = await MainActor.run { view?.bounds.size ?? .zero }
+                let boxes = ImageBoxDetector.detect(img).map { CGRect(x: $0.minX / scale, y: $0.minY / scale, width: $0.width / scale, height: $0.height / scale) }
+                let kept = SmartPickLogic.filterBoxes(boxes, screen: size)
+                await MainActor.run { view?.imageBoxes = kept }
+            }
+        }
+        if !trusted { showAccessibilityNotice() }
+    }
+
+    // MARK: Accessibility notice (once per run)
+
+    private var axNotice: NSPanel?
+    private var axNoticeShown = false
+
+    private func showAccessibilityNotice() {
+        guard !axNoticeShown else { return }
+        axNoticeShown = true
+        let host = NSHostingView(rootView: CaptureNotice(symbol: "hand.raised", text: "Turn on Accessibility for exact picks", button: "Open Settings", action: { [weak self] in
+            self?.close()
+            if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(u) }
+        }, dismiss: { [weak self] in self?.axNotice?.orderOut(nil); self?.axNotice = nil }))
+        let size = host.fittingSize
+        let p = NSPanel(contentRect: CGRect(origin: .zero, size: size), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        p.isOpaque = false; p.backgroundColor = .clear; p.level = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1); p.hasShadow = true
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        p.contentView = host
+        if let s = NSScreen.main { p.setFrameOrigin(CGPoint(x: s.frame.midX - size.width / 2, y: s.frame.maxY - size.height - 90)) }
+        p.orderFrontRegardless()
+        axNotice = p
     }
 
     func close() {
         panels.forEach { $0.orderOut(nil) }
         panels = []
+        axNotice?.orderOut(nil); axNotice = nil
     }
 
     private func handle(_ outcome: CaptureOutcome) {
