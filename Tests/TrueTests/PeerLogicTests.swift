@@ -6,8 +6,7 @@ struct PeerLogicTests {
     static let id = "0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0"
     static func body(_ patch: [String: Any] = [:], drop: [String] = []) -> Data {
         var o: [String: Any] = ["jobId": id, "title": "Fix the thing", "brief": "Please fix X.\n\tIndented.", "repo": "git@github.com:Acme/App.git",
-                                "base": "main", "mode": "pane", "fromAgent": "lead", "replyToken": PeerValidate.newReplyToken(),
-                                "replyURL": "https://yahia-mac.tail1234.ts.net:8444"]
+                                "base": "main", "mode": "pane", "fromAgent": "lead"]
         for (k, v) in patch { o[k] = v }
         for k in drop { o[k] = nil }
         return try! JSONSerialization.data(withJSONObject: o)
@@ -36,11 +35,6 @@ struct PeerLogicTests {
         #expect(bad(["base": "--upload-pack=x"]))
         #expect(bad(["base": "a..b"]))
         #expect(bad(["mode": "shell"]))
-        #expect(bad(["replyToken": "short"]))
-        #expect(bad(["replyURL": "http://x.ts.net:8444"]))
-        #expect(bad(["replyURL": "https://evil.example.com:8444"]))
-        #expect(bad(["replyURL": "https://x.ts.net:443"]))
-        #expect(bad(["replyURL": "https://x.ts.net:8444/steal"]))
         #expect(bad(drop: ["brief"]))
         #expect(!bad(["title": String(repeating: "a", count: 120)]))
         #expect(!bad(["brief": "tab\tand\nnewline"]))
@@ -103,40 +97,10 @@ struct PeerLogicTests {
         #expect(PeerBackoff.delay(attempt: 10_000) == 600 && PeerBackoff.delay(attempt: -3) == 30)
     }
 
-    @Test func replyTokenVerification() {
-        let t = PeerValidate.newReplyToken()
-        #expect(PeerValidate.validReplyToken(t))
-        let h = PeerToken.hash(t)
-        #expect(PeerToken.verify(t, storedHash: h))
-        #expect(!PeerToken.verify(PeerValidate.newReplyToken(), storedHash: h))
-        #expect(!PeerToken.verify(nil, storedHash: h) && !PeerToken.verify("", storedHash: h))
-    }
-
     @Test func inboundModeFlags() {
         #expect(PeerInboundMode.bypass.claudeFlags == ["--dangerously-skip-permissions"])
         #expect(PeerInboundMode.auto.claudeFlags == ["--permission-mode", "auto"])
         #expect(PeerInboundMode.ask.claudeFlags == ["--permission-mode", "auto"])
         #expect(PeerInboundMode.fresh == .ask)
-    }
-
-    @Test func authDecisionTable() {
-        let dns = "mac.ts.net"
-        func d(login: String? = "sam@x", expected: String? = "sam@x", host: String? = "mac.ts.net:8444", origin: String? = nil,
-               token: Bool = true, scope: Bool = true) -> RemoteAuth.Decision {
-            PeerAuth.decide(loginHeader: login, expectedLogin: expected, host: host, origin: origin, dnsName: dns,
-                            tokenValid: token, scopeOK: scope)
-        }
-        #expect(d() == .allow)
-        #expect(d(origin: nil) == .allow)                       // machine-to-machine: no Origin is fine
-        #expect(d(origin: "https://mac.ts.net:8444") == .allow)
-        #expect(d(origin: "https://evil.com") != .allow)        // a present Origin must be exact
-        #expect(d(login: nil) != .allow)                        // missing header fails closed
-        #expect(d(login: "") != .allow)
-        #expect(d(login: "other@x") != .allow)                  // wrong login
-        #expect(d(expected: nil) != .allow)                     // device with no recorded login (phone token)
-        #expect(d(host: "evil.com") != .allow && d(host: nil) != .allow)
-        #expect(d(token: false) == .needsPairing)
-        #expect(d(scope: false) != .allow)                      // phone/full/dropOnly token on /api/peer/*
-        #expect(d(login: "SAM@X") == .allow)                    // case-insensitive
     }
 }

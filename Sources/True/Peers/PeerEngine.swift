@@ -458,6 +458,10 @@ final class PeerEngine: @unchecked Sendable {
             inbound[i].status = .declined; inbound[i].note = "Peer removed"; inbound[i].finished = now(); log(inbound[i])
         }
         saveInbound()
+        for i in sent.indices where sent[i].peerMailbox == mailbox && !sent[i].status.isFinal {
+            sent[i].status = .failed; sent[i].note = "Peer removed"; sent[i].updated = now()
+        }
+        saveSent()
         lock.unlock()
         updateWanted()
         changed()
