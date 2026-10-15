@@ -29,7 +29,7 @@ enum ShellIntegration {
       if [[ $_true_suggest != 0 && -r $_true_dir/zsh-autosuggestions.zsh ]] && ! (( $+functions[_zsh_autosuggest_start] )); then
         # Menu-select tab completion, only for a user with no completion styles of their own.
         if [[ -z "$(zstyle -L ':completion:*' 2>/dev/null)" ]]; then
-          (( $+functions[compdef] )) || { autoload -Uz compinit && compinit -C; }
+          (( $+functions[compdef] )) || { autoload -Uz compinit && compinit -i; }
           zstyle ':completion:*' menu select
           zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
         fi
