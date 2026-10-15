@@ -38,7 +38,7 @@ enum PeerCLI {
                   let title = req["title"] as? String, let brief = req["brief"] as? String else { return fail("peer, repo, title and a brief are required") }
             let mode: PeerMode = (req["background"] as? Bool) == true ? .background : .pane
             switch engine.delegate(peer: peer, repo: repo, title: title, brief: brief, base: (req["base"] as? String) ?? "main",
-                                   mode: mode, fromAgent: (req["from"] as? String) ?? "yahia") {
+                                   mode: mode, fromAgent: (req["from"] as? String) ?? "agent") {
             case .success(let id): return ["ok": true, "jobId": id]
             case .failure(let e): return fail("\(e)")
             }
@@ -134,7 +134,7 @@ enum PeerCLI {
                 except OSError as e:
                     die("cannot read brief file: %s" % e)
                 r = call({"op": "delegate", "peer": rest[0], "repo": o["--repo"], "title": o["--title"], "brief": brief,
-                          "base": o.get("--base", "main"), "background": "--background" in o, "from": os.environ.get("TRUE_AGENT") or "yahia"})
+                          "base": o.get("--base", "main"), "background": "--background" in o, "from": os.environ.get("TRUE_AGENT") or "agent"})
                 print(r["jobId"])
             elif cmd == "status":
                 for j in call({"op": "status", "jobId": args[0] if args else None}).get("jobs", []):

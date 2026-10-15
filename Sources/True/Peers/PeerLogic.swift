@@ -100,7 +100,7 @@ enum PeerValidate {
         let base = str("base") ?? "main"
         guard validRef(base) else { return .failure(.invalid("bad base")) }
         guard let mode = str("mode").flatMap(PeerMode.init) else { return .failure(.invalid("mode must be pane or background")) }
-        let from = str("fromAgent") ?? "yahia"
+        let from = str("fromAgent") ?? "agent"
         guard from.count <= 80, !hasBadControl(from), !from.contains("\n") else { return .failure(.invalid("bad fromAgent")) }
         return .success(PeerJobRequest(jobId: jobId.lowercased(), title: title, brief: brief, repo: repo, base: base,
                                        mode: mode, fromAgent: from))

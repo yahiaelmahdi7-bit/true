@@ -258,7 +258,7 @@ final class PeerEngine: @unchecked Sendable {
 
     /// Hand a job to a paired peer. `repo` is a local path or a git remote URL. Returns the jobId.
     func delegate(peer: String, repo: String, title: String, brief: String, base: String = "main", mode: PeerMode = .pane,
-                  fromAgent: String = "yahia") -> Result<String, PeerError> {
+                  fromAgent: String = "agent") -> Result<String, PeerError> {
         lock.lock(); let link = links.first { $0.label.lowercased() == peer.lowercased() }; lock.unlock()
         guard let link else { return .failure(.invalid("No peer named \(peer)")) }
         var remote = repo
