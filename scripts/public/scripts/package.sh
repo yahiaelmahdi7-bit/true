@@ -45,6 +45,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <!-- Turns on built-in auto-update (GitHub Releases of this repo). Public build only; without the key the updater is inert. -->
   <key>TrueUpdateRepo</key><string>yahiaelmahdi7-bit/true-terminal</string>
   <key>NSHighResolutionCapable</key><true/>
+  <!-- Strangers must not get --dangerously-skip-permissions by default; the Settings toggle can turn it on. -->
+  <key>TrueClaudeAutostartDefault</key><false/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <!-- macOS charges a child process's mic use to the app that launched it; without this key a
        program run inside True that wants the microphone is refused silently, with no prompt. -->

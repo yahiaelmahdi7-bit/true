@@ -7,6 +7,8 @@ struct SettingsView: View {
     @AppStorage(TerminalSettings.cursorKey) private var cursor = TerminalSettings.Cursor.steadyBlock.rawValue
     @AppStorage(TerminalSettings.scrollbackKey) private var scrollback = TerminalSettings.defaultScrollback
     @AppStorage(TerminalSettings.colorKey) private var color = TerminalSettings.defaultColor
+    @AppStorage(TerminalSettings.inlineSuggestionsKey) private var inlineSuggestions = true
+    @AppStorage(TerminalSettings.claudeAutostartKey) private var claudeAutostart = TerminalSettings.claudeAutostartDefault()
     @AppStorage(TerminalSettings.overseerKey) private var overseer = true
     @AppStorage(TerminalSettings.watcherKey) private var watcher = true
     @AppStorage(TerminalSettings.jevRoutingKey) private var jevRouting = true
@@ -32,6 +34,10 @@ struct SettingsView: View {
                 Text("Scrollback: \(scrollback.formatted()) lines")
             }
             Toggle("Colour in terminals", isOn: $color)
+            Toggle("Inline suggestions", isOn: $inlineSuggestions)
+                .help("Grey ghost text from your history as you type in zsh; → or End accepts, ⌥→ takes one word. Applies to new panes.")
+            Toggle("Start Claude in new tabs (skip permissions)", isOn: $claudeAutostart)
+                .help("A new tab and a fresh launch open Claude with --dangerously-skip-permissions. Splits stay a plain shell.")
             Toggle("Overseer", isOn: $overseer)
                 .help("After each Claude turn in a True pane, Jev reads what was asked and answered and shows a verdict. Off: no calls.")
                 .onChange(of: overseer) { _, on in if !on { OverseerStore.shared.clearAll() } }
