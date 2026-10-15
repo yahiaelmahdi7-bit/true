@@ -43,6 +43,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <!-- Strangers must not get --dangerously-skip-permissions by default; the Settings toggle can turn it on. -->
+  <key>TrueClaudeAutostartDefault</key><false/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <!-- macOS charges a child process's mic use to the app that launched it; without this key a
        program run inside True that wants the microphone is refused silently, with no prompt. -->
