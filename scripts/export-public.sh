@@ -21,6 +21,7 @@ cd "$STAGE"
 rm -rf .claude .builder .playwright-mcp docs SPEC.md CLAUDE.md True.app True.app.old dist .build \
        Sources/True/Nova \
        Tests/TrueTests/Nova*.swift \
+       Tests/TrueTests/BrainErrorTests.swift \
        Tests/TrueTests/CommandBarLiveTests.swift Tests/TrueTests/OverseerLiveTests.swift \
        Tests/TrueTests/WatcherLiveTests.swift \
        Tests/TrueTests/Fixtures/commandbar-labelled.json Tests/TrueTests/Fixtures/watcher-labelled.json \
