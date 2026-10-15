@@ -18,6 +18,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            UpdateSettingsSection()
             Picker("Font", selection: $family) {
                 Text("System Mono").tag(TerminalSettings.systemMono)
                 Divider()
@@ -56,5 +57,22 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 420)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// "Check for updates automatically" + "Check now". Shown only in a build that can update itself.
+private struct UpdateSettingsSection: View {
+    @AppStorage(UpdateLogic.autoKey) private var auto = true
+
+    var body: some View {
+        let updater = Updater.shared
+        if updater.enabled {
+            Section("Updates") {
+                Toggle("Check for updates automatically", isOn: $auto)
+                LabeledContent(updater.status.isEmpty ? "Version \(updater.ownVersion)" : updater.status) {
+                    Button("Check now") { Task { await updater.check(manual: true) } }.disabled(updater.checking)
+                }
+            }
+        }
     }
 }
