@@ -150,9 +150,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controlSocket = AgentControlSocket(path: AgentPaths.standard.controlSocketPath, registry: AgentRegistry.shared)
         _ = controlSocket?.start()
         // `true-peer`: same shape, for delegating to a paired friend's True. The engine is built only on first use.
-        peerSocket = PeerSocket(path: PeerCLI.socketPath(.standard)) { await MainActor.run { RemoteAccess.shared.peers } }
+        peerSocket = PeerSocket(path: PeerCLI.socketPath(.standard)) { PeerService.engine }
         _ = peerSocket?.start()
         PeerCLI.install(paths: .standard)
+        PeerService.startIfPaired()
         AgentHooks.installClient(paths: AgentPaths.standard)   // the door's client, before any agent wakes
         AgentHooks.installPaneHooks(paths: AgentPaths.standard)  // two small files, rewritten only if stale
         // The Hub's data: one directory scan plus a few kqueue watches on ~/.claude/sessions and

@@ -133,26 +133,7 @@ final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
 @MainActor enum PeerBuilders {
     static func report(_ records: [BuilderRecord]) {
         for r in records where r.name.hasPrefix("peer-") {
-            RemoteAccess.shared.peers.builderUpdate(name: r.name, running: r.state == .running)
+            PeerService.engine.builderUpdate(name: r.name, running: r.state == .running)
         }
-    }
-}
-
-/// Sync HTTPS POST to a peer's True (the engine calls it off the main thread). 15 s timeout; status 0 = network failure.
-struct PeerTransportLive: PeerTransport {
-    func post(baseURL: String, path: String, bearer: String?, body: Data) -> (status: Int, body: Data) {
-        guard let url = URL(string: baseURL + path) else { return (0, Data()) }
-        var req = URLRequest(url: url, timeoutInterval: 15)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let bearer { req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }
-        req.httpBody = body
-        final class Box: @unchecked Sendable { var r: (Int, Data) = (0, Data()) }
-        let box = Box(), sem = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: req) { d, resp, _ in
-            box.r = ((resp as? HTTPURLResponse)?.statusCode ?? 0, d ?? Data()); sem.signal()
-        }.resume()
-        sem.wait()
-        return box.r
     }
 }

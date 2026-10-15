@@ -55,7 +55,7 @@ struct PeerJobsSection: View {
     }
 
     private func reload() {
-        let e = RemoteAccess.shared.peers
+        let e = PeerService.engine
         let cutoff = Date().addingTimeInterval(-3 * 86400)
         sent = e.sentJobs().filter { !$0.status.isFinal || $0.updated > cutoff }.prefix(8).map { $0 }
         inbound = e.inboundJobs().filter { !$0.status.isFinal || ($0.finished ?? .distantPast) > cutoff }.prefix(8).map { $0 }
@@ -104,8 +104,8 @@ struct PeerJobsSection: View {
                         .font(.callout).foregroundStyle(Theme.text).help(j.flags.joined(separator: "\n"))
                 }
                 if j.status == .queued && j.inboundMode == .ask {
-                    Button("Decline") { RemoteAccess.shared.peers.decline(j.id) }.buttonStyle(.plain).foregroundStyle(Theme.hubSecondary)
-                    Button("Accept") { RemoteAccess.shared.peers.accept(j.id) }.buttonStyle(.plain).fontWeight(.semibold)
+                    Button("Decline") { PeerService.engine.decline(j.id) }.buttonStyle(.plain).foregroundStyle(Theme.hubSecondary)
+                    Button("Accept") { PeerService.engine.accept(j.id) }.buttonStyle(.plain).fontWeight(.semibold)
                 } else {
                     pill(j.status)
                 }
@@ -125,7 +125,7 @@ struct SentJobSheet: View {
     @State private var copied = false
 
     var body: some View {
-        let live = RemoteAccess.shared.peers.result(jobId: job.jobId) ?? job
+        let live = PeerService.engine.result(jobId: job.jobId) ?? job
         VStack(alignment: .leading, spacing: 12) {
             Text(live.title).font(.title3.weight(.semibold))
             Text("\(live.peerLabel) · \(live.status.pillLabel)\(live.note.isEmpty ? "" : " · \(live.note)")")
@@ -172,8 +172,8 @@ struct InboundJobSheet: View {
             HStack {
                 Spacer()
                 if waiting {
-                    Button("Decline") { RemoteAccess.shared.peers.decline(job.id); onDone() }
-                    Button("Accept") { RemoteAccess.shared.peers.accept(job.id); onDone() }.keyboardShortcut(.defaultAction)
+                    Button("Decline") { PeerService.engine.decline(job.id); onDone() }
+                    Button("Accept") { PeerService.engine.accept(job.id); onDone() }.keyboardShortcut(.defaultAction)
                 } else {
                     Button("Close") { onDone() }.keyboardShortcut(.cancelAction)
                 }
@@ -189,8 +189,6 @@ final class PeersWindow {
     private var window: NSWindow?
 
     func show() {
-        RemoteAccess.shared.reloadDevices()
-        RemoteAccess.shared.refreshTailnet()
         if window == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 640),
                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -206,16 +204,18 @@ final class PeersWindow {
 }
 
 struct PeersView: View {
-    @State private var remote = RemoteAccess.shared
     @State private var mode = PeerInboundMode.current
-    @State private var invite: (url: String?, code: String)?
+    @State private var inviteText: String?
+    @State private var copied = false
     @State private var links: [PeerLink] = []
-    @State private var devices: [PairedDevice] = []
-    @State private var addURL = ""
-    @State private var addCode = ""
+    @State private var connected = false
+    @State private var wanted = false
+    @State private var paired: String?
+    @State private var addInvite = ""
     @State private var addLabel = ""
     @State private var addNote: String?
-    @State private var adding = false
+    @State private var relayURL = PeerRelay.url
+    @State private var showAdvanced = false
 
     var body: some View {
         ScrollView { content }
@@ -225,17 +225,16 @@ struct PeersView: View {
     }
 
     private func reload() {
-        let e = remote.peers
-        links = e.peerLinks(); devices = e.peerDevices()
+        let e = PeerService.engine
+        links = e.peerLinks(); connected = e.isConnected; wanted = e.wantsRelay; paired = e.lastPaired
     }
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if !remote.enabled {
-                Text("Remote Access is off. Peers only work while it is on.").font(.callout).foregroundStyle(.secondary)
-                Button("Turn on Remote Access") { remote.setEnabled(true) }
-                Divider()
+            if wanted {
+                Text(connected ? "Connected" : "Offline — retrying").font(.callout).foregroundStyle(.secondary)
             }
+            if let paired { Text("Paired with \(paired)").font(.callout.weight(.semibold)) }
             Text("Jobs from peers").font(.headline)
             Picker("", selection: Binding(get: { mode }, set: { mode = $0; PeerInboundMode.current = $0 })) {
                 Text("Run at once, no prompts").tag(PeerInboundMode.bypass)
@@ -246,69 +245,58 @@ struct PeersView: View {
             Text("Applies to jobs a paired friend sends this Mac.").font(.caption).foregroundStyle(.secondary)
             Divider()
             Text("Invite a peer").font(.headline)
-            if let invite {
-                Text(invite.url ?? "Waiting for this Mac's Tailscale address…")
-                    .font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-                Text(invite.code).font(.system(size: 28, weight: .semibold, design: .monospaced)).textSelection(.enabled)
-                Text("Share the Mac on Tailscale, then give them the address and this code. One use, 5 minutes.")
-                    .font(.caption).foregroundStyle(.secondary)
+            if let inviteText {
+                Text(inviteText).font(.system(.caption, design: .monospaced)).textSelection(.enabled).lineLimit(4)
+                Button(copied ? "Copied" : "Copy") {
+                    NSPasteboard.general.clearContents(); NSPasteboard.general.setString(inviteText, forType: .string); copied = true
+                }
+                Text("Send this to one person. It works once, for 24 hours.").font(.caption).foregroundStyle(.secondary)
             }
-            Button(invite == nil ? "Show a code" : "New code") { invite = remote.peers.invite() }
+            Button(inviteText == nil ? "Invite" : "New invite") { inviteText = PeerService.engine.invite(); copied = false; reload() }
             Divider()
             Text("Add a peer").font(.headline)
-            TextField("https://their-mac.tailnet.ts.net:8444", text: $addURL).textFieldStyle(.roundedBorder)
+            TextField("Paste their invite", text: $addInvite).textFieldStyle(.roundedBorder)
+            TextField("What you call them", text: $addLabel).textFieldStyle(.roundedBorder)
             HStack {
-                TextField("Code", text: $addCode).textFieldStyle(.roundedBorder).frame(width: 110)
-                TextField("What you call them", text: $addLabel).textFieldStyle(.roundedBorder)
-            }
-            HStack {
-                Button(adding ? "Pairing…" : "Add") { add() }
-                    .disabled(adding || addURL.isEmpty || addCode.isEmpty || addLabel.isEmpty)
+                Button("Add") { add() }.disabled(addInvite.isEmpty || addLabel.isEmpty)
                 if let addNote { Text(addNote).font(.callout).foregroundStyle(.secondary) }
             }
             Divider()
-            Text("You can send to").font(.headline)
+            Text("Your peers").font(.headline)
             if links.isEmpty { Text("Nobody yet.").foregroundStyle(.secondary) }
-            ForEach(links, id: \.label) { l in
-                HStack {
-                    VStack(alignment: .leading) { Text(l.label); Text(l.url).font(.caption).foregroundStyle(.secondary) }
-                    Spacer()
-                    Button("Remove") { remote.peers.removeLink(l.label) }
-                }
-            }
-            Text("Can send to you").font(.headline).padding(.top, 4)
-            if devices.isEmpty { Text("Nobody yet.").foregroundStyle(.secondary) }
-            ForEach(devices) { d in
+            ForEach(links, id: \.mailboxId) { l in
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(d.label)
-                        Text("last seen \(d.lastSeen.formatted(.relative(presentation: .named)))").font(.caption).foregroundStyle(.secondary)
+                        Text(l.label)
+                        if !l.confirmed { Text("Waiting for them to accept").font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer()
-                    Button("Revoke", role: .destructive) { remote.peers.revoke(deviceId: d.id); remote.reloadDevices() }
+                    Button("Revoke", role: .destructive) { PeerService.engine.revoke(mailboxId: l.mailboxId) }
                 }
             }
             Divider()
-            Button("Stop all peer jobs", role: .destructive) { remote.peers.stopAll() }
+            Button("Stop all peer jobs", role: .destructive) { PeerService.engine.stopAll() }
             Text("Ends every job running for a peer and declines the waiting ones.").font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup("Advanced", isExpanded: $showAdvanced) {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("Relay address", text: $relayURL).textFieldStyle(.roundedBorder)
+                    HStack {
+                        Button("Use this relay") { PeerRelay.url = relayURL; relayURL = PeerRelay.url; PeerService.relay.reload() }
+                        Button("Reset") { PeerRelay.url = ""; relayURL = PeerRelay.url; PeerService.relay.reload() }
+                    }
+                }
+                .padding(.top, 4)
+            }
         }
         .padding(20).frame(width: 460, alignment: .topLeading)
     }
 
     private func add() {
-        adding = true; addNote = nil
-        let (u, c, l) = (addURL, addCode, addLabel)
-        let engine = remote.peers
-        Task.detached {
-            let r = engine.pairAsSender(url: u, code: c, label: l)
-            await MainActor.run {
-                adding = false
-                switch r {
-                case .success: addNote = "Added \(l)."; addURL = ""; addCode = ""; addLabel = ""
-                case .failure(let e): addNote = "\(e)"
-                }
-                reload()
-            }
+        let r = PeerService.engine.pairWithInvite(addInvite, label: addLabel)
+        switch r {
+        case .success: addNote = "Asked \(addLabel) to pair."; addInvite = ""; addLabel = ""
+        case .failure(let e): if case .invalid(let m) = e { addNote = m }
         }
+        reload()
     }
 }

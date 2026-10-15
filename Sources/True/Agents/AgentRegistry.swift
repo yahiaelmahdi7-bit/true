@@ -136,7 +136,7 @@ final class AgentRegistry {
 
     func handle(_ e: PaneEvent) {
         if let m = e.mode { modes[e.pane] = m }
-        if PeerOrigin.shared.label(for: e.pane) != nil { RemoteAccess.shared.peers.paneEvent(pane: e.pane, kind: Self.peerKind(e.kind)) }
+        if PeerOrigin.shared.label(for: e.pane) != nil { PeerService.engine.paneEvent(pane: e.pane, kind: Self.peerKind(e.kind)) }
         if e.kind == .session {
             // Any pane's Claude (⌘↩ or typed by hand) reports its session id: that is the resume record.
             let sid = e.message.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -207,7 +207,7 @@ final class AgentRegistry {
     }
 
     func paneClosed(_ pane: UUID) {
-        if PeerOrigin.shared.label(for: pane) != nil { RemoteAccess.shared.peers.paneClosed(pane: pane) }
+        if PeerOrigin.shared.label(for: pane) != nil { PeerService.engine.paneClosed(pane: pane) }
         OverseerStore.shared.paneClosed(pane)
         launchSpecs[pane] = nil
         latest[pane] = nil

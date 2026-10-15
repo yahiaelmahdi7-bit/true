@@ -6,19 +6,28 @@ extension Notification.Name {
     static let peersChanged = Notification.Name("true.peers.changed")
 }
 
-/// Sender side: a friend's True we can send to. The token is the one their True handed us at pairing.
+/// A paired peer. Their public keys were pinned at pairing (from the invite, or from a valid pair-request) and are
+/// the only thing that decides who a message is from. `confirmed` = the pairing handshake finished.
 struct PeerLink: Codable, Equatable, Sendable {
     var label: String
-    var url: String
-    var token: String
-    var receiverLogin: String
+    var mailboxId: String
+    var keys: PeerKeys
+    var confirmed: Bool
+    var created: Date
+}
+
+/// An invite this Mac handed out. Only the SHA-256 of the secret is kept.
+struct PendingInvite: Codable, Equatable, Sendable {
+    var secretHash: String
+    var expires: Date
+    var used: Bool
 }
 
 /// Receiver side: a job a paired peer handed to this Mac.
 struct InboundJob: Codable, Equatable, Sendable, Identifiable {
     var req: PeerJobRequest
     var peerLabel: String
-    var deviceId: UUID
+    var peerMailbox: String
     var status: PeerStatus
     var note: String
     var inboundMode: PeerInboundMode
@@ -34,17 +43,16 @@ struct InboundJob: Codable, Equatable, Sendable, Identifiable {
     var id: String { req.jobId }
 }
 
-/// Sender side: a job we handed to a peer. Only the SHA-256 of the reply token is kept.
+/// Sender side: a job we handed to a peer.
 struct SentJob: Codable, Equatable, Sendable, Identifiable {
     var jobId: String
     var peerLabel: String
-    var peerLogin: String
+    var peerMailbox: String
     var title: String
     var repo: String
     var base: String
     var mode: PeerMode
     var fromAgent: String
-    var tokenHash: String
     var status: PeerStatus
     var note: String
     var branch: String?
@@ -55,20 +63,15 @@ struct SentJob: Codable, Equatable, Sendable, Identifiable {
     var id: String { jobId }
 }
 
-/// A POST waiting for the network. `owner` is the peer device id (receiver side), so a revoke can drop it.
+/// A sealed message waiting for the relay. `owner` is the peer mailbox, so a revoke can drop it.
 struct OutboxItem: Codable, Equatable, Sendable {
-    enum Kind: String, Codable, Sendable { case job, event }
     var id: String
-    var kind: Kind
-    var jobId: String
-    var peerLabel: String
-    var owner: String?
-    var baseURL: String
-    var path: String
-    var bearer: String
-    var body: Data
+    var jobId: String?
+    var to: String
+    var blob: Data
     var attempt: Int
     var nextAt: Date
+    var owner: String?
 }
 
 /// What the engine needs from the Mac: finding the clone, making the worktree, opening the work, nudging a lead.
@@ -88,7 +91,23 @@ protocol PeerLauncher: AnyObject, Sendable {
     func stop(panes: [UUID], builders: [String])
 }
 
-/// One POST to a peer's True. `status` 0 = the network failed.
-protocol PeerTransport: Sendable {
-    func post(baseURL: String, path: String, bearer: String?, body: Data) -> (status: Int, body: Data)
+enum PeerSendResult: Equatable, Sendable {
+    /// The relay took it.
+    case delivered
+    /// Not connected, rate-limited or queue full: try again later.
+    case retry
+    /// The relay will never take it (too large).
+    case refused
+}
+
+/// The wire: one message-based pipe to the relay. `send` blocks until the relay answers (call it off the main thread).
+/// Inbound messages arrive on `onMessage`; the transport confirms them to the relay once the handler returns.
+protocol PeerTransport: AnyObject, Sendable {
+    func send(to: String, id: String, blob: Data) -> PeerSendResult
+    var onMessage: (@Sendable (_ from: String, _ id: String, _ blob: Data) -> Void)? { get set }
+    /// Called with true when the relay connection is ready, false when it drops.
+    var onStatus: (@Sendable (Bool) -> Void)? { get set }
+    /// Connected only while there is somebody to talk to.
+    func setWanted(_ on: Bool)
+    var isConnected: Bool { get }
 }

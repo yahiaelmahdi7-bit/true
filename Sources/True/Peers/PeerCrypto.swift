@@ -124,7 +124,8 @@ struct PeerEnvelope: Codable, Equatable, Sendable {
 enum PeerSeal {
     static let maxAge: TimeInterval = 7 * 24 * 3600
     static let skew: TimeInterval = 5 * 60
-    static let maxBlob = 192 * 1024
+    /// Raw envelope bytes; base64 of this is exactly the relay's 192 KB limit.
+    static let maxBlob = 144 * 1024
 
     enum Drop: Error, Equatable { case malformed, version, wrongRecipient, stale, unknownSender, badSignature, undecryptable }
 
