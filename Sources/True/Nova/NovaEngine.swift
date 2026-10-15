@@ -289,6 +289,8 @@ final class NovaEngine: ObservableObject {
 
     // MARK: REFLEX ∥ BRAIN
 
+    private var brainVoice = BrainFailureVoice()
+
     private func say(_ s: String) {
         speech.enqueue(.init(line: s, elevenEnabled: Vault.has("elevenlabs"), elevenVoiceID: nil, elevenModel: nil, voiceboxProfile: nil))
     }
@@ -353,7 +355,15 @@ final class NovaEngine: ObservableObject {
                     }
                 }
                 await MainActor.run { if !self.speechBuf.trimmingCharacters(in: .whitespaces).isEmpty { self.say(self.speechBuf) }; self.speechBuf = "" }
-                if case .failed(let m) = out, m != "cancelled" { await MainActor.run { self.notice = "Brain: \(m)" } }
+                if case .failed(let m) = out, m != "cancelled" {
+                    await MainActor.run {
+                        self.notice = "Brain: \(m)"
+                        if let kind = BrainFailureVoice.kind(forFailure: m), self.brainVoice.shouldSpeak(kind, now: Date()) {
+                            let line = BrainFailureVoice.line(kind)
+                            self.notice = line; self.say(line)
+                        }
+                    }
+                }
                 await MainActor.run { self.run["brain_ms"] = Int(Date().timeIntervalSince(b0) * 1000); self.run["brain_outcome"] = out.label }
             })
         _ = verdict; _ = tools

@@ -83,7 +83,20 @@ struct SSEParser {
     }
 }
 
-enum BrainError: Error, Equatable { case api(String), http(Int), noKey, transport(String) }
+enum BrainError: Error, Equatable {
+    case api(String), http(Int), noKey, transport(String)
+    case creditsExhausted, keyRejected
+
+    /// Deterministic parse of the API's structured error JSON ({"error":{"type","message"}}); never the key.
+    static func from(status: Int, body: Data) -> BrainError {
+        let err = (try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["error"] as? [String: Any]
+        let type = err?["type"] as? String ?? ""
+        let message = (err?["message"] as? String ?? "").lowercased()
+        if status == 401 || type == "authentication_error" { return .keyRejected }
+        if status == 400, message.contains("credit balance") { return .creditsExhausted }
+        return .http(status)
+    }
+}
 
 /// Builds the assistant message from stream events. Content blocks are read BY TYPE (thinking may come first) and kept
 /// verbatim so the history stays append-only and thinking blocks go back unchanged.
@@ -153,7 +166,15 @@ struct LiveMessagesTransport: MessagesTransport {
                             let (bytes, resp) = try await NovaNet.session.bytes(for: req)
                             let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
                             if code == 429 || code >= 500, attempt == 0 { attempt = 1; try await Task.sleep(for: .milliseconds(800)); continue }
-                            if code != 200 { throw BrainError.http(code) }     // 400s are never retried
+                            if code != 200 {                                    // 400s are never retried
+                                var body = Data()
+                                for try await b in bytes { body.append(b); if body.count > 4096 { break } }
+                                let e = BrainError.from(status: code, body: body)
+                                if let m = ((try? JSONSerialization.jsonObject(with: body) as? [String: Any])?["error"] as? [String: Any])?["message"] as? String {
+                                    NSLog("Nova brain HTTP %d: %@", code, String(m.prefix(200)))
+                                }
+                                throw e
+                            }
                             var p = SSEParser()
                             for try await b in bytes { if let e = p.feed(byte: b) { cont.yield(e) } }
                             if let e = p.finish() { cont.yield(e) }
