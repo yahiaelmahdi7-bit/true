@@ -11,6 +11,7 @@ final class FakeLauncher: PeerLauncher, @unchecked Sendable {
     var lines: [(String, String)] = []
     var stopped: ([UUID], [String]) = ([], [])
     let pane = UUID()
+    var canRunBackground = true
     func resolveClone(repo: String) -> String? { clone }
     func prepareWorktree(clone: String, base: String, branch: String, worktree: String) -> String? { worktreeError }
     func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String) -> UUID? {
@@ -150,6 +151,25 @@ private func jobReq(_ id: String = UUID().uuidString.lowercased(), brief: String
         try Data("ok".utf8).write(to: URL(fileURLWithPath: r.e.resultPath(job.jobId)))
         r.e.builderUpdate(name: name, running: false); r.e.drain()
         #expect(events(r).map { $0["status"] as? String } == ["accepted", "working", "done"])
+    }
+
+    @Test func backgroundFallsBackToTabUnlessBypassAndBuilderInstalled() {
+        let auto = rig(mode: .auto); defer { try? FileManager.default.removeItem(at: auto.root) }
+        _ = auto.e.receiveJob(jobReq(mode: .background), from: device(auto)); auto.e.drain()
+        #expect(auto.l.builders.isEmpty)
+        #expect(auto.l.panes.first?.flags == ["--permission-mode", "auto"])
+
+        let ask = rig(mode: .ask); defer { try? FileManager.default.removeItem(at: ask.root) }
+        let queued = jobReq(mode: .background)
+        _ = ask.e.receiveJob(queued, from: device(ask)); ask.e.accept(queued.jobId); ask.e.drain()
+        #expect(ask.l.builders.isEmpty)
+        #expect(ask.l.panes.first?.flags == ["--permission-mode", "auto"])
+
+        let noBuilder = rig(); defer { try? FileManager.default.removeItem(at: noBuilder.root) }
+        noBuilder.l.canRunBackground = false
+        _ = noBuilder.e.receiveJob(jobReq(mode: .background), from: device(noBuilder)); noBuilder.e.drain()
+        #expect(noBuilder.l.builders.isEmpty)
+        #expect(noBuilder.l.panes.count == 1)
     }
 
     @Test func outboxBacksOffThenDeliversAndStopsTimer() {

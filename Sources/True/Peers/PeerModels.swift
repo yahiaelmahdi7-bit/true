@@ -80,6 +80,8 @@ protocol PeerLauncher: AnyObject, Sendable {
     func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String) -> UUID?
     /// nil = started; otherwise a short plain reason.
     func launchBackground(agentName: String, parent: String, cwd: String, prompt: String) -> String?
+    /// Whether a background builder can run here at all (the builder script is installed).
+    var canRunBackground: Bool { get }
     func headSHA(worktree: String) -> String?
     func remoteURL(ofRepoAt path: String) -> String?
     func deliverLine(agent: String, line: String)

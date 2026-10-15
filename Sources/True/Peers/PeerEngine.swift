@@ -323,7 +323,7 @@ final class PeerEngine: PeerHost, @unchecked Sendable {
         Self.write(Data(role.utf8), to: dir.appendingPathComponent("role.md"))
         let name = PeerNaming.agentName(label: label, jobId: jobId)
         var pane: UUID?, builder: String?
-        switch j.req.mode {
+        switch PeerMode.effective(requested: j.req.mode, inboundFlags: flags, builderInstalled: launcher.canRunBackground) {
         case .pane:
             pane = launcher.launchPane(agentName: name, label: label, cwd: wt, flags: flags, rolePath: dir.appendingPathComponent("role.md").path,
                                        firstPrompt: PeerText.firstPrompt(envelopePath: dir.appendingPathComponent("envelope.md").path))

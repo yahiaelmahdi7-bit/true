@@ -13,7 +13,15 @@ enum PeerStatus: String, Codable, Sendable, Equatable {
     static let wire: Set<PeerStatus> = [.accepted, .working, .needsYou, .idle, .done, .failed]
 }
 
-enum PeerMode: String, Codable, Sendable, Equatable { case pane, background }
+enum PeerMode: String, Codable, Sendable, Equatable {
+    case pane, background
+
+    /// A background job runs as a builder, and the builder always skips permissions — so it is allowed only when THIS
+    /// Mac chose bypass and has the builder installed. Otherwise the job opens in a tab under this Mac's own flags.
+    static func effective(requested: PeerMode, inboundFlags: [String], builderInstalled: Bool) -> PeerMode {
+        requested == .background && inboundFlags == PeerInboundMode.bypass.claudeFlags && builderInstalled ? .background : .pane
+    }
+}
 
 /// How THIS Mac runs inbound jobs (`peer.inboundMode`). A fresh install asks.
 enum PeerInboundMode: String, Codable, Sendable, CaseIterable {

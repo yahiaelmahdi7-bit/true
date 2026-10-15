@@ -82,6 +82,8 @@ final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
         }
     }
 
+    var canRunBackground: Bool { FileManager.default.isExecutableFile(atPath: SpawnRequest.builderPath()) }
+
     func launchBackground(agentName: String, parent: String, cwd: String, prompt: String) -> String? {
         guard let file = CommandExecutor.writePrompt(prompt, name: agentName) else { return "Couldn't write the job prompt" }
         let req = SpawnRequest(name: agentName, promptFile: file, repo: cwd, worktree: false, model: "sonnet", from: parent)
