@@ -231,8 +231,8 @@ struct RemoteAccessView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Divider()
                 Text("Paired phones").font(.headline)
-                if remote.devices.isEmpty { Text("None yet.").foregroundStyle(.secondary) }
-                ForEach(remote.devices) { d in
+                if remote.devices.allSatisfy({ $0.scope == .peer }) { Text("None yet.").foregroundStyle(.secondary) }
+                ForEach(remote.devices.filter { $0.scope != .peer }) { d in
                     HStack {
                         VStack(alignment: .leading) {
                             Text(d.scope == .dropOnly ? "\(d.label) · send only" : d.label)

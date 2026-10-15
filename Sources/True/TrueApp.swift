@@ -66,6 +66,7 @@ struct TrueApp: App {
                 Divider()
                 Button("Send Clipboard to Phone") { PhoneOutbox.sendClipboard() }
                 Button("Remote Access…") { RemoteAccessWindow.shared.show() }
+                Button("Peers…") { PeersWindow.shared.show() }
             }
             CommandMenu("Hub") {
                 Button(registry.panelOpen ? "Hide Hub" : "Show Hub") { registry.panelOpen.toggle() }.keyboardShortcut("e")
