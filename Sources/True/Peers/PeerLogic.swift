@@ -1,9 +1,8 @@
 import Foundation
 import CryptoKit
-import Security
 
 /// True ↔ True peers — the pure, unit-tested core: job validation, repo URL normalization, naming, the envelope
-/// and role card text, hook-event → status mapping, outbox backoff, reply-token checks and the peer auth table.
+/// and role card text, hook-event → status mapping and outbox backoff.
 /// No sockets, no disk, no clocks here (Run 29).
 
 enum PeerStatus: String, Codable, Sendable, Equatable {
@@ -49,8 +48,24 @@ struct PeerJobRequest: Codable, Equatable, Sendable {
     var base: String
     var mode: PeerMode
     var fromAgent: String
-    var replyToken: String
-    var replyURL: String
+}
+
+/// A status report from the peer a job was sent to.
+struct PeerEvent: Codable, Equatable, Sendable {
+    var jobId: String
+    var status: PeerStatus
+    var note: String
+    var branch: String?
+    var sha: String?
+    var result: String?
+
+    static func parse(_ o: [String: Any]) -> PeerEvent? {
+        guard let id = o["jobId"] as? String, UUID(uuidString: id) != nil,
+              let st = (o["status"] as? String).flatMap(PeerStatus.init), PeerStatus.wire.contains(st) else { return nil }
+        func clip(_ k: String, _ n: Int) -> String? { (o[k] as? String).map { String($0.prefix(n)) } }
+        return PeerEvent(jobId: id.lowercased(), status: st, note: clip("note", PeerValidate.maxNote) ?? "",
+                         branch: clip("branch", 200), sha: clip("sha", 64), result: clip("result", PeerValidate.maxResult))
+    }
 }
 
 enum PeerError: Error, Equatable { case invalid(String) }
@@ -61,6 +76,7 @@ enum PeerValidate {
     static let maxResult = 16 * 1024
     static let maxNote = 500
     static let maxBodyBytes = 96 * 1024
+    static let maxLabel = 40
 
     /// Control characters other than tab/newline (and CR, which pairs with newline) are refused.
     static func hasBadControl(_ s: String) -> Bool {
@@ -86,38 +102,14 @@ enum PeerValidate {
         guard let mode = str("mode").flatMap(PeerMode.init) else { return .failure(.invalid("mode must be pane or background")) }
         let from = str("fromAgent") ?? "yahia"
         guard from.count <= 80, !hasBadControl(from), !from.contains("\n") else { return .failure(.invalid("bad fromAgent")) }
-        guard let rt = str("replyToken"), validReplyToken(rt) else { return .failure(.invalid("bad replyToken")) }
-        guard let url = str("replyURL"), validReplyURL(url) else { return .failure(.invalid("bad replyURL")) }
         return .success(PeerJobRequest(jobId: jobId.lowercased(), title: title, brief: brief, repo: repo, base: base,
-                                       mode: mode, fromAgent: from, replyToken: rt, replyURL: url))
+                                       mode: mode, fromAgent: from))
     }
 
     /// A branch/ref name: conservative charset, no leading dash, no `..`.
     static func validRef(_ s: String) -> Bool {
         guard !s.isEmpty, s.count <= 100, !s.hasPrefix("-"), !s.contains(".."), !s.hasSuffix("/"), !s.hasSuffix(".lock") else { return false }
         return s.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || "/._-".unicodeScalars.contains($0) }
-    }
-
-    /// 32 random bytes, base64url without padding = 43 chars.
-    static func validReplyToken(_ s: String) -> Bool {
-        guard s.count == 43 else { return false }
-        return s.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" }
-    }
-
-    /// Only `https://<host>.ts.net:8444` (optionally a trailing slash) — never an arbitrary URL to call back.
-    static func validReplyURL(_ s: String) -> Bool {
-        guard let u = URL(string: s), u.scheme == "https", let h = u.host?.lowercased(), h.hasSuffix(".ts.net"),
-              h.count > ".ts.net".count, u.port == RemoteAuth.httpsPort, u.user == nil, u.password == nil,
-              u.query == nil, u.fragment == nil, u.path.isEmpty || u.path == "/" else { return false }
-        return h.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "." }
-    }
-
-    static func newReplyToken() -> String {
-        var b = [UInt8](repeating: 0, count: 32)
-        let rc = SecRandomCopyBytes(kSecRandomDefault, b.count, &b)
-        precondition(rc == errSecSuccess, "no secure randomness")
-        return Data(b).base64EncodedString().replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
     }
 }
 
@@ -253,35 +245,5 @@ enum PeerBackoff {
     /// 30 s, 60, 120, 240, 480, then 600 forever. `attempt` is 0 for the first retry.
     static func delay(attempt: Int) -> TimeInterval {
         min(cap, first * pow(2, Double(max(0, min(attempt, 10)))))
-    }
-}
-
-enum PeerToken {
-    static func hash(_ token: String) -> String { RemoteAuth.sha256Hex(token) }
-    /// Constant-time comparison of the token's SHA-256 against the stored hash.
-    static func verify(_ token: String?, storedHash: String) -> Bool {
-        guard let token, !token.isEmpty else { return false }
-        let a = Array(hash(token).utf8), b = Array(storedHash.lowercased().utf8)
-        guard a.count == b.count else { return false }
-        var diff: UInt8 = 0
-        for i in 0..<a.count { diff |= a[i] ^ b[i] }
-        return diff == 0
-    }
-}
-
-/// The peer auth table. Separate from `RemoteAuth.decide` because that one compares to the OWNER's login; a peer is
-/// a different tailnet user. Order: identity (fail closed) → Host → Origin (absent is fine, present must be exact)
-/// → token → scope.
-enum PeerAuth {
-    static func decide(loginHeader: String?, expectedLogin: String?, host: String?, origin: String?, dnsName: String?,
-                       tokenValid: Bool, scopeOK: Bool) -> RemoteAuth.Decision {
-        guard let expected = expectedLogin?.lowercased(), !expected.isEmpty else { return .forbidden("no peer login on record") }
-        guard let login = loginHeader?.lowercased(), !login.isEmpty else { return .forbidden("missing tailscale login") }
-        guard login == expected else { return .forbidden("login not the paired peer") }
-        guard RemoteAuth.hostMatches(host: host, dnsName: dnsName) else { return .forbidden("host mismatch") }
-        if let origin, !RemoteAuth.originMatches(origin: origin, dnsName: dnsName) { return .forbidden("origin mismatch") }
-        guard tokenValid else { return .needsPairing }
-        guard scopeOK else { return .forbidden("token is not a peer token") }
-        return .allow
     }
 }
