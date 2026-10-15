@@ -24,7 +24,7 @@ struct HTTPRequest: Equatable {
     static let bodyDeadline: TimeInterval = 10
     static let maxBody = 4 * 1024
     /// POST routes whose body is read after authentication, under their own caps (drop 200 MB streamed, clip 1 MB).
-    static let bodyRoutes: Set<String> = ["/api/drop", "/api/clip", "/api/peer/job", "/api/peer/event"]
+    static let bodyRoutes: Set<String> = ["/api/drop", "/api/clip"]
     /// The pane composer posts whole prompts (≤ 64 KB), so it streams too.
     static func isBodyRoute(_ path: String) -> Bool {
         bodyRoutes.contains(path) || (path.hasPrefix("/api/pane/") && path.hasSuffix("/input"))

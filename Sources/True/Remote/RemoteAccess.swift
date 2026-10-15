@@ -27,14 +27,7 @@ final class RemoteAccess {
     @ObservationIgnored let codes = PairingCodes()
     @ObservationIgnored let deviceStore = DeviceStore()
     @ObservationIgnored private var server: RemoteServer?
-    @ObservationIgnored nonisolated let loginCache = LoginCache()
-    @ObservationIgnored let peerCodes = PairingCodes()
-    /// Peers (Run 29): shares the paired-device file, so a peer shows up (and is revoked) like any device.
-    @ObservationIgnored lazy var peers: PeerEngine = {
-        let cache = loginCache
-        return PeerEngine(codes: peerCodes, devices: deviceStore, launcher: PeerLauncherLive(), transport: PeerTransportLive(),
-                          selfURL: { cache.dns().map { "https://\($0):\(RemoteAuth.httpsPort)" } })
-    }()
+    @ObservationIgnored private let loginCache = LoginCache()
 
     var url: String? { dnsName.map { "https://\($0):\(Self.httpsPort)" } }
     var allowedLoginOverride: String {
@@ -54,15 +47,12 @@ final class RemoteAccess {
     private func start(attempt: Int = 0) {
         if server == nil {
             let cache = loginCache
-            server = RemoteServer(backend: RemoteBackendLive(), codes: codes, devices: deviceStore,
-                                  allowedLogin: {
+            server = RemoteServer(backend: RemoteBackendLive(), codes: codes, devices: deviceStore) {
                 let o = UserDefaults.standard.string(forKey: RemoteAccess.loginOverrideKey) ?? ""
                 return o.isEmpty ? cache.login() : o
-            }, dnsName: { cache.dns() }, peerCodes: peerCodes)
-            server?.peerHost = peers
+            } dnsName: { cache.dns() }
         }
         listening = server?.start() ?? false
-        if listening { peers.flush() }
         devices = deviceStore.all
         // The previous copy of the app may still hold 127.0.0.1:8801 for a moment after a restart; retry
         // rather than leave the phone with a dead page until the toggle is flipped by hand.
@@ -231,8 +221,8 @@ struct RemoteAccessView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Divider()
                 Text("Paired phones").font(.headline)
-                if remote.devices.allSatisfy({ $0.scope == .peer }) { Text("None yet.").foregroundStyle(.secondary) }
-                ForEach(remote.devices.filter { $0.scope != .peer }) { d in
+                if remote.devices.isEmpty { Text("None yet.").foregroundStyle(.secondary) }
+                ForEach(remote.devices) { d in
                     HStack {
                         VStack(alignment: .leading) {
                             Text(d.scope == .dropOnly ? "\(d.label) · send only" : d.label)

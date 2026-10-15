@@ -23,19 +23,10 @@ final class RemoteServer: @unchecked Sendable {
     }
 
     let codes: PairingCodes
-    /// Separate code for peer pairing so a phone code can never pair a peer (and vice versa).
-    let peerCodes: PairingCodes
-    /// The True↔True peers engine (nil until Remote Access wires it; every /api/peer/* route is 404 without it).
-    private let peerLock = NSLock()
-    private var _peerHost: PeerHost?
-    var peerHost: PeerHost? {
-        get { peerLock.lock(); defer { peerLock.unlock() }; return _peerHost }
-        set { peerLock.lock(); _peerHost = newValue; peerLock.unlock() }
-    }
     let devices: DeviceStore
     let backend: RemoteBackend
-    let allowedLogin: @Sendable () -> String?
-    let dnsName: @Sendable () -> String?
+    private let allowedLogin: @Sendable () -> String?
+    private let dnsName: @Sendable () -> String?
     private let wsAuthTimeout: TimeInterval
     let files: RemoteFiles
     private let dropDeadline: TimeInterval
@@ -54,8 +45,7 @@ final class RemoteServer: @unchecked Sendable {
     init(backend: RemoteBackend, codes: PairingCodes, devices: DeviceStore,
          allowedLogin: @escaping @Sendable () -> String?, dnsName: @escaping @Sendable () -> String?,
          files: RemoteFiles = RemoteFilesLive.make(), dropDeadline: TimeInterval = 120, wsAuthTimeout: TimeInterval = 5,
-         commands: RemoteCommands = RemoteCommandsLive(), peerCodes: PairingCodes = PairingCodes()) {
-        self.peerCodes = peerCodes
+         commands: RemoteCommands = RemoteCommandsLive()) {
         self.commands = commands; self.bar = RemoteBar(commands: commands)
         self.wsAuthTimeout = wsAuthTimeout
         self.files = files; self.dropDeadline = dropDeadline
@@ -183,10 +173,6 @@ final class RemoteServer: @unchecked Sendable {
         if ws && !paneSocket {
             _ = send(fd, HTTPResponse.make(status: 400, reason: "Bad Request", body: Array("Bad request".utf8))); return
         }
-        // True↔True peers: their own auth table (a peer is another tailnet user, not the owner), so they never reach
-        // RemoteAuth.decide. Everything under /api/peer/ and a `kind:"peer"` pairing is handled here.
-        if req.path.hasPrefix("/api/peer/") { handlePeer(fd, req); return }
-        if req.method == "POST", req.path == "/pair", Self.isPeerPair(req) { handlePeerPair(fd, req); return }
         let stateChanging = req.method != "GET" && req.method != "HEAD"
         // WebSocket auth is the first message (browsers can't set headers on a WS), so the upgrade itself needs no token.
         let needsToken = isAPI && !paneSocket
@@ -195,11 +181,6 @@ final class RemoteServer: @unchecked Sendable {
         // Browsers always send Origin on POST, and a bearer token is not ambient (no CSRF), so ONLY the Shortcuts routes
         // may omit it. A present Origin must still be exact; a bad/missing bearer still gets 401.
         let originOptional = req.method == "POST" && Self.noOriginRoutes.contains(req.path) && req.header("origin") == nil
-        // A peer token is valid for nothing but /api/peer/*.
-        if let device, device.scope == .peer {
-            Self.log.notice("deny 403 \(req.method, privacy: .public) \(req.path, privacy: .public): peer token")
-            _ = send(fd, HTTPResponse.make(status: 403, reason: "Forbidden", body: Array("Forbidden".utf8))); return
-        }
         // A send-only (Shortcut) token is valid for nothing but POST /api/drop and /api/clip.
         if let device, device.scope == .dropOnly, !(req.method == "POST" && Self.noOriginRoutes.contains(req.path)) {
             Self.log.notice("deny 403 \(req.method, privacy: .public) \(req.path, privacy: .public): send-only token")
@@ -229,10 +210,9 @@ final class RemoteServer: @unchecked Sendable {
         "GET /api/shots", "GET /api/shots/<id>", "GET /api/shots/<id>/thumb", "GET /api/inbox", "GET /api/inbox/<id>", "DELETE /api/inbox/<id>",
         "GET /api/hub", "GET /api/hub/builder/<id>", "POST /api/hub/builder/<id>/ack",
         "POST /api/route", "POST /api/route/<routeId>/slot", "POST /api/run", "GET /api/recent",
-        "POST /api/peer/job", "POST /api/peer/event",
     ]
 
-    func json(_ fd: Int32, _ status: Int, _ reason: String, _ obj: [String: Any], extra: [String: String] = [:]) {
+    private func json(_ fd: Int32, _ status: Int, _ reason: String, _ obj: [String: Any], extra: [String: String] = [:]) {
         let body = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data("{}".utf8)
         _ = send(fd, HTTPResponse.make(status: status, reason: reason, headers: extra, body: [UInt8](body),
                                        contentType: "application/json"))
@@ -301,7 +281,7 @@ final class RemoteServer: @unchecked Sendable {
 
     // MARK: phone ↔ Mac files
 
-    func plain(_ fd: Int32, _ status: Int, _ reason: String, _ msg: String) {
+    private func plain(_ fd: Int32, _ status: Int, _ reason: String, _ msg: String) {
         _ = send(fd, HTTPResponse.make(status: status, reason: reason, body: Array(msg.utf8)))
     }
 

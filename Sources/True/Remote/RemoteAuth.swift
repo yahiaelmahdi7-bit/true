@@ -131,16 +131,13 @@ struct PairedDevice: Codable, Equatable, Identifiable, Sendable {
     var created: Date
     var lastSeen: Date
     var scope: Scope = .full
-    /// The `Tailscale-User-Login` recorded when a `.peer` device paired — every later request must carry the same one.
-    var login: String?
 
-    /// `dropOnly` (the iOS Shortcut token) may only POST /api/drop and /api/clip; `peer` (a friend's True) may reach
-    /// only /api/peer/*.
-    enum Scope: String, Codable, Sendable { case full, dropOnly, peer }
+    /// `dropOnly` (the iOS Shortcut token) may only POST /api/drop and /api/clip.
+    enum Scope: String, Codable, Sendable { case full, dropOnly }
 
-    init(id: UUID, label: String, tokenHash: String, created: Date, lastSeen: Date, scope: Scope = .full, login: String? = nil) {
+    init(id: UUID, label: String, tokenHash: String, created: Date, lastSeen: Date, scope: Scope = .full) {
         self.id = id; self.label = label; self.tokenHash = tokenHash
-        self.created = created; self.lastSeen = lastSeen; self.scope = scope; self.login = login
+        self.created = created; self.lastSeen = lastSeen; self.scope = scope
     }
 
     /// A missing `scope` key (devices paired before scopes existed) decodes as `full`.
@@ -152,7 +149,6 @@ struct PairedDevice: Codable, Equatable, Identifiable, Sendable {
         created = try c.decode(Date.self, forKey: .created)
         lastSeen = try c.decode(Date.self, forKey: .lastSeen)
         scope = try c.decodeIfPresent(Scope.self, forKey: .scope) ?? .full
-        login = try c.decodeIfPresent(String.self, forKey: .login)
     }
 }
 
@@ -176,11 +172,11 @@ final class DeviceStore: @unchecked Sendable {
     var all: [PairedDevice] { lock.lock(); defer { lock.unlock() }; return devices }
 
     /// Register a new device; returns the raw token to hand to the phone exactly once.
-    func pair(label: String, scope: PairedDevice.Scope = .full, login: String? = nil, at date: Date = Date()) -> String {
+    func pair(label: String, scope: PairedDevice.Scope = .full, at date: Date = Date()) -> String {
         lock.lock(); defer { lock.unlock() }
         let token = RemoteAuth.newToken()
         devices.append(PairedDevice(id: UUID(), label: label, tokenHash: RemoteAuth.sha256Hex(token),
-                                    created: date, lastSeen: date, scope: scope, login: login))
+                                    created: date, lastSeen: date, scope: scope))
         save()
         return token
     }
