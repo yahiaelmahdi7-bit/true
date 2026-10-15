@@ -2,7 +2,7 @@ import Foundation
 
 /// Where the relay lives (Run 29). The public build ships `defaultURL`; `peer.relayURL` overrides it.
 enum PeerRelay {
-    static let defaultURL = "wss://RELAY_URL_PLACEHOLDER"
+    static let defaultURL = "wss://true-relay.yahia-xbox.workers.dev"
     static let defaultsKey = "peer.relayURL"
 
     static var url: String {
