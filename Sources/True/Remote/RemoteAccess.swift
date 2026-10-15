@@ -27,7 +27,14 @@ final class RemoteAccess {
     @ObservationIgnored let codes = PairingCodes()
     @ObservationIgnored let deviceStore = DeviceStore()
     @ObservationIgnored private var server: RemoteServer?
-    @ObservationIgnored private let loginCache = LoginCache()
+    @ObservationIgnored nonisolated let loginCache = LoginCache()
+    @ObservationIgnored let peerCodes = PairingCodes()
+    /// Peers (Run 29): shares the paired-device file, so a peer shows up (and is revoked) like any device.
+    @ObservationIgnored lazy var peers: PeerEngine = {
+        let cache = loginCache
+        return PeerEngine(codes: peerCodes, devices: deviceStore, launcher: PeerLauncherLive(), transport: PeerTransportLive(),
+                          selfURL: { cache.dns().map { "https://\($0):\(RemoteAuth.httpsPort)" } })
+    }()
 
     var url: String? { dnsName.map { "https://\($0):\(Self.httpsPort)" } }
     var allowedLoginOverride: String {
@@ -47,12 +54,15 @@ final class RemoteAccess {
     private func start(attempt: Int = 0) {
         if server == nil {
             let cache = loginCache
-            server = RemoteServer(backend: RemoteBackendLive(), codes: codes, devices: deviceStore) {
+            server = RemoteServer(backend: RemoteBackendLive(), codes: codes, devices: deviceStore,
+                                  allowedLogin: {
                 let o = UserDefaults.standard.string(forKey: RemoteAccess.loginOverrideKey) ?? ""
                 return o.isEmpty ? cache.login() : o
-            } dnsName: { cache.dns() }
+            }, dnsName: { cache.dns() }, peerCodes: peerCodes)
+            server?.peerHost = peers
         }
         listening = server?.start() ?? false
+        if listening { peers.flush() }
         devices = deviceStore.all
         // The previous copy of the app may still hold 127.0.0.1:8801 for a moment after a restart; retry
         // rather than leave the phone with a dead page until the toggle is flipped by hand.
