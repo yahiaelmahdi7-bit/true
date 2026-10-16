@@ -33,7 +33,8 @@ final class RemoteServer: @unchecked Sendable {
     let commands: RemoteCommands
     let bar: RemoteBar
     let sites: RemoteSites
-    private let lock = NSLock()
+    let browser: RemoteBrowser
+    let lock = NSLock()
     private var listenFD: Int32 = -1
     private var running = false
     private var open: Set<Int32> = []
@@ -41,13 +42,13 @@ final class RemoteServer: @unchecked Sendable {
     static let maxConcurrentDrops = 2
     private var activeDrops = 0
     /// Authenticated WebSocket fds → the device that authed them, so a revoke can cut live sessions.
-    private var socketDevices: [Int32: UUID] = [:]
+    var socketDevices: [Int32: UUID] = [:]
 
     init(backend: RemoteBackend, codes: PairingCodes, devices: DeviceStore,
          allowedLogin: @escaping @Sendable () -> String?, dnsName: @escaping @Sendable () -> String?,
          files: RemoteFiles = RemoteFilesLive.make(), dropDeadline: TimeInterval = 120, wsAuthTimeout: TimeInterval = 5,
-         commands: RemoteCommands = RemoteCommandsLive(), sites: RemoteSites = NoSites()) {
-        self.sites = sites; self.commands = commands; self.bar = RemoteBar(commands: commands)
+         commands: RemoteCommands = RemoteCommandsLive(), sites: RemoteSites = NoSites(), browser: RemoteBrowser = NoBrowser()) {
+        self.browser = browser; self.sites = sites; self.commands = commands; self.bar = RemoteBar(commands: commands)
         self.wsAuthTimeout = wsAuthTimeout
         self.files = files; self.dropDeadline = dropDeadline
         self.backend = backend; self.codes = codes; self.devices = devices
@@ -172,7 +173,7 @@ final class RemoteServer: @unchecked Sendable {
         let isAPI = req.path.hasPrefix("/api/")
         let ws = req.isWebSocketUpgrade
         // The only request allowed to skip the bearer header is the pane WebSocket (it authenticates by first message).
-        let paneSocket = ws && req.path.hasPrefix("/api/pane/")
+        let paneSocket = ws && (req.path.hasPrefix("/api/pane/") || req.path == "/api/browser/stream")
         if ws && !paneSocket {
             _ = send(fd, HTTPResponse.make(status: 400, reason: "Bad Request", body: Array("Bad request".utf8))); return
         }
@@ -215,9 +216,10 @@ final class RemoteServer: @unchecked Sendable {
         "GET /api/hub", "GET /api/hub/builder/<id>", "POST /api/hub/builder/<id>/ack",
         "POST /api/route", "POST /api/route/<routeId>/slot", "POST /api/run", "GET /api/recent",
         "GET /api/sites", "POST /api/sites/<port>/expose", "POST /api/sites/<port>/unexpose",
+        "WS /api/browser/stream", "GET /api/browser/tabs", "POST /api/browser/tabs",
     ]
 
-    private func json(_ fd: Int32, _ status: Int, _ reason: String, _ obj: [String: Any], extra: [String: String] = [:]) {
+    func json(_ fd: Int32, _ status: Int, _ reason: String, _ obj: [String: Any], extra: [String: String] = [:]) {
         let body = (try? JSONSerialization.data(withJSONObject: obj)) ?? Data("{}".utf8)
         _ = send(fd, HTTPResponse.make(status: status, reason: reason, headers: extra, body: [UInt8](body),
                                        contentType: "application/json"))
@@ -247,6 +249,14 @@ final class RemoteServer: @unchecked Sendable {
     /// Identity, Host and (where needed) Origin/token already passed.
     private func route(_ fd: Int32, _ req: HTTPRequest, device: UUID? = nil) {
         if req.method == "POST" && req.path == "/pair" { handlePair(fd, req); return }
+        if req.path.hasPrefix("/api/browser") {
+            if req.path == "/api/browser/stream", req.isWebSocketUpgrade {
+                guard let key = req.header("sec-websocket-key") else { plain(fd, 400, "Bad Request", "Bad request"); return }
+                streamBrowser(fd, key: key); return
+            }
+            guard device != nil else { plain(fd, 401, "Unauthorized", "Not paired"); return }
+            handleBrowserTabs(fd, req); return
+        }
         if req.path.hasPrefix("/api/sites") {
             guard device != nil else { plain(fd, 401, "Unauthorized", "Not paired"); return }
             handleSites(fd, req); return
@@ -304,7 +314,7 @@ final class RemoteServer: @unchecked Sendable {
 
     // MARK: phone ↔ Mac files
 
-    private func plain(_ fd: Int32, _ status: Int, _ reason: String, _ msg: String) {
+    func plain(_ fd: Int32, _ status: Int, _ reason: String, _ msg: String) {
         _ = send(fd, HTTPResponse.make(status: status, reason: reason, body: Array(msg.utf8)))
     }
 
@@ -448,7 +458,7 @@ final class RemoteServer: @unchecked Sendable {
     }
 
     /// First WebSocket message must be text `{"auth":"<token>"}` within 5 s, else close 4401 and no PTY bytes flow.
-    private func authenticateSocket(_ fd: Int32, _ dec: inout WebSocket.Decoder, _ pending: inout [WebSocket.Message]) -> PairedDevice? {
+    func authenticateSocket(_ fd: Int32, _ dec: inout WebSocket.Decoder, _ pending: inout [WebSocket.Message]) -> PairedDevice? {
         let end = Date().addingTimeInterval(wsAuthTimeout)
         var chunk = [UInt8](repeating: 0, count: 4096)
         while pending.isEmpty {

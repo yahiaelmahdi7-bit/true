@@ -88,7 +88,7 @@ final class RemoteAccess {
             server = RemoteServer(backend: RemoteBackendLive(), codes: codes, devices: deviceStore, allowedLogin: {
                 let o = UserDefaults.standard.string(forKey: RemoteAccess.loginOverrideKey) ?? ""
                 return o.isEmpty ? cache.login() : o
-            }, dnsName: { cache.dns() }, sites: SiteService.shared)
+            }, dnsName: { cache.dns() }, sites: SiteService.shared, browser: BrowserHub.shared)
         }
         listening = server?.start() ?? false
         if listening { _ = SiteModel.shared; SiteService.shared.start() }

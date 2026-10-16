@@ -21,6 +21,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             UpdateSettingsSection()
+            PhoneBrowserSection()
             Picker("Font", selection: $family) {
                 Text("System Mono").tag(TerminalSettings.systemMono)
                 Divider()
@@ -84,6 +85,21 @@ private struct UpdateSettingsSection: View {
                 if let last = updater.lastChecked {
                     LabeledContent("Last checked") { Text(last, format: .relative(presentation: .named)).foregroundStyle(.secondary) }
                 }
+            }
+        }
+    }
+}
+
+/// Phone browser: a separate "True Chrome" (own profile) the phone drives. Sign in to sites once here.
+private struct PhoneBrowserSection: View {
+    @AppStorage(BrowserHub.defaultsKey) private var on = true
+
+    var body: some View {
+        Section("Phone") {
+            Toggle("Phone browser", isOn: $on)
+                .help("Lets your paired phone browse through a separate Chrome on this Mac, with its own profile.")
+            LabeledContent("True Chrome") {
+                Button("Open True Chrome") { ChromeLauncher.openForSignIn() }
             }
         }
     }
