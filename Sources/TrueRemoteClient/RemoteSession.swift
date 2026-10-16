@@ -164,6 +164,10 @@ public actor RemoteSession {
 
     private static func seg(_ s: String) -> String { s.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? s }
 
+    func getJSON<T: Decodable>(_ path: String, as: T.Type = T.self) async throws -> T { try decode(try await call("GET", path)) }
+    func postJSON<T: Decodable>(_ path: String) async throws -> T { try decode(try await call("POST", path, json: [String: String]())) }
+    func postRaw(_ path: String, body: Data) async throws -> Data { try await call("POST", path, body: body, headers: ["Content-Type": "application/json"]) }
+
     private func get<T: Decodable>(_ path: String, as: T.Type = T.self) async throws -> T { try decode(try await call("GET", path)) }
     private func post<T: Decodable>(_ path: String, _ body: some Encodable) async throws -> T { try decode(try await call("POST", path, json: body)) }
 
