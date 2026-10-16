@@ -30,7 +30,7 @@ add pinning in a dedicated delegate (pass that `URLSession` to `RemoteSession`/`
 `products: [.library(name: "TrueRemoteClient", targets: ["TrueRemoteClient"])]` in `Package.swift`, then depend on it from `project.yml`.
 
 ## Launch arguments (screenshots / dev)
-`-baseURL http://localhost:8899 -autoPair 123456` pair against the mock · `-uiState composer|composer-routed|builder|shots|viewer|send|pane|pane-select|pair-scan` jump to a screen ·
+`-baseURL http://localhost:8899 -autoPair 123456` pair against the mock · `-uiState composer|composer-routed|builder|shots|viewer|send|sites|browser|pane|pane-select|pair-scan` jump to a screen ·
 `-composerText "…"` prefill · `-composerRoute 1` route on open.
 Mock: `MOCK_PORT=8899 MOCK_STATE=normal|empty|offline python3 scripts/remote-mock.py` (it has no WebSocket; `-uiState pane` feeds demo text, DEBUG only).
 
@@ -83,3 +83,6 @@ Layers live in `ios/Design/Icon/` (`background.svg` warm near-black, `foreground
 `AppIcon-1024.png` is rendered from the same geometry: `swift ios/Design/Icon/render.swift ios/True/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`.
 Icon Composer (two minutes): open Icon Composer, drag `background.svg` then `foreground.svg` in as two layers, leave Liquid Glass defaults, export
 `AppIcon.icon` into `ios/True/`, and select it as the app icon in the target. This gives the iOS 26 tinted/clear/dark variants.
+
+## Sites + Browser tabs
+**Sites** lists dev servers running in True panes on the Mac (`/api/sites`); tapping one shares it over Tailscale (`tailscale serve`, True-owned ports only) and opens it in-app, with a copy-paste fix if Vite/Next rejects the `*.ts.net` host. **Browser** streams a separate "True Chrome" on the Mac (`/api/browser/stream`): tap, drag-scroll, pinch-zoom, keyboard, tabs; `localhost:<port>` works because the browser runs on the Mac. Toggle in True's Settings ("Phone browser"). `-uiState sites|browser` shows demo data (DEBUG).

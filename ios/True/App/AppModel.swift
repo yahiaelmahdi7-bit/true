@@ -58,7 +58,10 @@ final class AppModel {
             }
         }
         if let s = uiState {
-            selectedTab = s.hasPrefix("shots") || s == "viewer" ? "shots" : s == "send" ? "send" : s.hasPrefix("panes") ? "panes" : "hub"
+            selectedTab = s.hasPrefix("shots") || s == "viewer" ? "shots" : s == "send" ? "send" : s == "sites" ? "sites" : s == "browser" ? "browser" : s.hasPrefix("panes") ? "panes" : "hub"
+            #if DEBUG
+            if s == "sites" || s == "browser" { paired = true }  // demo tabs need no Mac
+            #endif
             showComposer = s == "composer" || s == "composer-routed"
         }
     }
