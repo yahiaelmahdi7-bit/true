@@ -32,6 +32,7 @@ final class RemoteServer: @unchecked Sendable {
     private let dropDeadline: TimeInterval
     let commands: RemoteCommands
     let bar: RemoteBar
+    let sites: RemoteSites
     private let lock = NSLock()
     private var listenFD: Int32 = -1
     private var running = false
@@ -45,8 +46,8 @@ final class RemoteServer: @unchecked Sendable {
     init(backend: RemoteBackend, codes: PairingCodes, devices: DeviceStore,
          allowedLogin: @escaping @Sendable () -> String?, dnsName: @escaping @Sendable () -> String?,
          files: RemoteFiles = RemoteFilesLive.make(), dropDeadline: TimeInterval = 120, wsAuthTimeout: TimeInterval = 5,
-         commands: RemoteCommands = RemoteCommandsLive()) {
-        self.commands = commands; self.bar = RemoteBar(commands: commands)
+         commands: RemoteCommands = RemoteCommandsLive(), sites: RemoteSites = NoSites()) {
+        self.sites = sites; self.commands = commands; self.bar = RemoteBar(commands: commands)
         self.wsAuthTimeout = wsAuthTimeout
         self.files = files; self.dropDeadline = dropDeadline
         self.backend = backend; self.codes = codes; self.devices = devices
@@ -213,6 +214,7 @@ final class RemoteServer: @unchecked Sendable {
         "GET /api/shots", "GET /api/shots/<id>", "GET /api/shots/<id>/thumb", "GET /api/inbox", "GET /api/inbox/<id>", "DELETE /api/inbox/<id>",
         "GET /api/hub", "GET /api/hub/builder/<id>", "POST /api/hub/builder/<id>/ack",
         "POST /api/route", "POST /api/route/<routeId>/slot", "POST /api/run", "GET /api/recent",
+        "GET /api/sites", "POST /api/sites/<port>/expose", "POST /api/sites/<port>/unexpose",
     ]
 
     private func json(_ fd: Int32, _ status: Int, _ reason: String, _ obj: [String: Any], extra: [String: String] = [:]) {
@@ -245,6 +247,10 @@ final class RemoteServer: @unchecked Sendable {
     /// Identity, Host and (where needed) Origin/token already passed.
     private func route(_ fd: Int32, _ req: HTTPRequest, device: UUID? = nil) {
         if req.method == "POST" && req.path == "/pair" { handlePair(fd, req); return }
+        if req.path.hasPrefix("/api/sites") {
+            guard device != nil else { plain(fd, 401, "Unauthorized", "Not paired"); return }
+            handleSites(fd, req); return
+        }
         if req.path.hasPrefix("/api/hub") || req.path.hasPrefix("/api/route") || req.path == "/api/run" || req.path == "/api/recent" {
             guard let device else { plain(fd, 401, "Unauthorized", "Not paired"); return }
             handleBar(fd, req, device: device); return
@@ -280,6 +286,20 @@ final class RemoteServer: @unchecked Sendable {
             _ = send(fd, HTTPResponse.make(status: 200, reason: "OK", body: asset.body, contentType: asset.type)); return
         }
         _ = send(fd, HTTPResponse.make(status: 404, reason: "Not Found", body: Array("Not found".utf8)))
+    }
+
+    /// GET /api/sites[?refresh=1] · POST /api/sites/<port>/expose|unexpose
+    private func handleSites(_ fd: Int32, _ req: HTTPRequest) {
+        let path = req.path.split(separator: "?").first.map(String.init) ?? req.path
+        if req.method == "GET", path == "/api/sites" {
+            let body = sites.listJSON(refresh: req.path.contains("refresh=1"))
+            _ = send(fd, HTTPResponse.make(status: 200, reason: "OK", body: [UInt8](body), contentType: "application/json")); return
+        }
+        let parts = path.split(separator: "/").map(String.init)   // api sites <port> expose
+        guard req.method == "POST", parts.count == 4, let port = Int(parts[2]), SitesLogic.isWebCandidate(port: port),
+              parts[3] == "expose" || parts[3] == "unexpose" else { plain(fd, 404, "Not Found", "Not found"); return }
+        let r = parts[3] == "expose" ? sites.expose(port: port) : sites.unexpose(port: port)
+        json(fd, r.status, r.status == 200 ? "OK" : "Error", r.json)
     }
 
     // MARK: phone ↔ Mac files

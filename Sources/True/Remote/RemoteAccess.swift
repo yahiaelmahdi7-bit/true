@@ -41,7 +41,9 @@ final class RemoteAccess {
     @ObservationIgnored let codes = PairingCodes()
     @ObservationIgnored let deviceStore = DeviceStore()
     @ObservationIgnored private var server: RemoteServer?
-    @ObservationIgnored private let loginCache = LoginCache()
+    nonisolated static let sharedLoginCache = LoginCache()
+    nonisolated static func currentDNS() -> String? { sharedLoginCache.dns() }
+    @ObservationIgnored private var loginCache: LoginCache { Self.sharedLoginCache }
 
     var url: String? { dnsName.map { "https://\($0):\(Self.httpsPort)" } }
     var allowedLoginOverride: String {
@@ -83,12 +85,13 @@ final class RemoteAccess {
     private func start(attempt: Int = 0) {
         if server == nil {
             let cache = loginCache
-            server = RemoteServer(backend: RemoteBackendLive(), codes: codes, devices: deviceStore) {
+            server = RemoteServer(backend: RemoteBackendLive(), codes: codes, devices: deviceStore, allowedLogin: {
                 let o = UserDefaults.standard.string(forKey: RemoteAccess.loginOverrideKey) ?? ""
                 return o.isEmpty ? cache.login() : o
-            } dnsName: { cache.dns() }
+            }, dnsName: { cache.dns() }, sites: SiteService.shared)
         }
         listening = server?.start() ?? false
+        if listening { SiteService.shared.start() }
         devices = deviceStore.all
         // The previous copy of the app may still hold 127.0.0.1:8801 for a moment after a restart; retry
         // rather than leave the phone with a dead page until the toggle is flipped by hand.
@@ -102,6 +105,7 @@ final class RemoteAccess {
 
     private func stop() {
         server?.stop(); server = nil; listening = false
+        SiteService.shared.stop()
         codes.revokeCode(); code = nil; codeExpiry = nil
     }
 
