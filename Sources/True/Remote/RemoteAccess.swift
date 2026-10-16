@@ -91,7 +91,7 @@ final class RemoteAccess {
             }, dnsName: { cache.dns() }, sites: SiteService.shared)
         }
         listening = server?.start() ?? false
-        if listening { SiteService.shared.start() }
+        if listening { _ = SiteModel.shared; SiteService.shared.start() }
         devices = deviceStore.all
         // The previous copy of the app may still hold 127.0.0.1:8801 for a moment after a restart; retry
         // rather than leave the phone with a dead page until the toggle is flipped by hand.
