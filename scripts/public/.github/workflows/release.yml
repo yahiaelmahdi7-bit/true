@@ -32,7 +32,11 @@ jobs:
     runs-on: macos-26  # the macOS 26 SDK is needed for the Liquid Glass code paths
     env:
       REL: ${{ needs.tag.outputs.ref || github.ref_name }}
+      TRUE_UPDATE_PUBKEY: ${{ vars.TRUE_UPDATE_PUBKEY }}
     steps:
+      - name: Require the update public key
+        run: |
+          [ -n "$TRUE_UPDATE_PUBKEY" ] || { echo "::error::vars.TRUE_UPDATE_PUBKEY is empty. Run scripts/gen-update-key.sh once, then the gh variable set command it prints."; exit 1; }
       - uses: actions/checkout@v5
         with:
           ref: ${{ needs.tag.outputs.ref || github.ref }}
@@ -85,6 +89,9 @@ jobs:
           REPO=$(/usr/libexec/PlistBuddy -c 'Print :TrueUpdateRepo' "$PL")
           [ "$REPO" = "$GITHUB_REPOSITORY" ] || { echo "::error::TrueUpdateRepo is '$REPO'"; exit 1; }
           VER=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PL")
+          KEY=$(/usr/libexec/PlistBuddy -c 'Print :TrueUpdatePublicKey' "$PL" 2>/dev/null || true)
+          [ -n "$KEY" ] || { echo "::error::app has no TrueUpdatePublicKey"; exit 1; }
+          [ "$KEY" = "${{ vars.TRUE_UPDATE_PUBKEY }}" ] || { echo "::error::embedded key differs from vars.TRUE_UPDATE_PUBKEY"; exit 1; }
           [ "v$VER" = "$REL" ] || { echo "::error::app version $VER != tag $REL"; exit 1; }
           codesign -v "$APP" || { echo "::error::codesign verify failed"; exit 1; }
           (cd artifact && shasum -a 256 -c True-macOS.zip.sha256)
@@ -127,28 +134,10 @@ jobs:
         with:
           name: True-macOS
           path: dist
-      - name: Publish release
+      - name: Publish as a DRAFT (scripts/sign-release.sh signs it and makes it Latest)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$REL" dist/True-macOS.zip dist/True-macOS.zip.sha256 \
-            --title "True $REL" --generate-notes --latest --repo "$GITHUB_REPOSITORY"
-  verify:
-    needs: [tag, publish]
-    if: always() && needs.publish.result == 'success'
-    runs-on: macos-14
-    env:
-      REL: ${{ needs.tag.outputs.ref || github.ref_name }}
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - name: Download the published release and re-check it
-        run: |
-          gh release download "$REL" --repo "$GITHUB_REPOSITORY" --dir pub
-          cd pub && shasum -a 256 -c True-macOS.zip.sha256 && ditto -x -k True-macOS.zip x
-          PL=x/True.app/Contents/Info.plist
-          [ "$(/usr/libexec/PlistBuddy -c 'Print :TrueUpdateRepo' $PL)" = "$GITHUB_REPOSITORY" ]
-          [ "v$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' $PL)" = "$REL" ]
-          codesign -v x/True.app
-          LATEST=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
-          [ "$LATEST" = "$REL" ] || { echo "::error::latest is $LATEST, updater will not see $REL"; exit 1; }
-          echo "Verified $REL: https://github.com/$GITHUB_REPOSITORY/releases/tag/$REL" >> "$GITHUB_STEP_SUMMARY"
+            --title "True $REL" --generate-notes --draft --repo "$GITHUB_REPOSITORY"
+          echo "Draft $REL created. Now run on your Mac: scripts/sign-release.sh ${REL#v}" >> "$GITHUB_STEP_SUMMARY"
