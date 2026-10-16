@@ -61,6 +61,7 @@ final class RemoteServer: @unchecked Sendable {
         guard !running else { return true }
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else { return false }
+        _ = fcntl(fd, F_SETFD, FD_CLOEXEC)   // pane shells are forked from this process; they must never inherit the listener
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, socklen_t(MemoryLayout<Int32>.size))
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
@@ -99,6 +100,7 @@ final class RemoteServer: @unchecked Sendable {
             guard poll(&p, 1, 500) > 0 else { continue }
             let c = accept(fd, nil, nil)
             if c < 0 { continue }
+            _ = fcntl(c, F_SETFD, FD_CLOEXEC)
             lock.lock()
             let full = open.count >= Self.maxConnections
             if !full { open.insert(c) }
@@ -198,7 +200,8 @@ final class RemoteServer: @unchecked Sendable {
             Self.log.notice("deny 401 \(req.path, privacy: .public): not paired")
             _ = send(fd, HTTPResponse.make(status: 401, reason: "Unauthorized", body: Array("Not paired".utf8)))
         case .allow:
-            Self.log.notice("allow \(req.method, privacy: .public) \(req.path, privacy: .public) device=\(device?.label ?? "-", privacy: .public)")
+            let duty = req.header("x-true-duty").map { " duty=\($0)" } ?? ""
+            Self.log.notice("allow \(req.method, privacy: .public) \(req.path, privacy: .public) device=\(device?.label ?? "-", privacy: .public)\(duty, privacy: .public)")
             route(fd, req, device: device?.id)
         }
     }
@@ -384,6 +387,7 @@ final class RemoteServer: @unchecked Sendable {
         let rows: [[String: Any]] = files.inbox.list().map { i in
             var r: [String: Any] = ["id": i.id, "name": i.name, "kind": i.kind.rawValue, "size": i.size,
                                     "created": i.created.timeIntervalSince1970]
+            if let src = i.source { r["source"] = src.rawValue }
             if i.kind == .text { r["preview"] = files.inbox.previewText(i.id) ?? "" }
             return r
         }

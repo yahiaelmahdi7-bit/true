@@ -292,6 +292,58 @@ func answer(_ kind: String, danger: Double? = nil, judged: Bool = true) -> JevRe
         #expect((json["summary"] as? String) != nil)
     }
 
+    @Test func needsYouSeatRowCarriesTheQuestion() throws {
+        let cfo = Agent(name: "cfo", role: .lead, repo: "/p/one", model: .opus, effort: .medium, permission: .acceptEdits)
+        let pane = UUID()
+        let groups = HubModel.build(seats: [cfo], seatStatus: { _ in .needsYou }, seatAwake: { _ in true }, peers: [],
+                                    builders: [], now: now, seatsOnly: false, hasGit: { _ in false })
+        let long = String(repeating: "x", count: 500)
+        let json = RemoteHubJSON.make(groups: groups, seatStatus: { _ in .needsYou }, seatPane: { _ in pane },
+                                      ask: { $0 == pane ? (long, "Bash", nil) : nil }, now: now)
+        let rows = try #require(json["projects"] as? [[String: Any]]).flatMap { ($0["rows"] as? [[String: Any]]) ?? [] }
+        let row = try #require(rows.first { $0["name"] as? String == "cfo" })
+        #expect((row["question"] as? String)?.count == 300)
+        #expect(row["tool"] as? String == "Bash")
+        #expect(row["needKind"] as? String == "permission")
+        #expect(row["detail"] == nil)
+    }
+
+    @Test func loosePaneThatAsksGetsANeedsYouRowInItsProject() throws {
+        let now = Date().timeIntervalSince1970
+        let cfo = Agent(name: "cfo", role: .lead, repo: "/p/one", model: .opus, effort: .medium, permission: .acceptEdits)
+        let seatPane = UUID(), loose = UUID(), elsewhere = UUID()
+        let groups = HubModel.build(seats: [cfo], seatStatus: { _ in .idle }, seatAwake: { _ in true }, peers: [],
+                                    builders: [], now: now, seatsOnly: false, hasGit: { _ in false })
+        let key = try #require(groups.first?.key)
+        let lp = [LoosePane(pane: loose, name: "one", cwd: "/p/one", projectKey: key, question: "Run rm?", tool: "Bash", detail: nil),
+                  LoosePane(pane: elsewhere, name: "two", cwd: "/p/two", projectKey: "/p/two", question: "Edit?", tool: nil, detail: nil),
+                  LoosePane(pane: seatPane, name: "cfo", cwd: "/p/one", projectKey: key, question: "dup", tool: nil, detail: nil)]
+        let json = RemoteHubJSON.make(groups: groups, seatStatus: { _ in .idle }, seatPane: { _ in seatPane },
+                                      loosePanes: lp, now: now)
+        let projects = try #require(json["projects"] as? [[String: Any]])
+        let rows = projects.flatMap { ($0["rows"] as? [[String: Any]]) ?? [] }
+        let one = try #require(rows.first { $0["id"] as? String == "pane-\(loose.uuidString)" })
+        #expect(one["kind"] as? String == "pane")
+        #expect(one["statusKey"] as? String == "needsYou")
+        #expect(one["pane"] as? String == loose.uuidString)
+        #expect(one["question"] as? String == "Run rm?")
+        #expect(one["tool"] as? String == "Bash")
+        #expect(one["needKind"] as? String == "permission")
+        // The seat's own pane is never duplicated as a loose row.
+        #expect(rows.first { $0["id"] as? String == "pane-\(seatPane.uuidString)" } == nil)
+        // A pane in a project the Hub has no group for gets one.
+        let two = try #require(projects.first { ($0["key"] as? String) == "/p/two" })
+        #expect(two["needsYou"] as? Int == 1)
+        #expect(json["needsYou"] as? Int == 2)
+    }
+
+    @Test func needKindClassifiesToolAndPermissionWording() {
+        #expect(NeedKind.classify(question: "Claude needs your input", tool: nil) == "question")
+        #expect(NeedKind.classify(question: "Claude needs your permission to use Bash", tool: nil) == "permission")
+        #expect(NeedKind.classify(question: "Claude needs your input", tool: "") == "question")
+        #expect(NeedKind.classify(question: "x", tool: "Bash") == "permission")
+    }
+
     @Test func ackValidatesTheIdAndWritesMeta() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ack-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

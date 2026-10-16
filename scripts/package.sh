@@ -51,6 +51,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSMicrophoneUsageDescription</key><string>Nova (True's voice assistant) and programs you run in True, such as Claude Code voice mode, use the microphone to hear you.</string>
   <key>NSSpeechRecognitionUsageDescription</key><string>Nova transcribes what you say on-device so you can control True by voice.</string>
   <key>NSAppleEventsUsageDescription</key><string>Nova uses Apple Events to open, quit and control apps when you ask.</string>
+  <!-- Bluetooth advertising (CBPeripheralManager) only notices an unpaired iPhone nearby so the pairing card can appear. -->
+  <key>NSBluetoothAlwaysUsageDescription</key><string>True uses Bluetooth only to notice your iPhone nearby so the pairing code can appear.</string>
 </dict>
 </plist>
 PLIST

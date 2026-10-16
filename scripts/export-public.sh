@@ -18,7 +18,7 @@ echo "==> copying tracked files from $SRC"
 
 echo "==> deleting excluded paths"
 cd "$STAGE"
-rm -rf .claude .builder .playwright-mcp docs SPEC.md CLAUDE.md True.app True.app.old dist .build \
+rm -rf ios .claude .builder .playwright-mcp docs SPEC.md CLAUDE.md True.app True.app.old dist .build \
        Sources/True/Nova \
        Tests/TrueTests/Nova*.swift \
        Tests/TrueTests/BrainErrorTests.swift \
