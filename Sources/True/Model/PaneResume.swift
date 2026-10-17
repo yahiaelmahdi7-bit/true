@@ -97,9 +97,9 @@ enum ResumePlan {
             for (pane, r) in map {
                 records += 1
                 if case .agent = r { if marks.contains(pane) { agents.insert(pane) }; continue }
-                guard case let .claude(id, cwd, mode) = r else { continue }
+                guard case let .claude(id, cwd, _) = r else { continue }
                 let prompt = marks.contains(pane) ? continuePrompt : nil
-                if let cmd = PaneStartup.resumeCommand(sessionID: id, settings: settings, mode: mode, prompt: prompt) {
+                if let cmd = PaneStartup.resumeCommand(sessionID: id, settings: settings, prompt: prompt) {
                     if AgentLaunch.transcriptExists(id: id, cwd: cwd, claudeDir: claudeDir) {
                         out[pane] = cmd
                         if prompt != nil { continued.append(pane) }
