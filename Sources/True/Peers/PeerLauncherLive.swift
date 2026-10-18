@@ -20,18 +20,11 @@ final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
 
     /// `git <args>` in `dir`; (exit status, trimmed output). Never prompts.
     static func git(_ args: [String], in dir: String) -> (Int32, String) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        p.arguments = ["-C", dir] + args
         var env = ProcessInfo.processInfo.environment
         env["GIT_TERMINAL_PROMPT"] = "0"
-        p.environment = env
-        let out = Pipe()
-        p.standardOutput = out; p.standardError = out
-        do { try p.run() } catch { return (127, "git is not available") }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return (p.terminationStatus, String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+        guard let r = Subprocess.exec("/usr/bin/git", ["-C", dir] + args, timeout: nil, mergeStderr: true, env: env)
+        else { return (127, "git is not available") }
+        return (r.status, String(decoding: r.out, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     func remoteURL(ofRepoAt path: String) -> String? {

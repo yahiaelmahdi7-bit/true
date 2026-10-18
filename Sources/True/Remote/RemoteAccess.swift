@@ -174,15 +174,7 @@ final class RemoteAccess {
             return (dns, login)
         }
 
-        private static func run(_ exe: String, _ args: [String]) -> Data? {
-            guard FileManager.default.isExecutableFile(atPath: exe) else { return nil }
-            let p = Process(); p.executableURL = URL(fileURLWithPath: exe); p.arguments = args
-            let pipe = Pipe(); p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
-            do { try p.run() } catch { return nil }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            p.waitUntilExit()
-            return p.terminationStatus == 0 ? data : nil
-        }
+        private static func run(_ exe: String, _ args: [String]) -> Data? { Subprocess.run(exe, args) }
     }
 
     /// What the QR encodes: the address and (while one is live) the pairing code, as a `true://pair` link the phone parses.

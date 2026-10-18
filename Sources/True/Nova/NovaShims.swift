@@ -55,14 +55,7 @@ enum Vault {
     nonisolated(unsafe) static var processSpy: (([String]) -> Void)?
     private static func run(_ args: [String]) -> (Int32, String) {
         processSpy?(args)
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = args
-        let out = Pipe()
-        p.standardOutput = out; p.standardError = FileHandle.nullDevice; p.standardInput = FileHandle.nullDevice
-        guard (try? p.run()) != nil else { return (-1, "") }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return (p.terminationStatus, String(decoding: data, as: UTF8.self))
+        guard let r = Subprocess.exec("/usr/bin/security", args, timeout: nil) else { return (-1, "") }
+        return (r.status, String(decoding: r.out, as: UTF8.self))
     }
 }

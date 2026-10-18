@@ -279,14 +279,7 @@ enum UpdateInstaller {
 
     @discardableResult
     static func run(_ exe: String, _ args: [String]) -> (status: Int32, out: String) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: exe)
-        p.arguments = args
-        let pipe = Pipe()
-        p.standardOutput = pipe; p.standardError = pipe
-        do { try p.run() } catch { return (127, "") }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return (p.terminationStatus, String(decoding: data, as: UTF8.self))
+        guard let r = Subprocess.exec(exe, args, timeout: nil, mergeStderr: true) else { return (127, "") }
+        return (r.status, String(decoding: r.out, as: UTF8.self))
     }
 }

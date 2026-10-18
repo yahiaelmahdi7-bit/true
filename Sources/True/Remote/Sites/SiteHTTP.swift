@@ -38,17 +38,7 @@ enum SiteHTTP {
 
     /// Run a tool to completion; nil on launch failure, non-zero exit or timeout. stderr is dropped.
     static func run(_ exe: String, _ args: [String], timeout: TimeInterval = 10) -> Data? {
-        guard FileManager.default.isExecutableFile(atPath: exe) else { return nil }
-        let p = Process(); p.executableURL = URL(fileURLWithPath: exe); p.arguments = args
-        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = FileHandle.nullDevice
-        p.standardInput = FileHandle.nullDevice
-        do { try p.run() } catch { return nil }
-        let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        killer.cancel()
-        return p.terminationStatus == 0 ? data : nil
+        Subprocess.run(exe, args, timeout: timeout)
     }
 
     /// GET / straight from the loopback socket with an arbitrary Host header — exactly what a dev server sees when

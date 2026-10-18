@@ -89,17 +89,7 @@ enum JevKey {
     /// Reads the key through `/usr/bin/security`, which owns the Keychain item, so no access dialog.
     /// The output is the secret: it is only trimmed and returned, never logged.
     static func fromKeychain() -> String? {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
-        p.arguments = ["find-generic-password", "-s", service, "-a", account, "-w"]
-        let out = Pipe()
-        p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
-        p.standardInput = FileHandle.nullDevice
-        guard (try? p.run()) != nil else { return nil }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        guard p.terminationStatus == 0 else { return nil }
+        guard let data = Subprocess.run("/usr/bin/security", ["find-generic-password", "-s", service, "-a", account, "-w"]) else { return nil }
         let key = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         return key.isEmpty ? nil : key
     }

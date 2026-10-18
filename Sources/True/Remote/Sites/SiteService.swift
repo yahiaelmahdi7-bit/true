@@ -32,7 +32,7 @@ struct NoSites: RemoteSites {
 /// Finds dev web servers started from True panes and shares them to the phone through `tailscale serve`.
 final class SiteService: RemoteSites, @unchecked Sendable {
     static let shared = SiteService()
-    static let pollInterval: TimeInterval = 3
+    static let pollInterval: TimeInterval = 10
 
     private let lock = NSLock()
     private var sites: [Int: SiteInfo] = [:]

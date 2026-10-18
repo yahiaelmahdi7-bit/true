@@ -254,10 +254,11 @@ final class NovaHands: NovaToolRunner, @unchecked Sendable {
                 if let env { p.environment = env }
                 let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe; p.standardInput = FileHandle.nullDevice
                 guard (try? p.run()) != nil else { c.resume(returning: (-1, "couldn't launch")); return }
-                let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
+                let killer = DispatchWorkItem { [weak p] in if p?.isRunning == true { p?.terminate() } }
                 DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
                 var data = Data()
                 while true { let d = pipe.fileHandleForReading.availableData; if d.isEmpty { break }; if data.count < cap { data.append(d) } }
+                try? pipe.fileHandleForReading.close()
                 p.waitUntilExit(); killer.cancel()
                 c.resume(returning: (p.terminationStatus, String(decoding: data.prefix(cap), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)))
             }
