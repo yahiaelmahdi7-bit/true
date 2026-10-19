@@ -45,6 +45,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppTransportSecurity</key><dict><key>NSAllowsArbitraryLoads</key><true/></dict>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <!-- macOS charges a child process's mic use to the app that launched it, so Claude Code's
        hold-space voice mode asks as True. Without this key TCC refuses silently, no prompt. -->
