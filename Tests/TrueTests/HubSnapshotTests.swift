@@ -278,4 +278,56 @@ struct HubSnapshotTests {
             }
         }
     }
+
+    // MARK: real data (read-only)
+
+    /// Loads Yahia's actual Watcher inbox + builder records + peers straight from disk (no store, no writes).
+    @Test func realData() throws {
+        let fm = FileManager.default
+        let home = NSHomeDirectory()
+        let log = URL(fileURLWithPath: home + "/.true/agents/watcher/inbox.jsonl")
+        var events: [InboxEvent] = []
+        for line in ((try? String(contentsOf: log, encoding: .utf8)) ?? "").split(separator: "\n") {
+            if let e = try? JSONDecoder().decode(InboxEvent.self, from: Data(line.utf8)) { events.append(e) }
+        }
+        let watcher = Inbox.fold(events).filter { $0.state == .open || $0.state == .approved }
+        let t = Date().timeIntervalSince1970
+        let builders = HubScanner.builders(in: URL(fileURLWithPath: home + "/.claude/builders"))
+        let peers = HubScanner.peers(in: URL(fileURLWithPath: home + "/.claude/sessions"))
+        let groups = HubModel.build(seats: [], seatStatus: { _ in .asleep }, seatAwake: { _ in false }, peers: peers,
+                                    builders: builders, now: t, hasGit: { _ in true })
+        let buckets = HubTriage.build(groups: groups, seatStatus: { _ in .asleep }, cloud: [], watcher: watcher,
+                                      builders: builders, openPanes: [], now: t)
+        let after = HubTriage.count(buckets, tone: .needsYou)
+        var kinds: [String: Int] = [:]
+        for w in watcher { kinds["\(w.source)/\(w.kind)", default: 0] += 1 }
+        let summary = "watcher open=\(watcher.count) \(kinds) builders=\(builders.count) peers=\(peers.count)\n"
+            + buckets.map { "\($0.section): \($0.count)" }.joined(separator: "\n") + "\nneedsYou(after)=\(after)\n"
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try summary.write(to: dir.appendingPathComponent("real-data-summary.txt"), atomically: true, encoding: .utf8)
+        print(summary)
+        for (name, w, h) in [("real-1600x1000", 1600.0, 1000.0), ("real-900x700", 900.0, 700.0)] {
+            try snapshot(name, width: w, height: h) {
+                popUp(window: CGSize(width: w, height: h)) {
+                    HubPanelContent(groups: groups, allSeats: [], filter: .constant(.all), now: t, actions: .inert,
+                                    watcherItems: watcher, builders: builders, openPanes: [])
+                }
+            }
+        }
+        try snapshot("real-1600x1000-backlog", width: 1600, height: 1000) {
+            popUp(window: CGSize(width: 1600, height: 1000)) {
+                HubPanelContent(groups: groups, allSeats: [], filter: .constant(.all), now: t, actions: .inert,
+                                watcherItems: watcher, builders: builders, openPanes: [], backlogOpen: true)
+            }
+        }
+    }
+
+    @Test func sampleLarge() throws {
+        try snapshot("sample-1600x1000", width: 1600, height: 1000) {
+            popUp(window: CGSize(width: 1600, height: 1000)) { hub(groups: groups(), seats: [lead, helper, cfo]) }
+        }
+        try snapshot("sample-900x700", width: 900, height: 700) {
+            popUp(window: CGSize(width: 900, height: 700)) { hub(groups: groups(), seats: [lead, helper, cfo]) }
+        }
+    }
 }
