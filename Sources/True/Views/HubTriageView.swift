@@ -1,11 +1,7 @@
 import SwiftUI
 
-/// "12m ago" for a finished row, "12m" for one still running, "now" under a minute.
-func triageTime(_ item: TriageItem, now: Double) -> String {
-    let s = max(0, now - item.at)
-    if s < 60 { return item.tone == .working ? "<1m" : "now" }
-    return item.tone == .working ? hubElapsed(s) : hubElapsed(s) + " ago"
-}
+/// "now", "2m", "3h", "6d": one coarse unit, same for finished and running rows.
+func triageTime(_ item: TriageItem, now: Double) -> String { HubTriage.age(now - item.at) }
 
 extension TriageTone {
     var glyph: String {
@@ -42,9 +38,9 @@ struct TriageGlyph: View {
     var cloud = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
-        Image(systemName: tone.glyph).font(.system(size: 17, weight: .medium)).foregroundStyle(tone.color)
+        Image(systemName: tone.glyph).font(.system(size: 15, weight: .medium)).foregroundStyle(tone.color)
             .symbolEffect(.pulse, isActive: tone == .working && !reduceMotion)
-            .frame(width: 24, height: 24)
+            .frame(width: 20, height: 20)
             .overlay(alignment: .bottomTrailing) {
                 if cloud {
                     Image(systemName: "icloud.fill").font(.system(size: 8)).foregroundStyle(Theme.hubSecondary)
@@ -62,9 +58,9 @@ struct TriageButton: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            Text(label).font(.callout.weight(.medium)).lineLimit(1)
+            Text(label).font(.callout.weight(.medium)).lineLimit(1).fixedSize()
                 .foregroundStyle(loud ? Color.black : Theme.text)
-                .padding(.horizontal, 12).padding(.vertical, 4)
+                .frame(minWidth: 72).padding(.horizontal, 10).padding(.vertical, 3)
                 .background(loud ? Color.white : Color.white.opacity(0.10), in: .capsule)
                 .contentShape(.capsule)
         }
@@ -79,12 +75,17 @@ struct ProjectChip: View {
             Text(name).font(.caption).foregroundStyle(Theme.hubSecondary).lineLimit(1).truncationMode(.middle)
                 .padding(.horizontal, 7).padding(.vertical, 2)
                 .background(Color.white.opacity(0.07), in: .capsule)
-                .frame(maxWidth: 120)
+                .frame(maxWidth: 112, alignment: .leading)
         }
     }
 }
 
-/// Row chrome: hover and keyboard selection share one fill.
+/// Column widths shared by every compact row so chips, ages and buttons line up down the list.
+private enum Col {
+    static let chip: CGFloat = 112, age: CGFloat = 34, button: CGFloat = 92, dismiss: CGFloat = 22
+}
+
+/// Row chrome: hover and keyboard selection share one fill. 34 pt tall.
 private struct TriageRowFrame<Content: View>: View {
     let selected: Bool
     var indent: CGFloat = 0
@@ -92,13 +93,25 @@ private struct TriageRowFrame<Content: View>: View {
     @State private var hovering = false
     var body: some View {
         content
-            .padding(.leading, 10 + indent).padding(.trailing, 10).padding(.vertical, 7).frame(minHeight: 46)
+            .padding(.leading, 10 + indent).padding(.trailing, 6).frame(height: 34)
             .background(selected ? Color.white.opacity(0.10) : hovering ? Theme.hubHoverFill : .clear,
-                        in: .rect(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        in: .rect(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(Color.white.opacity(selected ? 0.18 : 0), lineWidth: 1))
-            .contentShape(.rect(cornerRadius: 10, style: .continuous))
+            .contentShape(.rect(cornerRadius: 8, style: .continuous))
             .onHover { hovering = $0 }
+    }
+}
+
+/// The × on a row: dim until the row is hovered or selected, always in the layout so columns never shift.
+private struct DismissButton: View {
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "xmark").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.hubSecondary)
+                .frame(width: Col.dismiss, height: Col.dismiss).contentShape(.circle)
+        }
+        .buttonStyle(.plain).help("Dismiss").accessibilityLabel("Dismiss")
     }
 }
 
@@ -109,28 +122,33 @@ struct TriageRowView: View {
     var indent: CGFloat = 0
     var showProject = true
     let onAction: (TriageItem) -> Void
+    var onDismiss: (TriageItem) -> Void = { _ in }
 
     var body: some View {
         TriageRowFrame(selected: selected, indent: indent) {
             HStack(spacing: 10) {
                 TriageGlyph(tone: item.tone, cloud: item.isCloud)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(item.title).font(.body).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.middle)
-                    Text(item.subtitle).font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1).truncationMode(.tail)
-                }
-                Spacer(minLength: 6)
-                if showProject { ProjectChip(name: item.project) }
+                Text(item.title).font(.body).foregroundStyle(item.section == .backlog ? Theme.hubSecondary : Theme.text)
+                    .lineLimit(1).truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                ProjectChip(name: showProject ? item.project : "").frame(width: Col.chip, alignment: .leading)
                 Text(triageTime(item, now: now)).font(.callout.monospacedDigit()).foregroundStyle(Theme.hubSecondary)
-                    .frame(minWidth: 52, alignment: .trailing)
-                if !item.actionLabel.isEmpty {
-                    TriageButton(label: item.actionLabel, loud: item.tone == .needsYou) { onAction(item) }
+                    .frame(width: Col.age, alignment: .trailing)
+                Group {
+                    if item.actionLabel.isEmpty { Color.clear } else {
+                        TriageButton(label: item.actionLabel, loud: item.tone == .needsYou || item.tone == .failed) { onAction(item) }
+                    }
                 }
+                .frame(width: Col.button, alignment: .trailing)
+                DismissButton { onDismiss(item) }
             }
         }
         .onTapGesture(count: 2) { onAction(item) }
+        .help(item.subtitle)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.title), \(item.isCloud ? "cloud, " : "")\(item.tone.word), \(item.project), \(item.subtitle)")
         .accessibilityAction(named: item.actionLabel) { onAction(item) }
+        .accessibilityAction(named: "Dismiss") { onDismiss(item) }
     }
 }
 
@@ -145,11 +163,10 @@ struct TriageGroupView: View {
     let selected: String?
     let toggle: () -> Void
     let onAction: (TriageItem) -> Void
+    var onDismiss: (TriageItem) -> Void = { _ in }
 
     private var groupTime: String {
-        guard var newest = items.first else { return "" }
-        newest.at = items.map(\.at).max() ?? newest.at
-        return triageTime(newest, now: now)
+        HubTriage.age(now - (items.map(\.at).max() ?? now))
     }
 
     var body: some View {
@@ -159,11 +176,12 @@ struct TriageGroupView: View {
                     TriageGlyph(tone: tone, cloud: items.allSatisfy(\.isCloud))
                     (Text(project).foregroundStyle(Theme.text) + Text(" · \(label)").foregroundStyle(Theme.hubSecondary))
                         .font(.body).lineLimit(1).truncationMode(.middle)
-                    Spacer(minLength: 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     Text(groupTime).font(.callout.monospacedDigit()).foregroundStyle(Theme.hubSecondary)
+                        .frame(width: Col.age, alignment: .trailing)
                     Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(Theme.hubSecondary).rotationEffect(.degrees(expanded ? 90 : 0))
-                        .frame(width: 20)
+                        .frame(width: Col.button + Col.dismiss + 10, alignment: .trailing)
                 }
             }
             .onTapGesture(perform: toggle)
@@ -173,7 +191,8 @@ struct TriageGroupView: View {
             .accessibilityAddTraits(.isButton)
             if expanded {
                 ForEach(items) { i in
-                    TriageRowView(item: i, now: now, selected: selected == i.id, indent: 24, showProject: false, onAction: onAction)
+                    TriageRowView(item: i, now: now, selected: selected == i.id, indent: 20, showProject: false,
+                                  onAction: onAction, onDismiss: onDismiss)
                         .id(i.id)
                 }
             }
@@ -181,46 +200,105 @@ struct TriageGroupView: View {
     }
 }
 
-/// The All tab body: four sections, ↑↓ to move, ⏎ for the row's button. Pure over buckets + closures.
+/// One live thing: an open agent, a running builder or a cloud job. Name, project, how long, what it is doing.
+struct WorkingCardView: View {
+    let item: TriageItem
+    let now: Double
+    let selected: Bool
+    let onAction: (TriageItem) -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                TriageGlyph(tone: .working, cloud: item.isCloud)
+                Text(item.title).font(.body.weight(.medium)).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 4)
+                Text(HubTriage.age(now - item.at)).font(.callout.monospacedDigit()).foregroundStyle(Theme.hubSecondary)
+            }
+            Text(item.activity.isEmpty ? item.subtitle : item.activity).font(.callout).foregroundStyle(Theme.hubSecondary)
+                .lineLimit(1).truncationMode(.tail)
+            HStack(spacing: 8) {
+                ProjectChip(name: item.project)
+                Spacer(minLength: 4)
+                TriageButton(label: item.actionLabel.isEmpty ? "Open" : item.actionLabel, loud: false) { onAction(item) }
+            }
+        }
+        .padding(12)
+        .background(selected ? Color.white.opacity(0.10) : hovering ? Theme.hubHoverFill : Color.white.opacity(0.04),
+                    in: .rect(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(selected ? 0.18 : 0.06), lineWidth: 1))
+        .contentShape(.rect(cornerRadius: 12, style: .continuous))
+        .onHover { hovering = $0 }
+        .onTapGesture(count: 2) { onAction(item) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(item.title), \(item.isCloud ? "cloud, " : "")working, \(item.project), \(item.activity.isEmpty ? item.subtitle : item.activity)")
+        .accessibilityAction(named: item.actionLabel.isEmpty ? "Open" : item.actionLabel) { onAction(item) }
+    }
+}
+
+/// The All tab body. Wide: inbox on the left (Needs you, Done to review, Backlog), Working cards on the right.
+/// Narrow: one column (Needs you, Working, Review, Backlog). ↑↓ walk the inbox, ⏎ presses the row's button.
 struct TriageListView: View {
     let buckets: [TriageBucket]
     let now: Double
-    /// Set by the header's "N failed": select that row and scroll to it.
+    /// Set by the header's counts: select that row and scroll to it.
     @Binding var jump: String?
     var peers: AnyView = AnyView(EmptyView())
     let onAction: (TriageItem) -> Void
+    var onDismiss: (TriageItem) -> Void = { _ in }
+    var onClearBacklog: ([String]) -> Void = { _ in }
+    /// Test hook: start with the Backlog open.
+    var backlogStartsOpen = false
+    /// Most Backlog rows drawn at once; the rest are counted.
+    static let backlogCap = 150
 
     @State private var selected: String?
     @State private var expanded: Set<String> = []
-    @State private var historyOpen = false
+    @State private var backlogOpen = false
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var ids: [String] { HubTriage.visibleIDs(buckets, expanded: expanded, historyOpen: historyOpen) }
+    private func bucket(_ s: TriageSection) -> TriageBucket {
+        buckets.first { $0.section == s } ?? TriageBucket(section: s, entries: [], count: 0)
+    }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
-                    ForEach(buckets) { b in section(b) }
+        GeometryReader { geo in
+            let wide = HubLayout.isTwoColumn(width: geo.size.width)
+            ScrollViewReader { proxy in
+                Group {
+                    if wide {
+                        HStack(alignment: .top, spacing: 0) {
+                            ScrollView { column([.needsYou, .review, .backlog]).padding(.leading, 16).padding(.trailing, 12) }
+                                .frame(width: geo.size.width * HubLayout.leftShare)
+                            Divider().overlay(Color.white.opacity(0.08))
+                            ScrollView { column([.working]).padding(.leading, 12).padding(.trailing, 16) }
+                        }
+                    } else {
+                        ScrollView { column([.needsYou, .working, .review, .backlog]).padding(.horizontal, 16) }
+                    }
                 }
-                .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 20)
-            }
-            .focusable().focused($focused).focusEffectDisabled()
-            .onAppear { focused = true }
-            .onKeyPress(.upArrow) { selected = HubTriage.move(ids, from: selected, by: -1); return .handled }
-            .onKeyPress(.downArrow) { selected = HubTriage.move(ids, from: selected, by: 1); return .handled }
-            .onKeyPress(.return) { activate(); return selected == nil ? .ignored : .handled }
-            .onChange(of: selected) { _, new in
-                if let new { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) { proxy.scrollTo(new) } }
-            }
-            .onChange(of: jump) { _, new in
-                guard let new else { return }
-                selected = new; focused = true
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(new, anchor: .center) }
-                jump = nil
+                .focusable().focused($focused).focusEffectDisabled()
+                .onAppear { focused = true; if backlogStartsOpen { backlogOpen = true } }
+                .onKeyPress(.upArrow) { selected = HubTriage.move(ids(wide), from: selected, by: -1); return .handled }
+                .onKeyPress(.downArrow) { selected = HubTriage.move(ids(wide), from: selected, by: 1); return .handled }
+                .onKeyPress(.return) { activate(); return selected == nil ? .ignored : .handled }
+                .onChange(of: selected) { _, new in
+                    if let new { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) { proxy.scrollTo(new) } }
+                }
+                .onChange(of: jump) { _, new in
+                    guard let new else { return }
+                    selected = new; focused = true
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { proxy.scrollTo(new, anchor: .center) }
+                    jump = nil
+                }
             }
         }
+    }
+
+    private func ids(_ wide: Bool) -> [String] {
+        HubTriage.visibleIDs(buckets, expanded: expanded, backlogOpen: backlogOpen, includeWorking: !wide)
     }
 
     private func activate() {
@@ -234,30 +312,79 @@ struct TriageListView: View {
         }
     }
 
+    private func column(_ sections: [TriageSection]) -> some View {
+        LazyVStack(alignment: .leading, spacing: 20) {
+            ForEach(sections) { s in section(bucket(s)) }
+        }
+        .padding(.top, 4).padding(.bottom, 20)
+    }
+
     @ViewBuilder private func section(_ b: TriageBucket) -> some View {
-        if b.section == .history {
-            VStack(alignment: .leading, spacing: 4) {
-                Button { withAnimation(reduceMotion ? nil : .snappy) { historyOpen.toggle() } } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
-                            .rotationEffect(.degrees(historyOpen ? 90 : 0)).frame(width: 12)
-                        header(b)
-                    }.contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint(historyOpen ? "Collapses History" : "Shows older work")
-                if historyOpen {
-                    peers
-                    entries(b)
+        switch b.section {
+        case .backlog: backlog(b)
+        case .working:
+            VStack(alignment: .leading, spacing: 8) {
+                header(b)
+                if b.entries.isEmpty { empty(b) } else {
+                    ForEach(b.entries) { e in
+                        if case .row(let i) = e {
+                            WorkingCardView(item: i, now: now, selected: selected == i.id, onAction: onAction)
+                                .id(i.id).onTapGesture { selected = i.id }
+                        }
+                    }
                 }
             }
-        } else {
-            VStack(alignment: .leading, spacing: 4) {
-                header(b)
-                if b.entries.isEmpty {
-                    Text(b.section.emptyText).font(.callout).foregroundStyle(Theme.dimText).padding(.horizontal, 10).padding(.vertical, 6)
-                } else {
-                    entries(b)
+        default:
+            VStack(alignment: .leading, spacing: 2) {
+                header(b).padding(.bottom, 2)
+                if b.entries.isEmpty { empty(b) } else { entries(b) }
+            }
+        }
+    }
+
+    private func empty(_ b: TriageBucket) -> some View {
+        Text(b.section.emptyText).font(.callout).foregroundStyle(Theme.dimText).padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
+    private func backlog(_ b: TriageBucket) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Button { withAnimation(reduceMotion ? nil : .snappy) { backlogOpen.toggle() } } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                            .rotationEffect(.degrees(backlogOpen ? 90 : 0)).frame(width: 12)
+                        header(b)
+                    }.contentShape(.rect())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(backlogOpen ? "Collapses the Backlog" : "Shows older work")
+                if backlogOpen && b.count > 0 {
+                    let all = b.entries.flatMap { e -> [String] in
+                        if case .row(let i) = e { return [i.id] }
+                        if case .group(_, _, _, _, let items) = e { return items.map(\.id) }
+                        return []
+                    }
+                    Button { onClearBacklog(all) } label: {
+                        Text("Clear backlog").font(.callout.weight(.medium)).foregroundStyle(Theme.text)
+                            .padding(.horizontal, 10).padding(.vertical, 3)
+                            .background(Color.white.opacity(0.10), in: .capsule)
+                    }
+                    .buttonStyle(.plain).help("Hides all \(b.count) older items")
+                }
+            }
+            if backlogOpen {
+                peers
+                if b.entries.isEmpty { empty(b) }
+                let shown = Array(b.entries.prefix(Self.backlogCap))
+                ForEach(shown) { e in
+                    if case .row(let i) = e {
+                        TriageRowView(item: i, now: now, selected: selected == i.id, onAction: onAction, onDismiss: onDismiss)
+                            .id(i.id).onTapGesture { selected = i.id }
+                    }
+                }
+                if b.entries.count > shown.count {
+                    Text("+ \(b.entries.count - shown.count) older").font(.callout).foregroundStyle(Theme.dimText)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
                 }
             }
         }
@@ -269,24 +396,21 @@ struct TriageListView: View {
             Text("\(b.count)").font(.callout.monospacedDigit()).foregroundStyle(Theme.hubSecondary)
             Spacer()
         }
-        .padding(.horizontal, b.section == .history ? 0 : 4)
+        .padding(.horizontal, b.section == .backlog ? 0 : 4)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
 
     @ViewBuilder private func entries(_ b: TriageBucket) -> some View {
-        if b.section == .history && b.entries.isEmpty {
-            Text(b.section.emptyText).font(.callout).foregroundStyle(Theme.dimText).padding(.horizontal, 10).padding(.vertical, 6)
-        }
         ForEach(b.entries) { e in
             switch e {
             case .row(let i):
-                TriageRowView(item: i, now: now, selected: selected == i.id, onAction: onAction)
+                TriageRowView(item: i, now: now, selected: selected == i.id, onAction: onAction, onDismiss: onDismiss)
                     .id(i.id).onTapGesture { selected = i.id }
             case .group(let id, let project, let tone, let label, let items):
                 TriageGroupView(id: id, project: project, tone: tone, label: label, items: items, now: now,
                                 expanded: expanded.contains(id), selected: selected,
-                                toggle: { selected = id; toggle(id) }, onAction: onAction)
+                                toggle: { selected = id; toggle(id) }, onAction: onAction, onDismiss: onDismiss)
                     .id(id)
             }
         }
