@@ -49,7 +49,8 @@ struct CloudSync: Sendable {
 
     static func shq(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 
-    func sync(localRepo: String) throws -> Result {
+    func sync(localRepo: String, progress: @Sendable (CloudSendStep) -> Void = { _ in }) throws -> Result {
+        progress(.packing)
         let git = "/usr/bin/git"
         let head = run(git, ["-C", localRepo, "rev-parse", "--verify", "HEAD"])
         guard head.status == 0, head.out.count >= 40 else { throw CloudRepoError(message: "\(localRepo) is not a git repo with a commit") }
@@ -61,6 +62,7 @@ struct CloudSync: Sendable {
         defer { try? FileManager.default.removeItem(atPath: local) }
         let b = run(git, ["-C", localRepo, "bundle", "create", "-q", local, "HEAD"])
         guard b.status == 0 else { throw CloudRepoError(message: "Couldn't bundle the repo: \(b.out)") }
+        progress(.uploading)
         let cp = run("/usr/bin/scp", sshOpts + ["-q", local, "\(host):\(remote)"])
         guard cp.status == 0 else { throw CloudRepoError(message: "Couldn't copy the repo to the cloud: \(cp.out)") }
         let script = Self.remoteScript(repoPath: "\(reposDir)/\(name)", bundle: remote, user: serviceUser)

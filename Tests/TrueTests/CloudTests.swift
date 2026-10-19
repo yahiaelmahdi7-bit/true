@@ -245,3 +245,156 @@ final class CloudBox<T>: @unchecked Sendable {
     var value: T { lock.withLock { v } }
     func mutate(_ f: (inout T) -> Void) { lock.withLock { f(&v) } }
 }
+
+@Suite struct CloudComposerTests {
+    private func client(_ t: FakeCloud) -> CloudClient { CloudClient(transport: t, tokenProvider: { "tok" }) }
+    private func body(_ t: FakeCloud) throws -> [String: Any] {
+        let data = try #require(t.requests.last?.httpBody)
+        return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    @Test func createSendsModelAndEffort() async throws {
+        let t = FakeCloud(); t.body = Data(jobJSON.utf8)
+        _ = try await client(t).create(repo: "app", job: "do it", title: nil, base: "abc", model: "claude-sonnet-5-5", effort: "high")
+        let b = try body(t)
+        #expect(b["model"] as? String == "claude-sonnet-5-5" && b["effort"] as? String == "high" && b["repo"] as? String == "app")
+    }
+
+    @Test func createOmitsModelAndEffortWhenNil() async throws {
+        let t = FakeCloud(); t.body = Data(jobJSON.utf8)
+        _ = try await client(t).create(repo: "app", job: "do it")
+        let b = try body(t)
+        #expect(b["model"] == nil && b["effort"] == nil && b["title"] == nil && b["base"] == nil)
+    }
+
+    @Test func jobDecodesModelAndEffortWhenPresentAndNilWhenNot() throws {
+        let with = jobJSON.replacingOccurrences(of: "\"archived\":false", with: "\"archived\":false,\"model\":\"claude-opus-5-5\",\"effort\":\"xhigh\"")
+        let a = try JSONDecoder().decode(CloudJob.self, from: Data(with.utf8))
+        #expect(a.model == "claude-opus-5-5" && a.effort == "xhigh" && a.modelChip == "Opus 5.5 · X-High")
+        let b = try JSONDecoder().decode(CloudJob.self, from: Data(jobJSON.utf8))
+        #expect(b.model == nil && b.effort == nil && b.modelChip == nil)
+    }
+
+    @Test func healthDecodesNewFields() async throws {
+        let t = FakeCloud()
+        t.body = Data("""
+        {"factory":"ok","running":1,"queued":0,"max_jobs":2,"models":[{"id":"claude-haiku-5-5","label":"Haiku 5.5"},{"id":"x-new","label":"New One"}],
+         "default_model":"claude-haiku-5-5","efforts":["low","high"]}
+        """.utf8)
+        let h = try await client(t).health()
+        #expect(h.models.map(\.id) == ["claude-haiku-5-5", "x-new"] && h.models[0].hint == "fastest" && h.models[1].label == "New One")
+        #expect(h.efforts == ["low", "high"] && h.defaultModel == "claude-haiku-5-5")
+        #expect(h.statusLine == "Connected · streambox · 1 of 2 running")
+        #expect(t.requests[0].url?.path == "/health")
+    }
+
+    @Test func healthFallsBackToBuiltInListWhenFieldsMissing() async throws {
+        let t = FakeCloud(); t.body = Data(#"{"factory":"ok","running":0,"queued":0,"max_jobs":2}"#.utf8)
+        let h = try await client(t).health()
+        #expect(h.models == CloudModel.builtIn && h.efforts == CloudModel.builtInEfforts && h.defaultModel == nil)
+        #expect(CloudModel.builtIn.map(\.label) == ["Fable 5.1", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5"])
+        #expect(CloudModel.builtIn.map(\.hint) == ["deepest", "strong", "balanced", "fastest"])
+    }
+
+    @Test func repoStateParsing() {
+        let sha = String(repeating: "a", count: 40)
+        let log = "\(sha)\u{1f}Fix login\u{1f}1800000000"
+        let clean = CloudRepoInfo.parse(path: "/p/app", isGit: true, log: log, branch: "main\n", porcelain: "")
+        #expect(clean.isRunnable && clean.stateLabel == "clean" && clean.branch == "main" && clean.subject == "Fix login" && clean.shortSha == "aaaaaaa")
+        let dirty = CloudRepoInfo.parse(path: "/p/app", isGit: true, log: log, branch: "main", porcelain: " M a.swift\n?? b\n M c")
+        #expect(dirty.dirtyCount == 3 && dirty.stateLabel == "3 uncommitted changes · won't be sent")
+        #expect(CloudRepoInfo.parse(path: "/p/app", isGit: true, log: log, branch: "main", porcelain: " M a").stateLabel == "1 uncommitted change · won't be sent")
+        let notGit = CloudRepoInfo.parse(path: "/p/docs", isGit: false, log: "", branch: "", porcelain: "")
+        #expect(!notGit.isRunnable && notGit.problem != nil && notGit.kind == .notGit)
+        #expect(CloudRepoInfo.parse(path: "/p/new", isGit: true, log: "", branch: "main", porcelain: "").kind == .noCommit)
+        #expect(CloudRepoInfo.parse(path: "/p/app", isGit: true, log: log, branch: "HEAD", porcelain: "").branch == "detached")
+    }
+
+    @Test func repoReadUsesGitSeam() {
+        let sha = String(repeating: "b", count: 40)
+        let run: CloudRun = { _, args in
+            if args.contains("--is-inside-work-tree") { return (0, "true") }
+            if args.contains("log") { return (0, "\(sha)\u{1f}Hello\u{1f}1700000000") }
+            if args.contains("--abbrev-ref") { return (0, "dev") }
+            return (0, " M x")
+        }
+        let r = CloudRepoInfo.read(path: "/p/r", run: run)
+        #expect(r.branch == "dev" && r.dirtyCount == 1 && r.committedAt == 1_700_000_000)
+        #expect(CloudRepoInfo.read(path: "/p/r", run: { _, _ in (128, "fatal") }).kind == .notGit)
+    }
+
+    @Test func ageWords() {
+        #expect(CloudRepoInfo.age(of: 1000, now: 1030) == "now" && CloudRepoInfo.age(of: 0, now: 300) == "5m")
+        #expect(CloudRepoInfo.age(of: 0, now: 3 * 3600) == "3h" && CloudRepoInfo.age(of: 0, now: 2 * 86_400) == "2d")
+        #expect(CloudRepoInfo.age(of: 0, now: 21 * 86_400) == "3w" && CloudRepoInfo.age(of: nil, now: 5) == "")
+    }
+
+    @Test func rememberedChoicesRoundTrip() throws {
+        let suite = "cloud-prefs-test-\(UUID().uuidString)"
+        let d = try #require(UserDefaults(suiteName: suite)); defer { d.removePersistentDomain(forName: suite) }
+        let p = CloudPrefs(defaults: d)
+        #expect(p.model == "claude-sonnet-5-5" && p.effort == "high" && p.repo == nil)
+        p.model = "claude-opus-5-5"; p.effort = "max"; p.repo = "/p/app"
+        let q = CloudPrefs(defaults: d)
+        #expect(q.model == "claude-opus-5-5" && q.effort == "max" && q.repo == "/p/app")
+    }
+
+    @MainActor @Test func canRunNeedsCloudRepoAndTask() {
+        let m = CloudComposerModel(projects: [])
+        let sha = String(repeating: "c", count: 40)
+        m.link = .online
+        #expect(!m.canRun && m.blocker == "Pick a repo")
+        m.selected = CloudRepoInfo.parse(path: "/p/a", isGit: true, log: "\(sha)\u{1f}s\u{1f}1", branch: "main", porcelain: "")
+        #expect(!m.canRun && m.blocker == "Describe the job")
+        m.prompt = "  fix it \n"
+        #expect(m.canRun && m.blocker == nil)
+        m.link = .offline
+        #expect(!m.canRun)
+        m.link = .online
+        m.selected = CloudRepoInfo.parse(path: "/p/docs", isGit: false, log: "", branch: "", porcelain: "")
+        #expect(!m.canRun)
+    }
+
+    @MainActor @Test func healthRefreshKeepsBuiltInsOnOldServerAndMarksOfflineOnNetwork() async {
+        let t = FakeCloud(); t.body = Data(#"{"running":1,"max_jobs":2}"#.utf8)
+        let m = CloudComposerModel(projects: [])
+        await m.refreshHealth(client: CloudClient(transport: t, tokenProvider: { "t" }), running: 1)
+        #expect(m.link == .online && m.models == CloudModel.builtIn && m.statusLine == "Connected · streambox · 1 of 2 running")
+        t.fail = true
+        await m.refreshHealth(client: CloudClient(transport: t, tokenProvider: { "t" }), running: 0)
+        #expect(m.link == .offline && !m.canRun)
+    }
+
+    @MainActor @Test func runSendsChosenModelAndReportsFailedStep() async throws {
+        let sha = String(repeating: "d", count: 40)
+        let t = FakeCloud(); t.body = Data(jobJSON.utf8)
+        let c = CloudClient(transport: t, tokenProvider: { "t" })
+        let suite = "cloud-run-test-\(UUID().uuidString)"
+        let d = try #require(UserDefaults(suiteName: suite)); defer { d.removePersistentDomain(forName: suite) }
+        let m = CloudComposerModel(projects: [], prefs: CloudPrefs(defaults: d))
+        m.link = .online; m.prompt = "do it"; m.model = "claude-haiku-5-5"; m.effort = "low"
+        m.selected = CloudRepoInfo.parse(path: "/p/app", isGit: true, log: "\(sha)\u{1f}s\u{1f}1", branch: "main", porcelain: "")
+        // Upload fails: the sheet stays open, inputs kept, the failing step is Uploading.
+        var finished = false
+        await m.run(client: c, sync: { _, progress in progress(.uploading); throw CloudRepoError(message: "scp broke") }, onDone: { finished = true })
+        #expect(!finished && m.send == .failed(.uploading, "scp broke") && m.prompt == "do it" && t.requests.isEmpty)
+        // Retry succeeds: the request carries model + effort, choices are remembered.
+        await m.run(client: c, sync: { _, _ in CloudSync.Result(repoName: "app", sha: sha, dirty: false) }, onDone: { finished = true })
+        let data = try #require(t.requests.first(where: { $0.httpMethod == "POST" })?.httpBody)
+        let b = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(finished && b["model"] as? String == "claude-haiku-5-5" && b["effort"] as? String == "low" && b["base"] as? String == sha)
+        #expect(d.string(forKey: CloudPrefs.modelKey) == "claude-haiku-5-5" && d.string(forKey: CloudPrefs.repoKey) == "/p/app")
+    }
+
+    @Test func triageCarriesModelChip() {
+        var j = CloudJob(id: "j", title: "t", repo: "app", branch: "b", status: "working", createdAt: 0, updatedAt: 0)
+        #expect(HubTriage.item(j, now: 10).modelChip == "")
+        j.model = "claude-sonnet-5-5"; j.effort = "high"
+        #expect(HubTriage.item(j, now: 10).modelChip == "Sonnet 5.5 · High")
+    }
+
+    @Test func editorGrowsFromSixToFourteenLines() {
+        #expect(CloudComposerContent.editorHeight(for: "") == CloudComposerContent.editorHeight(for: "a\nb\nc"))
+        #expect(CloudComposerContent.editorHeight(for: String(repeating: "x\n", count: 40)) == CGFloat(14 * 20 + 16))
+    }
+}

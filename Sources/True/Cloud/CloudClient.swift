@@ -16,12 +16,18 @@ struct CloudJob: Codable, Equatable, Identifiable, Sendable {
     var viewedAt: Double?
     var unviewed: Bool?
     var archived: Bool?
+    /// What the job was started with (nil = the server's default, or an older server).
+    var model: String?
+    var effort: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, repo, branch, status, reason, unviewed, archived
+        case id, title, repo, branch, status, reason, unviewed, archived, model, effort
         case foremanStatus = "foreman_status", needsYouReason = "needs_you_reason"
         case createdAt = "created_at", updatedAt = "updated_at", viewedAt = "viewed_at"
     }
+
+    /// "Sonnet 5.5 · High", or nil when neither was recorded.
+    var modelChip: String? { CloudModel.chip(model: model, effort: effort) }
 
     var isWorking: Bool { status == "working" }
     var needsYou: Bool { status == "needsYou" }
@@ -176,14 +182,18 @@ struct CloudClient: Sendable {
         do { return try JSONDecoder().decode(type, from: data) } catch { throw CloudError.bad }
     }
 
+    func health() async throws -> CloudHealth { try decode(CloudHealth.self, try await call("GET", "health")) }
     func jobs() async throws -> [CloudJob] { try decode([CloudJob].self, try await call("GET", "jobs")) }
     func detail(_ id: String) async throws -> CloudJobDetail { try decode(CloudJobDetail.self, try await call("GET", "jobs/\(id)")) }
 
     /// `base` is a commit sha the sync step just put on the VPS; nil = the VPS clone's HEAD.
-    func create(repo: String, job: String, title: String? = nil, base: String? = nil) async throws -> CloudJob {
+    func create(repo: String, job: String, title: String? = nil, base: String? = nil,
+                model: String? = nil, effort: String? = nil) async throws -> CloudJob {
         var body: [String: Any] = ["repo": repo, "job": job]
         if let title, !title.isEmpty { body["title"] = title }
         if let base { body["base"] = base }
+        if let model, !model.isEmpty { body["model"] = model }
+        if let effort, !effort.isEmpty { body["effort"] = effort }
         return try decode(CloudJob.self, try await call("POST", "jobs", json: body))
     }
 

@@ -12,6 +12,11 @@ struct HubOverlay: View {
     /// Gap kept between the card and the window edge when the window is small.
     static let margin: CGFloat = 24
     static let sizeKey = "hub.size"
+    /// Legibility over a busy terminal wins over glass: a dark scrim, a solid black backing under the glass and a
+    /// near-opaque tint on it (~0.94 black in all), so terminal text never bleeds through the rows.
+    static let scrimOpacity = 0.5
+    static let backingOpacity = 0.7
+    static let tintOpacity = 0.8
     @State private var live: CGSize?
     @State private var dragStart: CGSize?
 
@@ -31,7 +36,7 @@ struct HubOverlay: View {
             ZStack {
                 if registry.panelOpen {
                     // Near-clear black (not clear) so the scrim takes the click that closes the Hub.
-                    Color.black.opacity(0.35)
+                    Color.black.opacity(Self.scrimOpacity)
                         .contentShape(Rectangle())
                         .onTapGesture { registry.panelOpen = false }
                         .transition(.opacity)
@@ -39,7 +44,8 @@ struct HubOverlay: View {
                     HubPanel(registry: registry)
                         .frame(width: size.width, height: size.height)
                         .overlay(alignment: .bottomTrailing) { resizeGrip(size: size, window: geo.size) }
-                        .glassSurface(Self.shape, tint: .black.opacity(0.7), hairline: false)
+                        .glassSurface(Self.shape, tint: .black.opacity(Self.tintOpacity), hairline: false)
+                        .background(Self.shape.fill(Color.black.opacity(Self.backingOpacity)))
                         .overlay(Self.shape.strokeBorder(Theme.hubCardStroke, lineWidth: 0.5))
                         .shadow(color: .black.opacity(0.45), radius: 30, y: 12)
                         // Swallow clicks on the card so they never reach the scrim or the terminal.

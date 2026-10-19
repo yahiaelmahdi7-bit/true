@@ -149,23 +149,19 @@ struct HubSnapshotTests {
         return CrewSnapshot(projectTitle: "true", project: [project, design], global: global)
     }
 
-    /// The pop-up as it sits in a window: busy fake terminal text, the 0.35 scrim, and the card centered at the real
+    /// The pop-up as it sits in a window: a dense multi-colour fake terminal, the scrim, and the card centered at the real
     /// width/height rule. Real glass can't render offscreen, so the backing approximates it (black ~0.7 over
     /// ultraThinMaterial): judges hierarchy, spacing, width use and contrast, not refraction.
     private func popUp<V: View>(window: CGSize = CGSize(width: 1000, height: 780), @ViewBuilder _ content: () -> V) -> some View {
         let sz = HubLayout.size(saved: nil, screen: window, window: window, margin: HubOverlay.margin)
         let (w, h) = (sz.width, sz.height)
         return ZStack {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(0..<56, id: \.self) { i in
-                    Text("$ swift test --filter Hub\(i) … Test run with \(320 + i) tests passed after 0.\(i)s in suite HubSnapshotTests")
-                        .font(.system(size: 12, design: .monospaced)).foregroundStyle(.green.opacity(0.8)).lineLimit(1)
-                }
-            }.frame(width: window.width, height: window.height, alignment: .topLeading).clipped()
-            Color.black.opacity(0.35)
+            BusyBackdrop(size: window)
+            Color.black.opacity(HubOverlay.scrimOpacity)
             content()
                 .frame(width: w, height: h)
-                .background(Color.black.opacity(0.7), in: HubOverlay.shape)
+                .background(Color.black.opacity(HubOverlay.tintOpacity), in: HubOverlay.shape)
+                .background(Color.black.opacity(HubOverlay.backingOpacity), in: HubOverlay.shape)
                 .background(.ultraThinMaterial, in: HubOverlay.shape)
                 .overlay(HubOverlay.shape.strokeBorder(Theme.hubCardStroke, lineWidth: 0.5))
                 .shadow(color: .black.opacity(0.45), radius: 30, y: 12)

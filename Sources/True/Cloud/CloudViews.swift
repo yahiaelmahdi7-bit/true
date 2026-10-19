@@ -14,67 +14,20 @@ extension CloudJob {
     var chipLoud: Bool { isWorking || needsYou || isFailed }
 }
 
+/// "Sonnet 5.5 · High": what the job was started with.
+struct ModelChip: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.caption).foregroundStyle(Theme.hubSecondary).lineLimit(1).fixedSize()
+            .padding(.horizontal, 8).padding(.vertical, 2).background(Color.white.opacity(0.07), in: .capsule)
+    }
+}
+
 struct CloudStatusChip: View {
     let job: CloudJob
     var body: some View {
         Text(job.chipLabel).font(.callout.weight(job.chipLoud ? .semibold : .regular))
             .foregroundStyle(job.chipLoud ? Theme.text : Theme.hubSecondary).lineLimit(1)
-    }
-}
-
-/// Pick a repo + a prompt → sync the repo to the VPS → create the job.
-struct NewCloudJobSheet: View {
-    let projects: [String]
-    var done: () -> Void
-    @State private var repo = ""
-    @State private var prompt = ""
-    @State private var busy = false
-    @State private var note: String?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Run in cloud").font(.headline)
-            HStack {
-                TextField("Project folder", text: $repo).textFieldStyle(.roundedBorder)
-                Menu("Pick…") {
-                    ForEach(projects.filter { !$0.isEmpty }, id: \.self) { p in Button((p as NSString).lastPathComponent) { repo = p } }
-                    if !projects.isEmpty { Divider() }
-                    Button("Choose folder…") { choose() }
-                }.fixedSize()
-            }
-            TextEditor(text: $prompt).font(.body).frame(minHeight: 110)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
-            Text("Only committed work is sent; the cloud works on a copy and you review a diff before anything lands here.")
-                .font(.caption).foregroundStyle(.secondary)
-            if let note { Text(note).font(.callout).foregroundStyle(.secondary).lineLimit(3) }
-            HStack {
-                Spacer()
-                Button("Cancel") { done() }.keyboardShortcut(.cancelAction)
-                Button(busy ? "Sending…" : "Send") { Task { await send() } }
-                    .keyboardShortcut(.defaultAction).disabled(busy || repo.isEmpty || prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(16).frame(width: 480)
-    }
-
-    private func choose() {
-        let p = NSOpenPanel(); p.canChooseDirectories = true; p.canChooseFiles = false
-        if p.runModal() == .OK, let u = p.url { repo = u.path }
-    }
-
-    private func send() async {
-        busy = true; note = "Sending your repo to the cloud…"
-        let (path, text, client) = (repo, prompt, CloudStore.shared.client)
-        let outcome: Result<CloudSync.Result, Error> = await Task.detached { Result { try CloudSync().sync(localRepo: path) } }.value
-        switch outcome {
-        case .failure(let e): note = e.localizedDescription; busy = false
-        case .success(let r):
-            do {
-                _ = try await client.create(repo: r.repoName, job: text, title: nil, base: r.sha)
-                await CloudStore.shared.refresh()
-                done()
-            } catch { note = error.localizedDescription; busy = false }
-        }
     }
 }
 
@@ -98,7 +51,10 @@ struct CloudJobSheet: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Cloud job · \(live.repo)").font(.caption).foregroundStyle(.secondary)
-                    HStack { Text(live.title).font(.headline).lineLimit(1).truncationMode(.tail); CloudStatusChip(job: live) }
+                    HStack {
+                        Text(live.title).font(.headline).lineLimit(1).truncationMode(.tail); CloudStatusChip(job: live)
+                        if let chip = live.modelChip { ModelChip(text: chip) }
+                    }
                 }
                 Spacer()
                 if live.isWorking { Button("Stop") { act { _ = try await CloudStore.shared.client.stop(job.id) } } }

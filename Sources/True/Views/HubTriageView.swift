@@ -128,9 +128,12 @@ struct TriageRowView: View {
         TriageRowFrame(selected: selected, indent: indent) {
             HStack(spacing: 10) {
                 TriageGlyph(tone: item.tone, cloud: item.isCloud)
-                Text(item.title).font(.body).foregroundStyle(item.section == .backlog ? Theme.hubSecondary : Theme.text)
-                    .lineLimit(1).truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 8) {
+                    Text(item.title).font(.body).foregroundStyle(item.section == .backlog ? Theme.hubSecondary : Theme.text)
+                        .lineLimit(1).truncationMode(.middle)
+                    if !item.modelChip.isEmpty { ModelChip(text: item.modelChip) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 ProjectChip(name: showProject ? item.project : "").frame(width: Col.chip, alignment: .leading)
                 Text(triageTime(item, now: now)).font(.callout.monospacedDigit()).foregroundStyle(Theme.hubSecondary)
                     .frame(width: Col.age, alignment: .trailing)
@@ -220,6 +223,7 @@ struct WorkingCardView: View {
                 .lineLimit(1).truncationMode(.tail)
             HStack(spacing: 8) {
                 ProjectChip(name: item.project)
+                if !item.modelChip.isEmpty { ModelChip(text: item.modelChip) }
                 Spacer(minLength: 4)
                 TriageButton(label: item.actionLabel.isEmpty ? "Open" : item.actionLabel, loud: false) { onAction(item) }
             }

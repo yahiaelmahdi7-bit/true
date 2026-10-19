@@ -44,6 +44,8 @@ struct TriageItem: Identifiable, Equatable {
     /// Seconds since 1970 the row's clock runs from (start while working, end once finished).
     var at: Double
     var isCloud = false
+    /// "Sonnet 5.5 · High" for a cloud job that recorded it; empty = none.
+    var modelChip = ""
     /// The one button on the row; empty = none.
     var actionLabel: String
     var action: TriageAction
@@ -221,7 +223,7 @@ enum HubTriage {
         let unviewed = j.unviewed == true
         func make(_ sec: TriageSection, _ tone: TriageTone, _ sub: String, _ label: String, _ at: Double) -> TriageItem {
             TriageItem(id: "cloud:\(j.id)", section: sec, tone: tone, title: j.title, subtitle: sub, project: repo, at: at,
-                       isCloud: true, actionLabel: label, action: .cloud(j.id), noun: "cloud jobs")
+                       isCloud: true, modelChip: j.modelChip ?? "", actionLabel: label, action: .cloud(j.id), noun: "cloud jobs")
         }
         if j.needsYou { return make(.needsYou, .needsYou, j.needsYouReason ?? "Needs an answer to continue", "Answer", j.updatedAt) }
         if j.isWorking {
