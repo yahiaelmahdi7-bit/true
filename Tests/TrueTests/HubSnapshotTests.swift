@@ -153,8 +153,8 @@ struct HubSnapshotTests {
     /// width/height rule. Real glass can't render offscreen, so the backing approximates it (black ~0.7 over
     /// ultraThinMaterial): judges hierarchy, spacing, width use and contrast, not refraction.
     private func popUp<V: View>(window: CGSize = CGSize(width: 1000, height: 780), @ViewBuilder _ content: () -> V) -> some View {
-        let w = min(HubPanelContent.width, window.width - 2 * HubOverlay.margin)
-        let h = min(window.height * HubOverlay.heightShare, HubOverlay.maxHeight)
+        let sz = HubLayout.size(saved: nil, screen: window, window: window, margin: HubOverlay.margin)
+        let (w, h) = (sz.width, sz.height)
         return ZStack {
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(0..<56, id: \.self) { i in

@@ -463,6 +463,10 @@ final class WatcherStore {
                 if GitSignals.parseAhead(await git(GitSignals.aheadArgv(repo: item.repo, upstream: up, branch: parts[1])) ?? "").isEmpty {
                     emit(InboxEvent(.resolved, id: item.id, at: now, reason: "Pushed")); decision("done-code", ["item": item.id])
                 }
+            } else if item.source == "builders", item.state == .open,
+                      now - item.at > HubTriage.liveWindow || !builders.contains(where: { $0.id == item.subject }) {
+                // Expiry: stale or orphaned builder items never self-clear otherwise.
+                emit(InboxEvent(.resolved, id: item.id, at: now, reason: "Aged out")); decision("done-code", ["item": item.id, "aged": true])
             } else if item.state == .approved, let bid = item.builderID, let fb = builders.first(where: { $0.id == bid }), fb.state == .done {
                 emit(InboxEvent(.lookedFixed, id: item.id, at: now)); decision("done-code", ["item": item.id, "fixBuilder": bid])
             } else if item.source == "builders", let b = builders.first(where: { $0.id == item.subject }) {

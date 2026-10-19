@@ -40,11 +40,11 @@ enum TriageFixture {
             TriageFixture.builder("f", "a", .failed), TriageFixture.builder("d", "a", .done),
             TriageFixture.builder("old", "a", .done, acked: true), TriageFixture.builder("p", "a", .paused)],
             cloud: [TriageFixture.cloud("c1", "needsYou")])
-        #expect(b.map(\.section) == [.needsYou, .working, .review, .history])
+        #expect(b.map(\.section) == [.needsYou, .working, .review, .backlog])
         #expect(bucket(b, .needsYou).count == 3)      // failed + paused + cloud needsYou
         #expect(bucket(b, .working).count == 1)
         #expect(bucket(b, .review).count == 1)
-        #expect(bucket(b, .history).count == 1)       // acked done
+        #expect(bucket(b, .backlog).count == 1)       // acked done
     }
 
     @Test func needsYouSortsAmberBeforeFailed() {
@@ -89,7 +89,7 @@ enum TriageFixture {
 
     @Test func viewedCloudResultsGoToHistory() {
         let b = TriageFixture.buckets([], cloud: [TriageFixture.cloud("v", "done", unviewed: false), TriageFixture.cloud("u", "failed", unviewed: true)])
-        #expect(bucket(b, .history).count == 1 && bucket(b, .needsYou).count == 1)
+        #expect(bucket(b, .backlog).count == 1 && bucket(b, .needsYou).count == 1)
     }
 
     @Test func headerCountsAndJumpTarget() {
@@ -101,10 +101,10 @@ enum TriageFixture {
 
     @Test func keyboardOrderAndClamp() {
         let b = TriageFixture.buckets((0..<3).map { TriageFixture.builder("g\($0)", "p", .done) } + [TriageFixture.builder("f", "q", .failed)])
-        let collapsed = HubTriage.visibleIDs(b, expanded: [], historyOpen: false)
+        let collapsed = HubTriage.visibleIDs(b, expanded: [], backlogOpen: false)
         #expect(collapsed.count == 2)
         let group = collapsed[1]
-        #expect(HubTriage.visibleIDs(b, expanded: [group], historyOpen: false).count == 5)
+        #expect(HubTriage.visibleIDs(b, expanded: [group], backlogOpen: false).count == 5)
         #expect(HubTriage.move(collapsed, from: nil, by: 1) == collapsed.first)
         #expect(HubTriage.move(collapsed, from: nil, by: -1) == collapsed.last)
         #expect(HubTriage.move(collapsed, from: collapsed.last, by: 1) == collapsed.last)
@@ -114,8 +114,8 @@ enum TriageFixture {
 
     @Test func historyRowsOnlyWalkableWhenOpen() {
         let b = TriageFixture.buckets([TriageFixture.builder("old", "p", .done, acked: true)])
-        #expect(HubTriage.visibleIDs(b, expanded: [], historyOpen: false).isEmpty)
-        #expect(HubTriage.visibleIDs(b, expanded: [], historyOpen: true).count == 1)
+        #expect(HubTriage.visibleIDs(b, expanded: [], backlogOpen: false).isEmpty)
+        #expect(HubTriage.visibleIDs(b, expanded: [], backlogOpen: true).count == 1)
     }
 
     @Test func cloudLinkStates() {
