@@ -66,14 +66,14 @@ struct CloudComposerContent: View {
             header
             Divider().overlay(Theme.hairline)
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 16) {
                     repoSection
                     taskSection
                     modelSection
                     effortSection
                     moreSection
                 }
-                .padding(24)
+                .padding(20)
                 .disabled(model.isSending)
             }
             .scrollIndicators(.hidden)
@@ -82,7 +82,7 @@ struct CloudComposerContent: View {
         }
         .background(Self.base)
         .foregroundStyle(Theme.text)
-        .frame(maxHeight: 760)
+        .frame(maxHeight: 840)
         .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -164,7 +164,7 @@ struct CloudComposerContent: View {
                             }
                         }
                         .scrollIndicators(.hidden)
-                        .frame(maxHeight: 4 * 56)
+                        .frame(maxHeight: 3 * 56)
                         .onChange(of: model.cursor) { _, c in if list.indices.contains(c) { proxy.scrollTo(list[c].id) } }
                     }
                 }
