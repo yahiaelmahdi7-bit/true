@@ -125,3 +125,31 @@ enum TriageFixture {
         #expect(CloudLink.offline.label == "Cloud · offline — retry")
     }
 }
+
+@MainActor
+@Suite struct HubTriageInboundTests {
+    private func job(_ id: String, _ status: PeerStatus, _ mode: PeerInboundMode = .ask) -> InboundJob {
+        InboundJob(req: PeerJobRequest(jobId: id, title: "Job \(id)", brief: "b", repo: "/srv/gamenight", base: "main",
+                                       mode: .background, fromAgent: "a"),
+                   peerLabel: "Mini", peerMailbox: "m", status: status, note: "", inboundMode: mode, flags: [],
+                   received: Date(timeIntervalSince1970: now - 30), finished: nil, branch: "b")
+    }
+
+    @Test func queuedAskJobLandsInNeedsYouWithAccept() {
+        let b = HubTriage.build(groups: [], seatStatus: { _ in .asleep }, cloud: [], watcher: [],
+                                inbound: [job("1", .queued)], now: now)
+        let needs = b.first { $0.section == .needsYou }!
+        guard case .row(let i) = needs.entries.first else { Issue.record("expected a row"); return }
+        #expect(i.actionLabel == "Accept")
+        #expect(i.action == .inbound("1"))
+        #expect(i.tone == .needsYou)
+        #expect(i.project == "gamenight")
+        #expect(needs.count == 1)
+    }
+
+    @Test func acceptedOrAutoJobsStayOut() {
+        let b = HubTriage.build(groups: [], seatStatus: { _ in .asleep }, cloud: [], watcher: [],
+                                inbound: [job("2", .working), job("3", .queued, .auto), job("4", .done)], now: now)
+        #expect(b.allSatisfy { $0.count == 0 })
+    }
+}

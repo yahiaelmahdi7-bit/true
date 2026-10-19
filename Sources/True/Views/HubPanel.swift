@@ -62,6 +62,7 @@ struct HubPanel: View {
     @State private var cloudDetail: CloudJob?
     @State private var showNewCloud = false
     @State private var watcherOpen: InboxItem?
+    @State private var inbound: [InboundJob] = []
 
     private struct CrewTrigger: Hashable { var active: Bool; var cwd: String }
 
@@ -92,11 +93,13 @@ struct HubPanel: View {
                             peerVerdict: { overseer.verdict(forSession: $0.sessionID)?.kind },
                             cloudJobs: cloud.jobs, cloudLink: .of(error: cloud.error, loaded: cloud.loaded),
                             watcherItems: WatcherStore.active ? watcher.needsYou : [],
+                            inboundJobs: inbound,
                             onRunCloud: { showNewCloud = true },
                             onRetryCloud: { Task { await cloud.refresh() } },
                             onTriage: { triageAction($0) })
         }
-        .onAppear { hub.hubAppeared(); cloud.visible = true; cloud.start(); Task { await cloud.refresh() } }
+        .onReceive(NotificationCenter.default.publisher(for: .peersChanged)) { _ in reloadInbound() }
+        .onAppear { reloadInbound(); hub.hubAppeared(); cloud.visible = true; cloud.start(); Task { await cloud.refresh() } }
         .onDisappear { cloud.visible = false }
         // Crew scan: only while the Crew tab is showing, and again when the focused pane's cwd changes.
         // `.task(id:)` runs once per id change and cancels with the view: no watcher, timer or poll.
@@ -115,6 +118,10 @@ struct HubPanel: View {
         .sheet(item: $watcherOpen) { WatcherItemSheet(item: $0, store: watcher) }
     }
 
+    private func reloadInbound() {
+        inbound = PeerService.engine.inboundJobs().filter { $0.status == .queued && $0.inboundMode == .ask }
+    }
+
     private var projectKeys: [String] {
         HubModel.build(seats: registry.crew, seatStatus: { registry.statusOf($0) }, seatAwake: { registry.isAwake($0) },
                        peers: hub.peers, builders: hub.builders, now: Date().timeIntervalSince1970).map(\.key)
@@ -129,6 +136,7 @@ struct HubPanel: View {
         case .seat(let name): seatActions.wake(name)
         case .peer(let pid):
             if let p = hub.peers.first(where: { $0.pid == pid }) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p.cwd)]) }
+        case .inbound(let id): PeerService.engine.accept(id); reloadInbound()
         case .pane(let pane): WorkspaceModel.shared.focus(pane: pane); registry.panelOpen = false
         }
     }
@@ -172,6 +180,7 @@ struct HubPanelContent: View {
     var cloudJobs: [CloudJob] = []
     var cloudLink: CloudLink = .checking
     var watcherItems: [InboxItem] = []
+    var inboundJobs: [InboundJob] = []
     var onRunCloud: () -> Void = {}
     var onRetryCloud: () -> Void = {}
     var onTriage: (TriageItem) -> Void = { _ in }
@@ -180,7 +189,7 @@ struct HubPanelContent: View {
 
     private var buckets: [TriageBucket] {
         HubTriage.build(groups: groups, seatStatus: actions.status, cloud: cloudJobs, watcher: watcherItems,
-                        yourMove: yourMove, now: now)
+                        yourMove: yourMove, inbound: inboundJobs, now: now)
     }
 
     var body: some View {

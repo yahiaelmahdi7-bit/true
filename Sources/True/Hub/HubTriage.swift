@@ -30,7 +30,7 @@ enum TriageTone: Int {
 }
 
 enum TriageAction: Equatable {
-    case builder(String), cloud(String), watcher(String), seat(String), peer(Int32), pane(UUID)
+    case builder(String), cloud(String), watcher(String), seat(String), peer(Int32), pane(UUID), inbound(String)
 }
 
 struct TriageItem: Identifiable, Equatable {
@@ -78,7 +78,7 @@ enum HubTriage {
     /// Everything on screen, in the four sections (always all four, so empty states can show).
     @MainActor
     static func build(groups: [HubProjectGroup], seatStatus: (String) -> AgentStatus, cloud: [CloudJob],
-                      watcher: [InboxItem], yourMove: [YourMoveRow] = [], now: Double) -> [TriageBucket] {
+                      watcher: [InboxItem], yourMove: [YourMoveRow] = [], inbound: [InboundJob] = [], now: Double) -> [TriageBucket] {
         var items: [TriageItem] = []
         for g in groups {
             for a in g.seats {
@@ -112,6 +112,14 @@ enum HubTriage {
                                     tone: r.kind == .blocked ? .failed : .needsYou, title: r.name,
                                     subtitle: "\(r.kind.label) · \(r.reason)", project: r.project, at: r.at.timeIntervalSince1970,
                                     actionLabel: "Open", action: .pane(r.pane), noun: "panes"))
+        }
+        // A peer's job waiting on Accept is yours to answer; once accepted it is the peer-jobs list's business.
+        for j in inbound where j.status == .queued && j.inboundMode == .ask {
+            let repo = j.req.hasRepo ? (j.req.repo as NSString).lastPathComponent : "no project"
+            items.append(TriageItem(id: "inbound:\(j.id)", section: .needsYou, tone: .needsYou, title: j.req.title,
+                                    subtitle: "From \(j.peerLabel) · waiting for Accept", project: repo,
+                                    at: j.received.timeIntervalSince1970, actionLabel: "Accept",
+                                    action: .inbound(j.id), noun: "peer jobs"))
         }
         return TriageSection.allCases.map { sec in
             let mine = sorted(items.filter { $0.section == sec })
