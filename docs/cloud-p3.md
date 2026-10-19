@@ -34,6 +34,6 @@ Only committed work travels; uncommitted changes are not sent. Binary files are 
   then `git -C <repo> log cloud/<id>`.
 
 ## Install in place (not done by this build)
-The builder did not touch `/Users/y/Projects/true/True.app`. From the main checkout after merging this branch:
-`~/.claude/…` unload the Clip Studio agent if needed, then `./scripts/package.sh` and replace/restart True yourself.
-To try it first from the worktree: `TRUE_APP_OUT=/tmp/True-cloud.app ./scripts/package.sh` (check the script's header for its flags).
+The builder did not touch `/Users/y/Projects/true/True.app`. After merging this branch, in the main checkout: unload the Clip Studio
+KeepAlive agent (it relaunches the app on quit), run `./scripts/package.sh`, then replace and restart True.
+To inspect first without installing: `TRUE_APP_OUT=/tmp/True-cloud.app ./scripts/package.sh` from this worktree.
