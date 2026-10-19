@@ -1,0 +1,4 @@
+# OSS adoption shortlist (research 2026-10-14, GitHub API verified; code not read)
+Adopt first: silero-vad (MIT) speech map + auto-editor (Unlicense) cut-list ideas -> cut pace | pycaps (MIT) caption presets | mediapipe (Apache) faces + pyannote (MIT, gated weights) diarization + Light-ASD (MIT, test first) who-talks | ffmpeg-normalize + DeepFilterNet (check LICENSE files) audio | mine openshorts / AI-Youtube-Shorts-Generator / FunClip (MIT) for moment+hook prompts | parakeet-mlx (Apache) Apple-Silicon ASR w/ word times.
+Avoid: lossless-cut (GPL GUI; only idea = stream-copy concat), storytold (Rust "ArtCraft" app clones, suspicious stars, no clipping code), AGPL: ultralytics, whisper-timestamped, aesthetic-predictor-v2-5; Wav2Lip (no license); Remotion (company license); stale TalkNet/TransNetV2/ShortGPT.
+No open-source virality scorer exists -> build our own, validate on held-out clips.

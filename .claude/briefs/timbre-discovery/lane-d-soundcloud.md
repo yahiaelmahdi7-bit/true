@@ -1,0 +1,7 @@
+# Lane D — SoundCloud source in timbre-feed (Node)
+Repo: this worktree (branched from builder/feed-discovery-20261013-234835). Commit locally, never push/merge, never restart the live launchd service net.prismlens.timbre-feed, never touch ~/Music or the real library (use temp dirs in tests).
+Goal (Yahia): SoundCloud as a real source.
+1. Playback fallback order for a track not owned: TorBox lossless (existing) -> YouTube stand-in (existing src/lossy.js, yt-dlp ytsearch) -> SoundCloud via yt-dlp `scsearch` (same skip-filters: slowed/reverb/nightcore/sped up; duration within ±10% of catalog duration when known). Tag source in the result + ticket (`source: "torbox"|"youtube"|"soundcloud"`). Same .opus remux path so Navidrome indexes it.
+2. Search: `/find` also returns SoundCloud-only hits (tracks the catalog doesn't have: remixes, edits, unreleased) via yt-dlp `scsearch10:<q>` --flat-playlist -J, merged into ranking (src/rank.js) below exact catalog matches, dedupe by normalized artist+title, each with `source:"soundcloud"`, url, duration, artwork if present. Bounded time: SoundCloud lookup in parallel with catalog, 4 s timeout, never blocks results.
+3. `POST /get` accepts a soundcloud url/id -> fetch via yt-dlp -> ticket like others.
+4. Tests with recorded fixtures/mocked exec, no network. `npm test` green except the pre-existing feed.test.js hang (confirm on base). Write proofs/SOUNDCLOUD.md: one real smoke on a temp port (e.g. 8798, temp home + temp library) searching 3 real queries, showing SC hits and one real fetch, then stop it.

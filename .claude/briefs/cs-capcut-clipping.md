@@ -1,0 +1,8 @@
+# Redo: CLIPPING presets only (Yahia: "the ones u showed suck — should be clipping ones, not trending")
+Your last run ranked ALL CapCut templates by uses -> music/meme templates ("OK LET'S GO!!" chrome). Rejected. Redo the reference set:
+1. Only podcast/talking-head CLIPPING sources: CapCut template + text-preset searches like "podcast", "podcast captions", "clipping", "subtitles", "talking head", "Hormozi captions", "interview clip"; CapCut auto-caption style names; TikTok templates in those searches. Rank by uses WITHIN that set.
+2. Second, stronger source: real top clipper output. Pull 10-15 high-view vertical clips from big podcast-clip accounts (e.g. DOAC clips, Flagrant clips, Solved/Mark Manson clipper accounts, Hormozi/JRE clip channels on Shorts) with yt-dlp into ~/Projects/clip-studio-refs/clippers/ (refs only, never in renders). Measure: caption style (font weight, case, words per card, highlight colour, pop curve, position), cut interval, punch-in frequency/scale, hook text in first 2s.
+3. Rebuild library presets from THESE measurements; drop or mark 'non-clipping' the music-template presets. Fix zoom crops so the speaker's face is never cut (anchor on face, logo kept whole).
+4. Proof: docs/proof/capcut-presets/clipping/ — per preset: real clipper frames (top) vs our rebuild on mom_8f399fa883 (bottom), rendered through the REAL caption pipeline, not a demo composite. README table with source account/template + measured params.
+Same rules: branch only, no merge/push, library DB/app untouched, own fonts/SFX only.
+(Note for any later run: REA skill enhanced — ~/.claude/skills/rea-mode/SKILL.md, r2 + Ghidra installed; CapCut bundle may be inspected for preset implementation, evidence only.)

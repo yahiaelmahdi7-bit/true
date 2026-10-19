@@ -1,0 +1,23 @@
+# Brief: Clip Farm submission system + global-rule guards (Clip Studio engine)
+
+Yahia: "go over how to submit a clip and set up a system to auto do this, and learn the global rules."
+Source of truth: ~/Projects/clip-studio-research/clipfarm-course/clipfarm-how-to-submit-clips.txt and clipfarm-global-campaign-rules.txt. Read both first.
+Repo: ~/Projects/clip-studio (you are in a builder worktree of it). Tests: `cd engine && env -u CLIP_PIPELINE .venv/bin/python -m pytest -q -p no:cacheprovider` (baseline 1255 passed / 2 skipped).
+Key code: engine/clipengine/slot.py (post step, gates), submit.py (Content Rewards submit, linked handles, rules_green), inapp.py, publish.py (final_text, check_rules), autopilot.py, conductor.py, editroom.py (tag_check, run_checks), campaigns.py.
+
+## Build (in this order, each with tests)
+1. NO-SPAM = DIFFERENT CLIPS PER PLATFORM/ACCOUNT (rule 7, highest priority). Yahia's design (2026-10-14): "make sure we clip in different variations and clips from the same content, so maybe more random clips on one, then more biased to one side on another, then another bias side and so on." So:
+   a) The slot NEVER posts the same rendered clip to two platforms/accounts. Each platform/account gets its own clip from the campaign queue.
+   b) Give each account a selection "lane" so their feeds differ: e.g. account 1 = broad/random pick of the best moments; account 2 = biased to one side (one speaker/angle/topic cluster, e.g. guest-led moments); account 3 = the other side (host-led), and so on. Store the lane per account in config; picker respects it; same moment may appear on two accounts ONLY as a genuinely different edit (different cut range + different opening line/hook + different framing emphasis), never a re-post.
+   c) Variant renders: reuse what exists (CLIP_VARIANT=B / variant_maker cold-open, hook_finder alternatives, speaker/framing options in render) — find them, wire a "variant for account N" call. If a render-side option is missing (e.g. framing bias toward the other speaker), add the smallest flag needed and note it; another builder (cs-clipfarm-course) is changing render/caption look, so keep render edits minimal and isolated.
+   d) Per-platform text too: own hook line, caption, CTA per post, from the clip's real transcript only (no invented claims/clickbait); required tags per platform stay.
+   e) Gate: refuse a post whose clip id, OR (moment id + same cut range), OR (hook, caption, CTA) matches an earlier post in this campaign on any account. Tests for a-e.
+2. CONTENT REWARDS SUBMIT per the guide: title (post title), video link, demographics image. A blank demographics screenshot of the new video is accepted: find how submit/inapp handles the image today; if missing, add the field and the step that captures/attaches it, or a clear needs_you naming exactly what is missing. Store the returned submission ID on the submission row.
+3. PAYOUT-TICKET HELPER (do NOT automate Discord or the phone): per submitted post, track views vs the campaign's minimum payout floor (store floor in campaign rules as min_payout_views or similar; floor may change in first 72 h, so keep it editable). When the floor is hit AND >= 24 h old, emit ONE needs_you item: "Record analytics for <post>" with the guide's exact recording checklist (start on phone home screen -> open the app FROM the App Store -> overview/reach/engagement/audience for YT; overview/engagement/viewers for IG) and a prefilled ticket text (submission ID, post URL, campaign, platform, views). Never before the floor (Clip Farm warns/close tickets opened early).
+4. RULE GUARDS: (a) never delete or unlist a post < 30 days old (guard any delete/unpublish path, add a test); (b) engagement monitor: (likes+comments+shares)/views < 0.20% after 48 h -> needs_you note; (c) likes must stay public: if the publish API exposes hide-like-count, force it off; (d) no boosts/story-sharing anywhere in the code paths; (e) dedicated accounts: Yahia creates dedicated accounts per campaign with our Chrome-extension account kit; add a campaign rule flag + a gate that refuses posting campaign A content to an account recorded as dedicated to campaign B.
+5. Write docs/clipfarm-submit.md: the end-to-end flow in plain English, what is automatic vs Yahia's step (the phone recording + sending the Discord ticket), and the config keys.
+
+## Rules
+- post.golive stays 0, autopilot stays paused. Never post, submit, or message anything real; tests use fakes. Don't touch ~/Library/Application Support/ClipStudio data.
+- Commit on your branch only; don't merge or push.
+- Done = all tests pass, new tests cover 1-4, docs/clipfarm-submit.md written, final report lists anything not done.

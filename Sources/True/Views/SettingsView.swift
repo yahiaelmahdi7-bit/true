@@ -46,8 +46,9 @@ struct SettingsView: View {
                 .help("Watches your builders, unpushed work and failed sessions, and proposes fixes in the Hub for you to approve. Off: no calls, no runs.")
             Toggle("Jev routing", isOn: $jevRouting)
                 .help("The Command bar (⌘K) asks Jev where each line should go. Off: prefix rules and defaults only, no calls.")
-            Section("Nova (voice) — takes effect on relaunch") {
+            Section("Nova (voice) — options below take effect on relaunch") {
                 Toggle("Nova", isOn: $novaOn)
+                    .onChange(of: novaOn) { _, on in on ? NovaEngine.shared.start() : NovaEngine.shared.stop() }
                 Toggle("Wake word “Nova” (mic always on)", isOn: $novaWake)
                 Picker("Push-to-talk", selection: $novaKey) { ForEach(Hotkey.allCases) { Text($0.label).tag($0.rawValue) } }
                 Picker("Brain effort", selection: $novaEffort) { Text("low").tag("low"); Text("medium").tag("medium") }

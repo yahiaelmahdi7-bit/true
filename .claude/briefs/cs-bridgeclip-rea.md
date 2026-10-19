@@ -1,0 +1,14 @@
+# Brief: REA bridgeclip (MIT) -> strengthen Clip Studio where we're weaker
+
+Yahia (2026-10-14): "we can learn from https://github.com/bridge-mind/bridgeclip and use their systems and strengthen the areas we are lacking in, so use REA to analyze and implement this."
+bridgeclip = MIT, TypeScript desktop clipping app (finds complete moments with setup+ending, framing, captions, Automatic vs Review & edit, Jev editorial checks via OpenRouter, YouTube/Twitch ingest).
+
+## Do
+1. Clone to ~/Projects/bridgeclip-ref, pin + record sha. Read-only reference (don't install/run its app unless a question can only be answered by running it; never enter keys).
+2. REA by source: for each system — ingest, transcript, moment discovery (how it keeps setup + ending intact, prompts, scoring, completeness checks), Jev editorial review (which questions, thresholds), framing/face tracking, captions (style, timing, word grouping), titles, review & edit UI model, export settings, job queue/retries — write ~/Projects/bridgeclip-ref/REA.md: how it works with file:line evidence, then a side-by-side vs Clip Studio (engine/clipengine: moments.py, finder, campaign_run.py, deadzones.py, tools2/*, render.py, captions, hookscore.py, verify) = theirs stronger / ours stronger / equal.
+3. Implement the "theirs stronger" items in this clip-studio worktree with tests. MIT: when you port code or prompts, keep attribution (header comment "Adapted from bridgeclip (MIT, BridgeMind) <sha> <path>" + add the MIT notice to THIRD_PARTY_NOTICES.md).
+4. Coordination: another builder (cs-clipfarm-course) edits the finder (moments.py/campaign_run.py) and another (cs-openchatcut-editor) is making OpenChatCut the editor with our tools via engine/clipengine/mcp_tools.py. Keep your finder/scoring changes in NEW modules (e.g. engine/clipengine/complete_moment.py) wired at one small hook point behind a flag CLIP_BRIDGE=1, so merges stay clean. Edit-side ideas (captions/framing) go as recommendations into REA.md "for the OpenChatCut editor" + as tools in a new module mcp-ready (pure functions), not render.py rewrites.
+5. Respect settled rules: no word punch-in zooms, no pop SFX, captions spoken-only + on time, HD, no music on Solved; Jev = decisions (classify/gate/rank), keep rules in code.
+6. Proof: run before/after (flag off/on) moment discovery on 2 real sources in a sandbox CLIPSTUDIO_HOME (copy /tmp/cs-tune-home library.sqlite + playbook, symlink models + media; never ~/Library/Application Support/ClipStudio); PROOF.md: moments picked each way, completeness (cut mid-thought? setup present? ending present?) judged from transcripts.
+- Tests: `cd engine && env -u CLIP_PIPELINE .venv/bin/python -m pytest -q -p no:cacheprovider` (baseline 1255 passed / 2 skipped). Commit on your branch only; no merge/push; never post/submit.
+Done = REA.md + implemented items with tests + PROOF.md + THIRD_PARTY_NOTICES.md.
