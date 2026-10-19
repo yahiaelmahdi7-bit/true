@@ -157,8 +157,8 @@ struct TriageGroupView: View {
             TriageRowFrame(selected: selected == id) {
                 HStack(spacing: 10) {
                     TriageGlyph(tone: tone, cloud: items.allSatisfy(\.isCloud))
-                    Text(project).font(.body).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.middle)
-                    Text("· \(label)").font(.body).foregroundStyle(Theme.hubSecondary).lineLimit(1)
+                    (Text(project).foregroundStyle(Theme.text) + Text(" · \(label)").foregroundStyle(Theme.hubSecondary))
+                        .font(.body).lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 6)
                     Text(groupTime).font(.callout.monospacedDigit()).foregroundStyle(Theme.hubSecondary)
                     Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold))

@@ -232,11 +232,14 @@ struct HubPanelContent: View {
     private func header(_ buckets: [TriageBucket]) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Hub").font(.title2.weight(.semibold)).foregroundStyle(Theme.text)
+                HStack(spacing: 10) {
+                    Text("Hub").font(.title2.weight(.semibold)).foregroundStyle(Theme.text)
+                    if filter == .all { cloudPill }
+                }
                 if filter != .crew { summary(buckets) }
             }
+            .layoutPriority(1)
             Spacer(minLength: 8)
-            if filter == .all { cloudPill }
             Picker("Show", selection: $filter) {
                 Text("All").tag(HubFilter.all)
                 Text("Agents").tag(HubFilter.seats)
@@ -287,7 +290,7 @@ struct HubPanelContent: View {
                     .help("Jump to the first failure")
                 }
             }
-            .font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1)
+            .font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1).fixedSize()
         } else {
             Text(liveSummary).font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1)
         }
