@@ -57,6 +57,11 @@ struct HubPanel: View {
     @State private var crew = CrewStore.shared
     @State private var overseer = OverseerStore.shared
     @State private var crewNotice: String?
+    @State private var cloud = CloudStore.shared
+    @State private var watcher = WatcherStore.shared
+    @State private var cloudDetail: CloudJob?
+    @State private var showNewCloud = false
+    @State private var watcherOpen: InboxItem?
 
     private struct CrewTrigger: Hashable { var active: Bool; var cwd: String }
 
@@ -83,11 +88,16 @@ struct HubPanel: View {
                             onCrewPick: { pickCrew($0) },
                             yourMove: YourMoveRow.build(overseer.verdicts, seatName: { registry.name(for: $0) },
                                                         tabTitle: { p in WorkspaceModel.shared.state.tabs.first { $0.tree.leafIDs.contains(p) }?.title }),
-                            showWatcher: true,
                             onFocusPane: { WorkspaceModel.shared.focus(pane: $0); registry.panelOpen = false },
-                            peerVerdict: { overseer.verdict(forSession: $0.sessionID)?.kind })
+                            peerVerdict: { overseer.verdict(forSession: $0.sessionID)?.kind },
+                            cloudJobs: cloud.jobs, cloudLink: .of(error: cloud.error, loaded: cloud.loaded),
+                            watcherItems: WatcherStore.active ? watcher.needsYou : [],
+                            onRunCloud: { showNewCloud = true },
+                            onRetryCloud: { Task { await cloud.refresh() } },
+                            onTriage: { triageAction($0) })
         }
-        .onAppear { hub.hubAppeared() }
+        .onAppear { hub.hubAppeared(); cloud.visible = true; cloud.start(); Task { await cloud.refresh() } }
+        .onDisappear { cloud.visible = false }
         // Crew scan: only while the Crew tab is showing, and again when the focused pane's cwd changes.
         // `.task(id:)` runs once per id change and cancels with the view: no watcher, timer or poll.
         .task(id: CrewTrigger(active: hub.filter == .crew, cwd: focusedCwd)) {
@@ -100,6 +110,27 @@ struct HubPanel: View {
             if !Task.isCancelled { crewNotice = nil }
         }
         .sheet(item: $detail) { BuilderDetailSheet(record: $0) }
+        .sheet(item: $cloudDetail) { CloudJobSheet(job: $0) { cloudDetail = nil } }
+        .sheet(isPresented: $showNewCloud) { NewCloudJobSheet(projects: projectKeys) { showNewCloud = false } }
+        .sheet(item: $watcherOpen) { WatcherItemSheet(item: $0, store: watcher) }
+    }
+
+    private var projectKeys: [String] {
+        HubModel.build(seats: registry.crew, seatStatus: { registry.statusOf($0) }, seatAwake: { registry.isAwake($0) },
+                       peers: hub.peers, builders: hub.builders, now: Date().timeIntervalSince1970).map(\.key)
+    }
+
+    /// A row's one button. Pop-up closes only when it lands you in a pane.
+    private func triageAction(_ item: TriageItem) {
+        switch item.action {
+        case .builder(let id): detail = hub.builders.first { $0.id == id }
+        case .cloud(let id): cloudDetail = cloud.jobs.first { $0.id == id }
+        case .watcher(let id): watcherOpen = watcher.items.first { $0.id == id }
+        case .seat(let name): seatActions.wake(name)
+        case .peer(let pid):
+            if let p = hub.peers.first(where: { $0.pid == pid }) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p.cwd)]) }
+        case .pane(let pane): WorkspaceModel.shared.focus(pane: pane); registry.panelOpen = false
+        }
     }
 
     /// The pop-up covers the terminal, so anything that lands you in a pane closes it: waking / focusing a seat,
@@ -135,19 +166,31 @@ struct HubPanelContent: View {
     var onCrewPick: (CrewAgent) -> Void = { _ in }
     /// Overseer: panes whose last turn needs a look (All filter only) and the verdict of an Other-session row.
     var yourMove: [YourMoveRow] = []
-    var showWatcher = false
     var onFocusPane: (UUID) -> Void = { _ in }
     var peerVerdict: (PeerSession) -> VerdictKind? = { _ in nil }
+    /// All tab: cloud jobs and Watcher items fold into the same triage sections.
+    var cloudJobs: [CloudJob] = []
+    var cloudLink: CloudLink = .checking
+    var watcherItems: [InboxItem] = []
+    var onRunCloud: () -> Void = {}
+    var onRetryCloud: () -> Void = {}
+    var onTriage: (TriageItem) -> Void = { _ in }
+    @State private var jump: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var buckets: [TriageBucket] {
+        HubTriage.build(groups: groups, seatStatus: actions.status, cloud: cloudJobs, watcher: watcherItems,
+                        yourMove: yourMove, now: now)
+    }
+
     var body: some View {
+        let buckets = filter == .all ? self.buckets : []
         VStack(spacing: 0) {
-            header
-            if filter == .all { PeerJobsSection(); CloudSection(projects: groups.map(\.key)) }
+            header(buckets)
             if filter == .crew {
                 CrewTabView(snapshot: crew, notice: crewNotice, onPick: onCrewPick)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: crewNotice)
-            } else if groups.isEmpty && allSeats.isEmpty {
+            } else if groups.isEmpty && allSeats.isEmpty && buckets.allSatisfy({ $0.count == 0 }) {
                 ContentUnavailableView {
                     Label("No agents yet", systemImage: "person.crop.circle.badge.plus")
                 } description: {
@@ -161,16 +204,14 @@ struct HubPanelContent: View {
                     }
                     .buttonStyle(.plain)
                 }
+            } else if filter == .all {
+                TriageListView(buckets: buckets, now: now, jump: $jump, peers: AnyView(PeerJobsSection()), onAction: onTriage)
             } else if groups.isEmpty {
                 ContentUnavailableView("Nothing running", systemImage: "moon.zzz",
                                        description: Text("No Claude sessions or background tasks right now."))
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 28) {
-                        if filter == .all && !yourMove.isEmpty {
-                            YourMoveSection(rows: yourMove, now: now, onFocus: onFocusPane)
-                        }
-                        if filter == .all && showWatcher { WatcherSection() }
                         ForEach(groups) { group in
                             groupView(group).transition(rowTransition)
                         }
@@ -187,28 +228,69 @@ struct HubPanelContent: View {
         reduceMotion ? .identity : .opacity.combined(with: .move(edge: .top))
     }
 
-    /// One row for a modal: title + live summary on the left; filter, New Agent and Close on the right.
-    private var header: some View {
+    /// One row for a modal: title + live summary on the left; filter, cloud, New Agent and Close on the right.
+    private func header(_ buckets: [TriageBucket]) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Hub").font(.title2.weight(.semibold)).foregroundStyle(Theme.text)
-                if filter != .crew {
-                    Text(liveSummary).font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1)
-                }
+                if filter != .crew { summary(buckets) }
             }
             Spacer(minLength: 8)
+            if filter == .all { cloudPill }
             Picker("Show", selection: $filter) {
                 Text("All").tag(HubFilter.all)
                 Text("Agents").tag(HubFilter.seats)
                 Text("Crew").tag(HubFilter.crew)
             }
-            .pickerStyle(.segmented).labelsHidden().frame(width: 210)
+            .pickerStyle(.segmented).labelsHidden().frame(width: 190)
             .accessibilityLabel("Show")
             .accessibilityHint("All: everything running and your agents. Agents: only your agents. Crew: specialists Claude can call in.")
+            if filter == .all { headerButton("icloud.and.arrow.up", help: "Run in cloud", hint: "Sends a repo and a prompt to the cloud factory", action: onRunCloud) }
             headerButton("plus", help: "New Agent", hint: "Opens the agent builder", action: onNew)
             headerButton("xmark", help: "Close (Esc)", hint: "Closes the Hub", action: onClose)
         }
         .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 14)
+    }
+
+    /// "Cloud · connected" / "Cloud · offline — retry": one compact pill, the offline one is the retry button.
+    private var cloudPill: some View {
+        let offline = cloudLink == .offline
+        return Button { if offline { onRetryCloud() } } label: {
+            HStack(spacing: 5) {
+                Circle().fill(cloudLink == .connected ? Theme.text : offline ? Theme.verdictWarn : Theme.dimText).frame(width: 6, height: 6)
+                Text(cloudLink.label).font(.caption).foregroundStyle(Theme.hubSecondary).lineLimit(1).fixedSize()
+            }
+            .padding(.horizontal, 9).padding(.vertical, 4)
+            .background(Color.white.opacity(0.07), in: .capsule).contentShape(.capsule)
+        }
+        .buttonStyle(.plain).disabled(!offline)
+        .help(offline ? "The cloud factory did not answer. Try again" : "Cloud factory")
+        .accessibilityLabel(cloudLink.label)
+    }
+
+    /// "2 working · 4 failed": the failed count jumps to the first failed row.
+    @ViewBuilder private func summary(_ buckets: [TriageBucket]) -> some View {
+        if filter == .all {
+            let working = HubTriage.count(buckets, tone: .working)
+            let needs = HubTriage.count(buckets, tone: .needsYou)
+            let failed = HubTriage.count(buckets, tone: .failed)
+            HStack(spacing: 0) {
+                if working + needs + failed == 0 { Text("Nothing running") }
+                if working > 0 { Text("\(working) working") }
+                if needs > 0 { Text("\(working > 0 ? " · " : "")\(needs) need\(needs == 1 ? "s" : "") you") }
+                if failed > 0 {
+                    Text(working + needs > 0 ? " · " : "")
+                    Button { jump = HubTriage.firstID(buckets, tone: .failed) } label: {
+                        Text("\(failed) failed").underline(false)
+                    }
+                    .buttonStyle(.plain).foregroundStyle(Theme.hubFailed)
+                    .help("Jump to the first failure")
+                }
+            }
+            .font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1)
+        } else {
+            Text(liveSummary).font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1)
+        }
     }
 
     private func headerButton(_ symbol: String, help: String, hint: String, action: @escaping () -> Void) -> some View {

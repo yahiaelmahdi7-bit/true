@@ -22,60 +22,6 @@ struct CloudStatusChip: View {
     }
 }
 
-/// Hub → All: "Cloud" jobs from the factory, newest first, with a Run in cloud button. An unreachable factory
-/// shows one quiet line, not an error wall.
-struct CloudSection: View {
-    /// Project folders the Hub already knows (offered as repo choices).
-    var projects: [String] = []
-    @State private var store = CloudStore.shared
-    @State private var detail: CloudJob?
-    @State private var showNew = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Cloud").font(.callout.weight(.semibold)).foregroundStyle(Theme.hubSecondary)
-                if store.attention > 0 { Text("\(store.attention) needs you").font(.callout).foregroundStyle(Theme.text) }
-                Spacer()
-                Button { showNew = true } label: { Label("Run in cloud", systemImage: "icloud.and.arrow.up") }
-                    .buttonStyle(.plain).font(.callout).foregroundStyle(Theme.hubSecondary)
-            }
-            if let e = store.error, store.jobs.isEmpty {
-                Text(e).font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(2)
-            } else if store.jobs.isEmpty && store.loaded {
-                Text("No cloud jobs yet.").font(.callout).foregroundStyle(Theme.hubSecondary)
-            }
-            ForEach(store.jobs.prefix(6)) { j in
-                Button { detail = j } label: { row(j) }.buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 16).padding(.bottom, 8)
-        .onAppear { store.visible = true; store.start(); Task { await store.refresh() } }
-        .onDisappear { store.visible = false }
-        .sheet(item: $detail) { CloudJobSheet(job: $0) { detail = nil } }
-        .sheet(isPresented: $showNew) { NewCloudJobSheet(projects: projects) { showNew = false } }
-    }
-
-    private func row(_ j: CloudJob) -> some View {
-        HubRowFrame {
-            HStack(spacing: 12) {
-                Image(systemName: "icloud").frame(width: 32, height: 32).foregroundStyle(Theme.hubSecondary)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(j.title).font(.body).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.tail)
-                    Text(j.needsYou ? (j.needsYouReason ?? j.repo) : "\(j.repo) · \(hubElapsed(Date().timeIntervalSince1970 - j.createdAt))")
-                        .font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1).truncationMode(.tail)
-                }
-                Spacer(minLength: 4)
-                CloudStatusChip(job: j)
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(j.title), cloud job, \(j.chipLabel)")
-        .accessibilityHint("Opens its details")
-        .accessibilityAddTraits(.isButton)
-    }
-}
-
 /// Pick a repo + a prompt → sync the repo to the VPS → create the job.
 struct NewCloudJobSheet: View {
     let projects: [String]

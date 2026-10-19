@@ -233,4 +233,49 @@ struct HubSnapshotTests {
             }.padding(20)
         }
     }
+
+    // MARK: triage redesign (proofs/hub-redesign)
+
+    /// 2 working, 4 failed, 8 done builders across 4 projects, 1 needsYou cloud job.
+    private func triageGroups() -> [HubProjectGroup] {
+        func rec(_ id: String, _ project: String, _ state: BuilderState, ago: Double, acked: Bool = false) -> BuilderRecord {
+            let cwd = "/Users/y/Projects/\(project)"
+            return BuilderRecord(id: id, name: id, cwd: cwd, originCwd: cwd, model: "sonnet", sessionID: "s-\(id)", claudePID: 0,
+                                 started: Self.now - ago - 1400, ended: state == .running ? nil : Self.now - ago, state: state,
+                                 acked: acked, parent: nil, branch: nil, worktree: nil, cost: 1.2, budget: 5, dir: nil)
+        }
+        var b: [BuilderRecord] = [rec("hub-redesign", "true", .running, ago: 0), rec("clip-captions", "clipping-site", .running, ago: 0)]
+        b += (1...3).map { rec("gn-fix-\($0)", "gamenight", .failed, ago: Double(300 * $0)) }
+        b.append(rec("prism-sync", "prism", .failed, ago: 5400))
+        b += (1...5).map { rec("gn-build-\($0)", "gamenight", .done, ago: Double(900 + 120 * $0)) }
+        b += [rec("true-fixes", "true", .done, ago: 3000), rec("true-gates", "true", .done, ago: 3300), rec("prism-seo", "prism", .done, ago: 7200)]
+        return HubModel.build(seats: [], seatStatus: { _ in .asleep }, seatAwake: { _ in false }, peers: [], builders: b,
+                              now: Self.now, hasGit: { _ in true })
+    }
+
+    private func triageView(link: CloudLink = .connected, expandNothing: Bool = true) -> some View {
+        var job = CloudJob(id: "c1", title: "Migrate score table", repo: "/srv/gamenight", branch: "main", status: "needsYou",
+                           foremanStatus: nil, needsYouReason: "Which database should the migration target?", reason: nil,
+                           createdAt: Self.now - 1500, updatedAt: Self.now - 120, viewedAt: nil, unviewed: true, archived: nil)
+        job.archived = nil
+        return HubPanelContent(groups: triageGroups(), allSeats: [], filter: .constant(.all), now: Self.now, actions: actions,
+                               cloudJobs: [job], cloudLink: link)
+    }
+
+    @Test func triageAll() throws {
+        try snapshot("hub-triage-all", width: 1000, height: 780) { popUp { triageView() } }
+    }
+
+    @Test func triageOffline() throws {
+        try snapshot("hub-triage-offline", width: 1000, height: 780) { popUp { triageView(link: .offline) } }
+    }
+
+    @Test func triageEmpty() throws {
+        try snapshot("hub-triage-empty", width: 1000, height: 780) {
+            popUp {
+                HubPanelContent(groups: [], allSeats: [lead], filter: .constant(.all), now: Self.now, actions: actions,
+                                cloudJobs: [], cloudLink: .connected)
+            }
+        }
+    }
 }
