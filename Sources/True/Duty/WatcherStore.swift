@@ -66,9 +66,14 @@ final class WatcherStore {
     private func emit(_ e: InboxEvent) {
         file.append(e)
         events.append(e)
-        if file.compactIfNeeded(now: now) { events = file.events() }
+        // Compact again only after the log doubles: when the folded state alone is over the limit,
+        // compacting on every emit rewrites the whole file each time.
+        if file.compactIfNeeded(limit: max(InboxFile.compactBytes, 2 * compactedBytes), now: now) {
+            events = file.events(); compactedBytes = file.size
+        }
         items = Inbox.fold(events)
     }
+    private var compactedBytes = 0
 
     // MARK: logs + ledger
 
