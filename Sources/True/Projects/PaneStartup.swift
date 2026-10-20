@@ -31,6 +31,13 @@ final class PaneStartup {
         return "claude --resume \(sessionID) --dangerously-skip-permissions --settings \(AgentLaunch.shellQuote(settings))\(tail); exec \"${SHELL:-/bin/zsh}\" -l"
     }
 
+    /// `command` after a `seconds` wait, so a relaunch never boots every restored Claude in the same second.
+    /// Ctrl-C ends the wait early: without the trap zsh aborts the whole line and the pane closes.
+    nonisolated static func staggered(_ command: String, after seconds: Int) -> String {
+        guard seconds > 0 else { return command }
+        return "trap 'true' INT; printf '\\033[2mTrue: waking this session in \(seconds)s so the Mac is not swamped (Ctrl-C = now)\\033[0m\\n'; sleep \(seconds); trap - INT; \(command)"
+    }
+
     /// The shell argv that runs `command`.
     nonisolated static func shellArgs(for command: String) -> [String] { ["-l", "-i", "-c", command] }
 }
