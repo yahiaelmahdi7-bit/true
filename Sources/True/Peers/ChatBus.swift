@@ -97,7 +97,17 @@ final class ChatBus: @unchecked Sendable {
 
     deinit { for s in sources.values { s.cancel() } }
 
-    func isSeat(_ name: String) -> Bool { knownSeat?(name) ?? seats().contains(name) }
+    private var handlers: [String: @Sendable (ChatMessage) -> Void] = [:]
+
+    /// Run 33: a seat whose delivery is a closure, not a pane (the Ask desk's `oracle`). It sees every line addressed to it.
+    func registerSeat(_ name: String, handler: @escaping @Sendable (ChatMessage) -> Void) {
+        lock.lock(); handlers[name] = handler; lock.unlock()
+    }
+
+    func isSeat(_ name: String) -> Bool {
+        lock.lock(); let h = handlers[name] != nil; lock.unlock()
+        return h || (knownSeat?(name) ?? seats().contains(name))
+    }
 
     func url(_ channel: String) -> URL { dir.appendingPathComponent(ChatNaming.fileName(channel)) }
 
@@ -240,7 +250,13 @@ final class ChatBus: @unchecked Sendable {
         for l in used.split(separator: 10) {
             guard let m = try? JSONDecoder().decode(ChatMessage.self, from: Data(l)) else { continue }
             lock.lock(); let quiet = silent.remove(m.id) != nil; lock.unlock()
-            if !quiet { let line = ChatNaming.line(m); for seat in recipients(m) { route(seat, line) } }
+            if !quiet {
+                let line = ChatNaming.line(m)
+                for seat in recipients(m) {
+                    lock.lock(); let h = handlers[seat]; lock.unlock()
+                    if let h { h(m) } else { route(seat, line) }
+                }
+            }
             onMessage?(m)
         }
     }

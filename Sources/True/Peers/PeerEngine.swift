@@ -13,7 +13,7 @@ final class PeerEngine: @unchecked Sendable {
     private let inboundMode: @Sendable () -> PeerInboundMode
     private let now: @Sendable () -> Date
     private let scheduler: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
-    private let ownName: String
+    let ownName: String
     private let steering: @Sendable () -> Bool
     private let share: @Sendable () -> PeerShare
     private let allowedDirs: @Sendable () -> [String]
@@ -767,7 +767,7 @@ final class PeerEngine: @unchecked Sendable {
 
     /// Post a line from a local agent/human. Stored + delivered locally through the bus; forwarded to the paired peer(s)
     /// the channel belongs to (`#<peer>` → that peer, `@agent@<peer>` → that peer, a named room → every peer, `#here` / `@agent` → nobody).
-    func postChat(channel raw: String, agent: String, text: String, re: String? = nil) -> Result<ChatMessage, PeerError> {
+    func postChat(channel raw: String, agent: String, text: String, re: String? = nil, recordLocal: Bool = true) -> Result<ChatMessage, PeerError> {
         guard let bus = chat else { return .failure(.invalid("Chat isn't running")) }
         guard let addr = ChatNaming.split(raw) else { return .failure(.invalid("A channel looks like #name or @agent")) }
         let own = PeerNaming.slug(ownName)
@@ -783,7 +783,14 @@ final class PeerEngine: @unchecked Sendable {
         } else if addr.channel != "#here" {
             targets = ls
         }
-        guard let m = bus.post(channel: local, agent: agent, text: localText, re: re, deliver: deliverLocal) else { return .failure(.invalid("Say something (a line of text)")) }
+        let posted: ChatMessage?
+        if recordLocal { posted = bus.post(channel: local, agent: agent, text: localText, re: re, deliver: deliverLocal) }
+        else {   // the caller records its own version in the shared room
+            let t = ChatNaming.clean(text)
+            posted = t.isEmpty ? nil : ChatMessage(id: UUID().uuidString.lowercased(), ts: Int(now().timeIntervalSince1970), channel: local,
+                                                   from: ChatSender(agent: agent, mac: bus.mac), text: t, re: re.map { String($0.prefix(80)) })
+        }
+        guard let m = posted else { return .failure(.invalid("Say something (a line of text)")) }
         let body = ChatNaming.clean(text)
         for l in targets {
             var item: [String: Any] = ["id": m.id + (targets.count > 1 ? ":" + String(l.mailboxId.prefix(6)) : ""), "ts": m.ts, "channel": wire,

@@ -374,6 +374,21 @@ enum PeerSettings {
         get { UserDefaults.standard.object(forKey: chatKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: chatKey) }
     }
+    /// Run 33: answer paired peers' questions from my second brain (default on), and which brain projects each peer may ask about.
+    static let askKey = "peer.ask", askProjectsKey = "peer.ask.projects"
+    static var ask: Bool {
+        get { UserDefaults.standard.object(forKey: askKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: askKey) }
+    }
+    static var askProjects: [String: [String]] {
+        get { UserDefaults.standard.dictionary(forKey: askProjectsKey) as? [String: [String]] ?? [:] }
+        set { UserDefaults.standard.set(newValue, forKey: askProjectsKey) }
+    }
+    /// "Finance-Director-OS, prism" → ["finance-director-os", "prism"] (comma-separated, trimmed, lowercased, de-duplicated).
+    static func parseSlugs(_ raw: String) -> [String] {
+        var seen = Set<String>()
+        return raw.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).lowercased() }.filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
     static var steering: Bool {
         get { UserDefaults.standard.object(forKey: steeringKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: steeringKey) }
