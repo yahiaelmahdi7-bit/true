@@ -104,8 +104,17 @@ final class ChatBus: @unchecked Sendable {
         lock.lock(); handlers[name] = handler; lock.unlock()
     }
 
+    private var expecting: [String: Date] = [:]
+
+    /// Run 33: a `true-ask` caller (often a plain shell, not a pane) is waiting for an answer addressed to `@name`; accept it as a seat for a while.
+    func expect(_ name: String, for seconds: TimeInterval = 900) {
+        lock.lock(); expecting[name] = now().addingTimeInterval(seconds); lock.unlock()
+    }
+
     func isSeat(_ name: String) -> Bool {
-        lock.lock(); let h = handlers[name] != nil; lock.unlock()
+        lock.lock()
+        let h = handlers[name] != nil || (expecting[name].map { $0 > now() } ?? false)
+        lock.unlock()
         return h || (knownSeat?(name) ?? seats().contains(name))
     }
 
