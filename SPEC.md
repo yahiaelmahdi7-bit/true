@@ -930,3 +930,26 @@ After both Macs run the build: he and Mahmoud each `true-chat send #mahmoud hi` 
 
 ### Live checks owed to Yahia
 Both Macs on this build and Mahmoud's mailbox allow-listed for `finance-director-os`: on his Mac `true-ask "what does director.plan() do and where is it specified?"` returns the cited answer within ~30 s and the pair shows in Yahia's Chat tab under `#mahmoud`.
+
+## Run 34 — Shared projects (a peer shares a repo and works on it with the owner's Claude)
+
+**Why.** Yahia's call (2026-10-22): Mahmoud must be able to share one of his projects and have Yahia's True/Claude work on it, the reverse of Run 29. Today an inbound job fails on the receiver without a local clone, and Run 30 dir jobs need a pre-listed directory.
+
+**Settled defaults (Yahia, 2026-10-22):** every inbound job on a shared repo is **approved one by one** by the owner (`ask`), never auto-accepted · a peer `offer`s a repo by URL; the owner accepts the offer once in the Peers sheet · accepted repos clone under `~/Projects/<slug>.peers/<peer-slug>/` and are added to that peer's allowed repos and `peer.allowedDirs` · both sides may delegate jobs on it and the room `#<slug>` is auto-joined on both Macs · nothing else changes.
+
+### Offer / accept (`PeerEngine`, `PeerModels`, `PeerViews`)
+- New payload `offer` `{id, url, name, note ≤ 400}` (sealed, pinned peers only). Shown in the Peers sheet as a pending card: name, URL (plain text, not a link), who, note; buttons Accept / Decline. Decline → `offer` nack with reason. Accept → `git clone <url> ~/Projects/<slug>.peers/<peer-slug>` (slug from `name`, validated like labels) with the owner's own git credentials; failure shown in the card, nothing recorded. Success → `PeerSettings.sharedRepos[mailboxId] += [{url, path, slug}]`, `peer.allowedDirs += [path]`, local membership joins `#<slug>`, and an `offer` ack goes back so the peer's True records the share too (its side joins `#<slug>`).
+- CLI `true-peer offer <url> [--name N] [--note …] <peer>` on the sharer's side; `true-peer shares` lists accepted repos on both sides.
+
+### Jobs on a shared repo
+- Inbound jobs whose repo normalises to a shared repo's URL run in a worktree of that clone (same as Run 29) **with inboundMode forced to `ask`** for that job regardless of the global inbound mode: the owner's Hub shows the job card with Approve / Decline; nothing starts before Approve. Dir jobs (Run 30) on the shared path follow the same rule.
+- The outbound side (Mahmoud delegating) is unchanged (`true-peer delegate`).
+
+### Security
+Repo URLs are text until the owner clicks Accept; the clone runs with the owner's credentials only after that click. Shared paths join `peer.allowedDirs` only for the peer that offered them. Removing a share (Peers sheet → Remove) deletes the allow-list entry and membership, never the clone.
+
+### Tests
+`PeerEngineTests` over `FakeRelay`: offer round trip, decline nack, accept records on both sides + `#<slug>` joined, inbound job on a shared repo is held for approval even with inbound=bypass, dir job on the shared path held likewise, remove share drops allow-list. `PeerCLITests`: `offer`, `shares`. `swift build` + `swift test --filter Peer` green. App not launched by the builder.
+
+### Live checks owed to Yahia
+Mahmoud runs `true-peer offer <his repo url> --name demo <yahia>`; Yahia accepts in the Peers sheet; Mahmoud delegates a job on it; Yahia's Hub asks him to approve; after Approve the job runs and returns its branch.
