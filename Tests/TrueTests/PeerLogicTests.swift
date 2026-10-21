@@ -213,6 +213,7 @@ struct PeerLogicTests {
         #expect(sent == 20)
         // the budget returns after a minute, and force ignores it
         c.add(item(), at: t0.addingTimeInterval(61))
-        #expect(c.take(at: t0.addingTimeInterval(61), force: true)?.count == 1)
+        // (the 10 throttled items are still pending, so the forced batch carries them plus the new one)
+        #expect(c.take(at: t0.addingTimeInterval(61), force: true)?.count == 11)
     }
 }
