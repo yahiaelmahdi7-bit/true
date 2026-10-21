@@ -18,12 +18,14 @@ enum ChatCLI {
         guard let bus = engine.chat else { return fail("chat isn't running") }
         let from = ((req["from"] as? String).flatMap { $0.isEmpty ? nil : $0 }) ?? "human"
         func row(_ m: ChatMessage) -> [String: Any] {
-            ["id": m.id, "ts": m.ts, "channel": m.channel, "agent": m.from.agent, "mac": m.from.mac, "text": m.text]
+            var r: [String: Any] = ["id": m.id, "ts": m.ts, "channel": m.channel, "agent": m.from.agent, "mac": m.from.mac, "text": m.text]
+            if let re = m.re { r["re"] = re }
+            return r
         }
         switch req["op"] as? String {
         case "chat.send":
             guard let ch = req["channel"] as? String, let text = req["text"] as? String else { return fail("a channel and some text are required") }
-            switch engine.postChat(channel: ch, agent: from, text: text) {
+            switch engine.postChat(channel: ch, agent: from, text: text, re: (req["re"] as? String).flatMap { $0.isEmpty ? nil : $0 }) {
             case .success(let m): return ["ok": true, "id": m.id, "channel": m.channel]
             case .failure(let e): return fail("\(e)")
             }
@@ -60,7 +62,7 @@ enum ChatCLI {
         #"""
         #!/usr/bin/env python3
         # true-chat — live chat between sessions (this Mac and paired friends' Macs) and the humans.
-        #   true-chat send <#channel|@agent[@mac]> <text|->   post a line (- = read stdin). #here = this Mac, #<peer> = a paired friend
+        #   true-chat send <#channel|@agent[@mac]> <text|-> [--re <id>]   post a line (--re = the id of the line you answer) (- = read stdin). #here = this Mac, #<peer> = a paired friend
         #   true-chat join <#channel>                          start receiving a channel in this session
         #   true-chat leave <#channel>
         #   true-chat tail [#channel] [-f] [-n N]              recent lines (default #here); -f keeps following (no polling)
@@ -139,8 +141,20 @@ enum ChatCLI {
             if cmd == "send":
                 if len(args) < 2:
                     die(USAGE)
-                text = sys.stdin.read() if args[1] == "-" else " ".join(args[1:])
-                call({"op": "chat.send", "channel": args[0], "text": text.strip()})
+                re, rest = None, args[1:]
+                if "--re" in rest:
+                    i = rest.index("--re")
+                    if i + 1 >= len(rest):
+                        die(USAGE)
+                    re = rest[i + 1]
+                    rest = rest[:i] + rest[i + 2:]
+                if not rest:
+                    die(USAGE)
+                text = sys.stdin.read() if rest[0] == "-" else " ".join(rest)
+                req = {"op": "chat.send", "channel": args[0], "text": text.strip()}
+                if re:
+                    req["re"] = re
+                call(req)
             elif cmd in ("join", "leave"):
                 if len(args) != 1:
                     die(USAGE)

@@ -12,6 +12,8 @@ struct ChatMessage: Codable, Equatable, Sendable, Identifiable {
     var channel: String
     var from: ChatSender
     var text: String
+    /// Run 33: the id of the line this one answers (≤ 80 chars). Absent on ordinary lines.
+    var re: String?
 }
 
 enum ChatNaming {
@@ -103,13 +105,14 @@ final class ChatBus: @unchecked Sendable {
 
     /// Append one message and deliver it. Returns nil for a bad channel or empty text.
     @discardableResult
-    func post(channel raw: String, agent: String, mac fromMac: String? = nil, text: String, id: String? = nil, ts: Int? = nil, deliver: Bool = true) -> ChatMessage? {
+    func post(channel raw: String, agent: String, mac fromMac: String? = nil, text: String, id: String? = nil, ts: Int? = nil, re: String? = nil, deliver: Bool = true) -> ChatMessage? {
         guard let channel = ChatNaming.normalize(raw) else { return nil }
         let t = ChatNaming.clean(text)
         guard !t.isEmpty else { return nil }
         let who = PaneDelivery.sanitize(agent).trimmingCharacters(in: .whitespaces)
         let m = ChatMessage(id: id ?? UUID().uuidString.lowercased(), ts: ts ?? Int(now().timeIntervalSince1970), channel: channel,
-                            from: ChatSender(agent: String(who.prefix(48)).isEmpty ? "human" : String(who.prefix(48)), mac: fromMac.map(PeerNaming.slug) ?? mac), text: t)
+                            from: ChatSender(agent: String(who.prefix(48)).isEmpty ? "human" : String(who.prefix(48)), mac: fromMac.map(PeerNaming.slug) ?? mac), text: t,
+                            re: re.map { String(PaneDelivery.sanitize($0).prefix(80)) }.flatMap { $0.isEmpty ? nil : $0 })
         guard var data = try? JSONEncoder().encode(m) else { return nil }
         data.append(10)
         lock.lock()

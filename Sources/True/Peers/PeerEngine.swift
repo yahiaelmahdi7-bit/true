@@ -767,7 +767,7 @@ final class PeerEngine: @unchecked Sendable {
 
     /// Post a line from a local agent/human. Stored + delivered locally through the bus; forwarded to the paired peer(s)
     /// the channel belongs to (`#<peer>` → that peer, `@agent@<peer>` → that peer, a named room → every peer, `#here` / `@agent` → nobody).
-    func postChat(channel raw: String, agent: String, text: String) -> Result<ChatMessage, PeerError> {
+    func postChat(channel raw: String, agent: String, text: String, re: String? = nil) -> Result<ChatMessage, PeerError> {
         guard let bus = chat else { return .failure(.invalid("Chat isn't running")) }
         guard let addr = ChatNaming.split(raw) else { return .failure(.invalid("A channel looks like #name or @agent")) }
         let own = PeerNaming.slug(ownName)
@@ -783,11 +783,12 @@ final class PeerEngine: @unchecked Sendable {
         } else if addr.channel != "#here" {
             targets = ls
         }
-        guard let m = bus.post(channel: local, agent: agent, text: localText, deliver: deliverLocal) else { return .failure(.invalid("Say something (a line of text)")) }
+        guard let m = bus.post(channel: local, agent: agent, text: localText, re: re, deliver: deliverLocal) else { return .failure(.invalid("Say something (a line of text)")) }
         let body = ChatNaming.clean(text)
         for l in targets {
-            let item: [String: Any] = ["id": m.id + (targets.count > 1 ? ":" + String(l.mailboxId.prefix(6)) : ""), "ts": m.ts, "channel": wire,
+            var item: [String: Any] = ["id": m.id + (targets.count > 1 ? ":" + String(l.mailboxId.prefix(6)) : ""), "ts": m.ts, "channel": wire,
                                        "from": ["agent": m.from.agent, "mac": own], "text": body]
+            if let r = m.re { item["re"] = r }
             lock.lock(); chatPending[l.mailboxId, default: []].append(item); let arm = chatFlushArmed.insert(l.mailboxId).inserted; lock.unlock()
             if arm { let mb = l.mailboxId; scheduler(Self.chatBatchDelay) { [weak self] in self?.flushChat(mb) } }
         }
@@ -859,7 +860,7 @@ final class PeerEngine: @unchecked Sendable {
             if !dup { seen[key] = Int(now().timeIntervalSince1970) + Int(Self.seenLife); saveSeen() }
             lock.unlock()
             if dup { continue }
-            bus.post(channel: dest, agent: String(agent.prefix(48)), mac: l.label, text: text, id: id, ts: ts)
+            bus.post(channel: dest, agent: String(agent.prefix(48)), mac: l.label, text: text, id: id, ts: ts, re: (o["re"] as? String).flatMap { $0.count <= 80 ? $0 : nil })
         }
         changed()
     }

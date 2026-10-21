@@ -72,4 +72,12 @@ import Foundation
         try p.run(); p.waitUntilExit()
         #expect(p.terminationStatus == 0)
     }
+
+    @Test func sendCarriesReAndTailShowsIt() {
+        let r = rig(); defer { r.a.close(); r.b.close() }
+        let s = call(r.a, "chat.send", ["channel": "#here", "text": "42", "from": "dev", "re": "q-9"])
+        #expect(ok(s))
+        let t = call(r.a, "chat.tail", ["channel": "#here", "n": 1])
+        #expect((t["messages"] as? [[String: Any]])?.first?["re"] as? String == "q-9")
+    }
 }
