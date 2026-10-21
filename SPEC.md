@@ -821,3 +821,22 @@ Yahia's agents (and Yahia) hand a task to a paired friend's True, which runs it 
 
 ### Live checks owed to Yahia
 Relaunch True; in Peers add one allowed directory; with Mahmoud's True updated, send a `dir` job, `say` one follow-up, watch `true-peer tail -f`, `stop` it.
+
+## Run 31 — Restart to update by itself
+
+**Why.** The Run 29/30 peer path only works when both Trues run the same build. Today a verified update is staged and installed **at quit**, and the pill waits for a click, so a friend's True (Mahmoud, on v1.1.2) stays old until he happens to quit. Yahia's call (2026-10-22): a True with "Install updates automatically" on **restarts itself** to adopt a staged update, as soon as that is safe, with a visible countdown the person can cancel.
+
+**Settled defaults:** `update.autoRestart` ON whenever `update.install.auto` is on (one new Settings toggle "Restart to update when idle", under the install toggle, shown only in a build that can update itself) · safe = no Claude session in True is `working`/`needsYou` (`BuildFreshnessWatcher.workingWarning` input), no peer job in `accepted|working|needsYou`, no builder running, no Nova turn in flight, no modal sheet or alert up, and no keyboard/mouse input for ≥ 120 s (`CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .null)`) · countdown 60 s · check loop `UpdateLogic.interval` drops from 24 h to **6 h** (launch +30 s unchanged).
+
+### Behaviour (`Model/Updater.swift`, `Model/UpdateLogic.swift`, `Views/RestartPill.swift`, `Views/SettingsView.swift`)
+- `UpdateLogic.restartDecision(staged: Bool, autoRestart: Bool, working: Int, peerJobs: Int, builders: Int, modal: Bool, novaBusy: Bool, idleSeconds: Double, now: Date, lastDeferral: Date?) -> RestartDecision` (`.restartAfterCountdown` · `.wait(reason)` · `.no`) is a pure function with tests. A deferral (user cancelled the countdown) blocks another attempt for 4 h; three cancellations in a row fall back to the pill only (`update.restartDeferrals`, reset on a successful restart).
+- When a staged version exists and the decision is `.restartAfterCountdown`, a non-modal toast (same glass as the HUD, bottom-right of the key window; VoiceOver announces it) reads "Restarting True in 60 s to update to vX.Y.Z — Now · Cancel". Counting is event-driven plus one 1 s tick that exists only while the toast is up. Any `working` verdict, modal or input during the countdown cancels silently and the engine re-evaluates on the next event (no polling loop; it re-arms from the same `withObservationTracking` sources `WorkAwake` uses, plus the updater's own `stagedVersion` change).
+- Restart = `installStagedAtQuit()` path via a normal quit: set a one-shot flag so `applicationWillTerminate` installs, then relaunch through `BuildFreshnessWatcher.relauncherArguments` (already restores panes; Run 29's staggered restore applies). A failed install leaves the old app in place as today and the pill reappears.
+- `Updater.check(manual:)` unchanged except the 6 h loop. The update key, signature policy, codesign check and ETag logic are untouched.
+- Log lines: `update: auto-restart armed (vX)`, `update: auto-restart cancelled (<reason>)`, `update: auto-restart now (vX)`.
+
+### Tests
+`UpdateLogicTests`: `restartDecision` table (every blocker, the 120 s idle floor, deferral window, three-strikes fallback), 6 h interval, jitter bounds. `UpdaterTests` (existing seam): staged + safe → countdown armed; input during countdown → cancelled; cancel three times → pill only. `swift build` + `swift test --filter Update` green. The app is not launched by the builder.
+
+### Live checks owed to Yahia
+After the next public release: Yahia's True (auto-install on) restarts itself idle within 60 s of the staged update; Mahmoud's v1.1.2 still installs at quit once, then has this.
