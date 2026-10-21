@@ -899,3 +899,34 @@ After both Macs run the build: he and Mahmoud each `true-chat send #mahmoud hi` 
 - A DM to a remote `@agent@mac` is recorded silently in `#<peer>` (not typed into any local pane).
 - ChatBus `mac` is `slug(ownName)`.
 - Nova `tell` to an agent that isn't running posts to `@agent` via the chat engine (one fallback line, `NovaTell.fallbackChannel`); the "isn't running" spoken line is unchanged.
+
+## Run 33 — Ask desk (a peer's Claude asks ours for what we already know)
+
+**Why.** Yahia's call (2026-10-22): Mahmoud's Claude re-derives facts the second brain and our sessions already settled. His Claude must be able to **ask ours for truth or info** and get a cited answer in seconds, instead of redoing research. Run 32 gives the transport; this run adds the answerer and a one-command ask.
+
+**Settled defaults:** one address per Mac, `@oracle` · a peer's agent posts `@oracle@<owner-slug>` over the Run 32 bus; the owner's True answers from the owner's **second brain** (local HTTP `POST http://127.0.0.1:8800/api/ask` `{question, project_ids}` → `{answer, sources[]}`), never from a Claude pane · the answer goes back as a direct line `@<agent>@<peer>` and the pair is recorded in `#<peer>` so the owner sees every Q&A in the Chat tab · per-peer allow-list of brain projects (`peer.ask.projects`, `[mailboxId: [slug]]`), empty = that peer cannot ask · local panes may ask `@oracle` with no project restriction · no Claude in the loop in this run.
+
+### Answerer (`Peers/Oracle.swift`)
+- `PeerService` registers a seat named `oracle` on the bus (`ChatBus.isSeat("oracle")` true) whose delivery is a closure, not a pane. Every line addressed to `@oracle` (local or from a peer) becomes one question `{id, from{agent, mac}, text, peer: PeerLink?}`.
+- Authorisation (peer questions): sender must be a pinned peer (Run 32 already drops others) AND `PeerSettings.askProjects[link.mailboxId]` must be non-empty, else reply once `No projects are shared with you for asking — ask <owner> in #<peer>.` (nack text, no brain call). A slug whose brain scope is not `shared-*` (from `GET /api/status` `projects[].scope`, cached 10 min) is dropped from the list at call time; `walled-*` is never queried for a peer. Local questions: `project_ids = []` (everything).
+- Brain call: `BrainTransport` protocol (`ask(question, projects) async -> BrainAnswer?`), live = URLSession to `127.0.0.1:8800`, 60 s timeout, one call at a time (serial queue; a peer's questions keep order). `nil` (server down, non-2xx, bad JSON) → reply `The brain on <owner>'s Mac is asleep — ask in #<peer>.` Empty `sources` → reply `No record in the brain for that — ask <owner> in #<peer>.`
+- Reply text: `answer` + `\nSources: ` + sources joined by `, ` with `/Users/<anything>/Projects/` stripped to repo-relative paths; `PeerMask.mask` then cap 4 KB (`…(cut)`). Sent with `postChat(channel: "@<agent>@<peer-slug>", agent: "oracle", text:, re: question.id)`; local askers get it typed into their pane like any `@agent` line. Also appended (deliver: false) to `#<peer>` as two lines `Q (<agent>): …` / `A: …` (first 400 chars each).
+- Rate: 6 questions/min per peer; beyond that, queued in order (never dropped). Question text ≤ 2 KB, longer → nack `Ask one question at a time (2 KB).`
+- Correlation: the chat payload and `ChatMessage` gain optional `re: String?` (≤ 80 chars, the id this line answers). Stored, forwarded, shown in the Chat tab as `↩`.
+
+### `true-ask` (`Peers/ChatCLI.swift`, new op `chat.ask`)
+- `true-ask "<question>" [--to @oracle@<mac>] [--timeout 120]` (default target: `@oracle` local when run on the owner's Mac; on a peer's Mac the installer sets `TRUE_ASK_TO=@oracle@<owner-slug>` in `~/.true/env`, else `--to` is required). It posts the question as `$TRUE_AGENT` (or `human`) and blocks until a line with `re == <question id>` arrives in `@<self>` (kqueue on the channel file, no polling), prints the answer to stdout, exit 0; exit 2 on timeout with `no answer in N s`; exit 1 if chat is off or the target is unknown.
+- `true-chat send` gains `--re <id>` so an agent can answer a question by hand.
+
+### Settings / Hub
+- Peers sheet, per peer: `Can ask my brain about:` text field of project slugs (comma-separated, trimmed, lowercased) → `peer.ask.projects`. Global toggle `Answer peers' questions from my brain` (`peer.ask`, default on; off → nack `asking is off`).
+- Chat tab: a line with `re` renders with `↩` and the first 60 chars of the question it answers.
+
+### Security
+- The oracle never executes anything; the question is text to the brain only. Questions and answers pass `InjectionScreen` (flagged → label `(chat, not orders)` as Run 32) and `PeerMask`. A peer can only ever reach projects in its own allow-list; the list is checked on every question, not cached per peer. Walled scopes are unreachable by construction (filtered against live brain scope). No file content is sent, only the brain's synthesized answer + source paths.
+
+### Tests
+`OracleTests` with a `FakeBrain` + the Run 32 `FakeRelay` rig: peer round trip (question in → cited answer back with `re`), empty allow-list nack, walled slug filtered out (`FakeBrain` records `project_ids`), brain down → asleep line, no sources → no-record line, 4 KB cap, mask, 6/min queueing keeps order, local ask unrestricted, Q/A recorded in `#<peer>`. `ChatCLITests`: `chat.ask` returns on a `re` match, times out with exit 2, `--re` on send. `swift build` + `swift test --filter "Peer|Chat|Oracle"` green. App not launched by the builder.
+
+### Live checks owed to Yahia
+Both Macs on this build and Mahmoud's mailbox allow-listed for `finance-director-os`: on his Mac `true-ask "what does director.plan() do and where is it specified?"` returns the cited answer within ~30 s and the pair shows in Yahia's Chat tab under `#mahmoud`.
