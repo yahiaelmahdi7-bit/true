@@ -17,6 +17,7 @@ final class PeerEngine: @unchecked Sendable {
     private let steering: @Sendable () -> Bool
     private let share: @Sendable () -> PeerShare
     private let allowedDirs: @Sendable () -> [String]
+    private let chatOn: @Sendable () -> Bool
 
     private let lock = NSLock()
     private let work = DispatchQueue(label: "true.peers.work")
@@ -37,6 +38,16 @@ final class PeerEngine: @unchecked Sendable {
     private var prompting: Set<UUID> = []
     private var activityCache: [String: [PeerActivityItem]] = [:]
     static let activityKeep = 200
+    // Run 32 — Channels
+    /// The local channel store + delivery. Set by the app (PeerService) and by tests; nil = chat not running.
+    var chat: ChatBus?
+    private var chatPending: [String: [[String: Any]]] = [:]
+    private var chatFlushArmed: Set<String> = []
+    private var chatSlots: [String: [Date]] = [:]
+    private var chatNacked: [String: Date] = [:]
+    static let chatBatchDelay: TimeInterval = 0.3
+    static let chatPerMinute = 20
+    static let chatBatchItems = 8
     /// Set when someone finished pairing with us ("Paired with <label>"); the Peers sheet shows it.
     private(set) var lastPaired: String?
     private(set) var dropCount = 0
@@ -52,10 +63,11 @@ final class PeerEngine: @unchecked Sendable {
          steering: @escaping @Sendable () -> Bool = { PeerSettings.steering },
          share: @escaping @Sendable () -> PeerShare = { PeerSettings.share },
          allowedDirs: @escaping @Sendable () -> [String] = { PeerSettings.allowedDirs },
+         chatOn: @escaping @Sendable () -> Bool = { PeerSettings.chat },
          now: @escaping @Sendable () -> Date = { Date() },
          scheduler: (@Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void)? = nil) {
         self.root = root; self.identity = identity; self.launcher = launcher; self.transport = transport
-        self.inboundMode = inboundMode; self.steering = steering; self.share = share; self.allowedDirs = allowedDirs; self.now = now; self.ownName = String(ownName.prefix(PeerValidate.maxLabel))
+        self.inboundMode = inboundMode; self.steering = steering; self.share = share; self.allowedDirs = allowedDirs; self.chatOn = chatOn; self.now = now; self.ownName = String(ownName.prefix(PeerValidate.maxLabel))
         let q = DispatchQueue(label: "true.peers.timer")
         self.scheduler = scheduler ?? { d, f in q.asyncAfter(deadline: .now() + d, execute: f) }
         links = PeerEngine.load(root.appendingPathComponent("peers.json")) ?? []
@@ -262,11 +274,11 @@ final class PeerEngine: @unchecked Sendable {
 
     /// Seal a payload to a pinned peer and put it in the outbox.
     @discardableResult
-    private func sealAndQueue(_ payload: [String: Any], to link: PeerLink, jobId: String? = nil, owner: String?) -> Bool {
+    private func sealAndQueue(_ payload: [String: Any], to link: PeerLink, jobId: String? = nil, owner: String?, at: Date? = nil) -> Bool {
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return false }
         let id = UUID().uuidString.lowercased()
         guard let blob = PeerSeal.seal(payload: body, id: id, now: now(), from: identity, to: link.keys) else { return false }
-        enqueue(OutboxItem(id: id, jobId: jobId, to: link.mailboxId, blob: blob, attempt: 0, nextAt: now(), owner: owner))
+        enqueue(OutboxItem(id: id, jobId: jobId, to: link.mailboxId, blob: blob, attempt: 0, nextAt: at ?? now(), owner: owner))
         return true
     }
 
@@ -430,6 +442,7 @@ final class PeerEngine: @unchecked Sendable {
             case "unpair": handleUnpair(from: o.envelope.from)
             case "say": handleSay(obj, from: o.envelope.from)
             case "stop": handleStop(obj, from: o.envelope.from)
+            case "chat": if obj["nack"] is String { handleChatNack(obj, from: o.envelope.from) } else { handleChat(obj, from: o.envelope.from) }
             case "activity": if let a = PeerActivity.parse(obj) { receiveActivity(a, from: o.envelope.from) } else { drop("activity payload") }
             default: drop("unknown kind")
             }
@@ -747,6 +760,114 @@ final class PeerEngine: @unchecked Sendable {
         } else {
             nack(j, "job not running")
         }
+        changed()
+    }
+
+    // MARK: Run 32 — Channels
+
+    /// Post a line from a local agent/human. Stored + delivered locally through the bus; forwarded to the paired peer(s)
+    /// the channel belongs to (`#<peer>` → that peer, `@agent@<peer>` → that peer, a named room → every peer, `#here` / `@agent` → nobody).
+    func postChat(channel raw: String, agent: String, text: String) -> Result<ChatMessage, PeerError> {
+        guard let bus = chat else { return .failure(.invalid("Chat isn't running")) }
+        guard let addr = ChatNaming.split(raw) else { return .failure(.invalid("A channel looks like #name or @agent")) }
+        let own = PeerNaming.slug(ownName)
+        lock.lock(); let ls = links; lock.unlock()
+        var targets: [PeerLink] = [], local = addr.channel, wire = addr.channel, localText = text, deliverLocal = true
+        if addr.channel.hasPrefix("@") {
+            if let mac = addr.mac, mac != own {
+                guard let l = ls.first(where: { PeerNaming.slug($0.label) == mac }) else { return .failure(.invalid("No peer named \(mac)")) }
+                targets = [l]; local = "#" + PeerNaming.slug(l.label); localText = "\(addr.channel) " + text; deliverLocal = false
+            }
+        } else if let l = ls.first(where: { "#" + PeerNaming.slug($0.label) == addr.channel }) {
+            targets = [l]; wire = "#" + own
+        } else if addr.channel != "#here" {
+            targets = ls
+        }
+        guard let m = bus.post(channel: local, agent: agent, text: localText, deliver: deliverLocal) else { return .failure(.invalid("Say something (a line of text)")) }
+        let body = ChatNaming.clean(text)
+        for l in targets {
+            let item: [String: Any] = ["id": m.id + (targets.count > 1 ? ":" + String(l.mailboxId.prefix(6)) : ""), "ts": m.ts, "channel": wire,
+                                       "from": ["agent": m.from.agent, "mac": own], "text": body]
+            lock.lock(); chatPending[l.mailboxId, default: []].append(item); let arm = chatFlushArmed.insert(l.mailboxId).inserted; lock.unlock()
+            if arm { let mb = l.mailboxId; scheduler(Self.chatBatchDelay) { [weak self] in self?.flushChat(mb) } }
+        }
+        changed()
+        return .success(m)
+    }
+
+    /// Send what has coalesced for a peer (all peers when nil). The scheduler calls this 300 ms after the first line; tests call it directly.
+    func flushChat(_ mailbox: String? = nil) {
+        lock.lock()
+        let boxes = mailbox.map { [$0] } ?? Array(chatPending.keys)
+        var work: [(PeerLink, [[String: Any]])] = []
+        for mb in boxes {
+            chatFlushArmed.remove(mb)
+            let items = chatPending.removeValue(forKey: mb) ?? []
+            if !items.isEmpty, let l = links.first(where: { $0.mailboxId == mb }) { work.append((l, items)) }
+        }
+        lock.unlock()
+        for (l, items) in work {
+            var i = 0
+            while i < items.count {
+                let chunk = Array(items[i..<min(i + Self.chatBatchItems, items.count)]); i += Self.chatBatchItems
+                sealAndQueue(["t": "chat", "items": chunk], to: l, owner: l.mailboxId, at: chatSlot(l.mailboxId))
+            }
+        }
+    }
+
+    /// When the next envelope to this peer may go: at most `chatPerMinute` per rolling minute, overflow keeps its order (never dropped).
+    private func chatSlot(_ mailbox: String) -> Date {
+        lock.lock(); defer { lock.unlock() }
+        let t = now()
+        var slots = (chatSlots[mailbox] ?? []).filter { $0 > t.addingTimeInterval(-120) }
+        var at = t
+        let recent = slots.filter { $0 > t.addingTimeInterval(-60) }
+        if recent.count >= Self.chatPerMinute { at = recent[recent.count - Self.chatPerMinute].addingTimeInterval(60.001) }
+        if let last = slots.last, last > t, at <= last { at = last.addingTimeInterval(0.001) }
+        slots.append(at); chatSlots[mailbox] = slots
+        return at
+    }
+
+    private func handleChat(_ obj: [String: Any], from mailbox: String) {
+        guard let l = link(mailbox) else { drop("chat from an unknown peer"); return }
+        let raw = (obj["items"] as? [[String: Any]]) ?? [obj]
+        guard !raw.isEmpty, raw.count <= 50 else { drop("chat payload"); return }
+        guard chatOn() else {
+            lock.lock()
+            let due = chatNacked[mailbox].map { now().timeIntervalSince($0) >= 3600 } ?? true
+            if due { chatNacked[mailbox] = now() }
+            lock.unlock()
+            if due { sealAndQueue(["t": "chat", "nack": "chat off"], to: l, owner: l.mailboxId) }
+            return
+        }
+        guard let bus = chat else { return }
+        let peerRoom = "#" + PeerNaming.slug(l.label), allLinks = peerLinks()
+        for o in raw {
+            guard let id = o["id"] as? String, !id.isEmpty, id.count <= 80, let text = o["text"] as? String, !text.isEmpty,
+                  let wireChannel = o["channel"] as? String, let from = o["from"] as? [String: Any], let agent = from["agent"] as? String, !agent.isEmpty,
+                  let channel = ChatNaming.normalize(wireChannel) else { drop("chat payload"); continue }
+            let ts = (o["ts"] as? Int) ?? Int(now().timeIntervalSince1970)
+            var local: String?
+            if channel == peerRoom || channel == "#" + PeerNaming.slug((from["mac"] as? String) ?? "") { local = peerRoom }   // their own-name room IS our room with them
+            else if channel.hasPrefix("@") { if bus.isSeat(String(channel.dropFirst())) { local = channel } }
+            else if channel != "#here", !bus.members(channel).isEmpty,
+                    !allLinks.contains(where: { "#" + PeerNaming.slug($0.label) == channel }) { local = channel }
+            guard let dest = local else { drop("chat channel not authorised"); continue }
+            let key = "chat:" + id
+            lock.lock()
+            let dup = seen[key] != nil
+            if !dup { seen[key] = Int(now().timeIntervalSince1970) + Int(Self.seenLife); saveSeen() }
+            lock.unlock()
+            if dup { continue }
+            bus.post(channel: dest, agent: String(agent.prefix(48)), mac: l.label, text: text, id: id, ts: ts)
+        }
+        changed()
+    }
+
+    /// The other side has chat off: say so in the shared channel (a note for people, never typed into a pane).
+    private func handleChatNack(_ obj: [String: Any], from mailbox: String) {
+        guard let l = link(mailbox), let bus = chat else { return }
+        bus.post(channel: "#" + PeerNaming.slug(l.label), agent: "true", text: "\(l.label) has chat turned off — they won't see these lines.", deliver: false)
         changed()
     }
 

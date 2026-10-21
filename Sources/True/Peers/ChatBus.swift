@@ -72,6 +72,9 @@ final class ChatBus: @unchecked Sendable {
     private var sources: [String: DispatchSourceFileSystemObject] = [:]
     private var memberMap: [String: [String]]
     private var held: [String: [String]] = [:]
+    private var silent = Set<String>()
+    /// Who counts as a local seat for an incoming `@agent` line (the app sets this to the roster; default = awake seats).
+    var knownSeat: (@Sendable (String) -> Bool)?
     /// Called after any store/membership change (the Chat tab reloads; the peer engine forwards from here).
     var onMessage: (@Sendable (ChatMessage) -> Void)?
 
@@ -92,13 +95,15 @@ final class ChatBus: @unchecked Sendable {
 
     deinit { for s in sources.values { s.cancel() } }
 
+    func isSeat(_ name: String) -> Bool { knownSeat?(name) ?? seats().contains(name) }
+
     func url(_ channel: String) -> URL { dir.appendingPathComponent(ChatNaming.fileName(channel)) }
 
     // MARK: store
 
     /// Append one message and deliver it. Returns nil for a bad channel or empty text.
     @discardableResult
-    func post(channel raw: String, agent: String, mac fromMac: String? = nil, text: String, id: String? = nil, ts: Int? = nil) -> ChatMessage? {
+    func post(channel raw: String, agent: String, mac fromMac: String? = nil, text: String, id: String? = nil, ts: Int? = nil, deliver: Bool = true) -> ChatMessage? {
         guard let channel = ChatNaming.normalize(raw) else { return nil }
         let t = ChatNaming.clean(text)
         guard !t.isEmpty else { return nil }
@@ -108,6 +113,7 @@ final class ChatBus: @unchecked Sendable {
         guard var data = try? JSONEncoder().encode(m) else { return nil }
         data.append(10)
         lock.lock()
+        if !deliver { silent.insert(m.id) }
         let fresh = !FileManager.default.fileExists(atPath: url(channel).path)
         if fresh { cursors[channel] = 0 }
         let fd = open(url(channel).path, O_WRONLY | O_CREAT | O_APPEND, 0o600)
@@ -230,8 +236,8 @@ final class ChatBus: @unchecked Sendable {
         lock.unlock()
         for l in used.split(separator: 10) {
             guard let m = try? JSONDecoder().decode(ChatMessage.self, from: Data(l)) else { continue }
-            let line = ChatNaming.line(m)
-            for seat in recipients(m) { route(seat, line) }
+            lock.lock(); let quiet = silent.remove(m.id) != nil; lock.unlock()
+            if !quiet { let line = ChatNaming.line(m); for seat in recipients(m) { route(seat, line) } }
             onMessage?(m)
         }
     }
