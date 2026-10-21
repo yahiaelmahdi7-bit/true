@@ -22,6 +22,7 @@ enum UpdateLogic {
     static let autoRestartKey = "update.autoRestart"
     /// Countdown cancellations in a row; reset by a successful restart.
     static let restartDeferralsKey = "update.restartDeferrals"
+    static let restartLastDeferralKey = "update.restartLastDeferral"
     static let restartCountdown: TimeInterval = 60
     static let restartIdleFloor: TimeInterval = 120
     static let restartDeferralWindow: TimeInterval = 4 * 3600
@@ -237,5 +238,12 @@ enum UpdateLogic {
         if modal { return .wait("dialog open") }
         if idleSeconds < restartIdleFloor { return .wait("recent input") }
         return .restartAfterCountdown
+    }
+
+    /// What the world looks like to `restartDecision`; read fresh each time by `Updater`.
+    struct RestartInputs: Equatable {
+        var working = 0, peerJobs = 0, builders = 0
+        var modal = false, novaBusy = false
+        var idleSeconds = 0.0
     }
 }
