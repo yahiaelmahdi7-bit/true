@@ -786,3 +786,38 @@ Yahia's agents (and Yahia) hand a task to a paired friend's True, which runs it 
 - **Kill switch.** Peers sheet: **Revoke** and **Stop all peer jobs**. **Hub** groups **From peers** and **Sent to peers**. **`true-peer`** CLI (`list`, `delegate`, `status`, `result`) over the 0600 socket `~/.true/peer.sock`.
 - **Code**: `Peers/PeerLogic.swift`, `PeerCrypto.swift`, `PeerModels.swift`, `PeerEngine.swift`, `PeerRelay.swift`, `PeerLauncherLive.swift`, `PeerCLI.swift`, `PeerViews.swift`; `relay/`. Removed: `Remote/RemoteServer+Peers.swift`, `/api/peer/*`, peer pairing scope, Tailscale wording. Tests: `PeerCryptoTests`, `PeerEngineTests`, `PeerEndToEndTests`, `PeerLogicTests`, `RemoteBarTests` (route table back to main's shape); relay `vitest` in `relay/test`.
 - **Live checks still owed.** Deploy the relay, fill `RELAY_URL_PLACEHOLDER`, then pair with a friend on another network (off any tailnet) and run a job both ways.
+
+## Run 30 — Drive (steer a peer's Claude live, on their systems)
+
+**Why.** Run 29 is a one-shot drop: a job goes out, status and a result come back, and the job must be a git repo the peer has cloned. Yahia wants to **drive and orchestrate a friend's Claude Code on the friend's own Mac, accounts and tools** (the 2026-10-22 case: Mahmoud builds the Finance Director OS P0 infra and agents). That needs four things Run 29 lacks: a steering channel into the running session, a condensed live view of what it is doing, jobs that run in a directory the peer allows (not only a cloned repo), and the same three controls usable by Yahia's agents from the CLI. v1 relay, crypto, pairing, modes and kill switch are unchanged; **the receiver still owns consent** (inboundMode, allowed directories, what flows back, every permission prompt stays local).
+
+**Settled defaults (Yahia can flip any):** steering on · activity stream on, receiver-controlled · directory jobs allowed only inside the receiver's explicit list (empty on a fresh install) · permission prompts are never answered remotely · the relay stays untrusted and never sees plaintext.
+
+### Payloads (extend `PeerModels` / `PeerLogic`, version stays 1; unknown payload types are dropped as before)
+- `job` gains `target`: `{"kind":"repo","repo","base"}` (Run 29 behaviour, worktree) **or** `{"kind":"dir","path"}`. A `dir` job runs only if `path` normalises to a directory under `peer.allowedDirs` (Peers sheet ▸ "Directories peers may work in", a list of folders, empty by default); else `failed` "Directory not allowed: <path>". No worktree for `dir`; the pane's cwd is the directory itself. `repo` is the string field as today for old senders.
+- `say` `{jobId, text ≤ 8 KB, fromAgent}`: sender → receiver. Accepted only from the peer that sent the job, only while the job is `accepted|working|needsYou|idle`. Delivered to the job's pane through `PaneDelivery.write(.submit)` (wake first if asleep), prefixed on one line `[from <peer label>]`; passes `InjectionScreen` (flagged, logged, never blocked). Background jobs: appended to `~/.true/peers/jobs/<jobId>/inbox.md` and the builder is told via its existing deliver line. Receiver toggle `peer.steering` (on by default); off → `nack` event `steering off` back to the sender.
+- `activity` `{jobId, seq, items:[{t, kind, text ≤ 1 KB}]}`: receiver → sender, batched every 2 s or when 8 KB accumulates, never more than 20 sends/min per job (relay limit is 60/min per socket). `kind` = `status` (the Run 29 status changes) · `tool` (tool name + first line of its input, from the pane hook's PreToolUse) · `assistant` (last assistant text, trimmed to 1 KB, from Stop) · `question` (the text Claude asks when it enters needsYou) · `nack`. Receiver setting `peer.share` = `status` | `activity` (default `activity`; `status` sends only the Run 29 statuses). Tool inputs are trimmed to their first line and secrets-looking tokens (`sk-`, `ghp_`, `Bearer`, 32+ hex) are masked before sealing.
+- `stop` `{jobId}`: sender asks the receiver to end the job; the receiver's existing `stop(panes:builders:)` runs and reports `failed` "Stopped by sender". Receiver may refuse with `peer.steering` off.
+
+### Sender side (`PeerEngine`, `SentJob`)
+- `SentJob` gains `target`, `seq`, `lastActivity`. Activity is appended to `~/.true/peers/jobs/<jobId>/events.jsonl` (0600, one JSON per item, idempotent on `seq`) and kept in memory for the Hub (last 200 items).
+- On `question` items ONE line goes to the sending agent's pane: `[peer <label>] needs you: "<first 160 chars>" — reply: true-peer say <jobId> "<text>"`. Done/failed line unchanged from Run 29.
+- Hub ▸ Sent to peers: a row expands to the live activity (monospace, newest last, 200 items), an input field "Say to <label>…" (⌘↩ sends `say`), and a Stop button. Nothing else in the Hub changes.
+- `true-peer` CLI gains `delegate … [--dir PATH]` (mutually exclusive with `--repo`; `--dir` sends a `dir` target) · `say <jobId> <text|-->` (`-` reads stdin) · `tail <jobId> [-f] [-n N]` (prints events.jsonl, `-f` follows by file watch, no polling timer) · `stop <jobId>`. All over the 0600 `~/.true/peer.sock` as today; ops `say`, `tail`, `stop`.
+
+### Receiver side (`PeerEngine`, `PeerLauncherLive`, `InboundJob`)
+- `InboundJob` gains `target` and `steering` (bool snapshot at accept). `dir` jobs skip `resolveClone`/`prepareWorktree`; the role card says the directory and that the sender may send follow-ups.
+- The pane hook forwarder already carries `permission_mode` on every event; Run 30 subscribes the peer engine to the job pane's hook events (PreToolUse, Stop, Notification/needsYou) and turns them into `activity` items per the batching rule. No new hook files; the existing per-pane hook stays the one source.
+- Permission prompts: **never** auto-answered from a `say`; if a `say` arrives while the pane is at a permission prompt it is held and delivered after the prompt resolves (the receiver answers locally). `InjectionScreen` runs on every `say` text.
+- Peers sheet: "Directories peers may work in" (add/remove folders via `NSOpenPanel`, persisted in `peer.allowedDirs`), "Let peers send follow-ups" (`peer.steering`), "Share with the sender" (`peer.share`: Status only / Activity). Kill switch unchanged; **Stop all peer jobs** also drops queued `say`s.
+
+### Security (unchanged doctrine, three additions)
+- A `say`/`stop`/`activity` is accepted only from the pinned peer on the other end of that jobId; anything else is dropped with a reason code in `drops.log`.
+- `dir` jobs cannot escape the allow-list via symlinks or `..` (realpath both sides before the prefix check); `~`, `/`, `$HOME` and any ancestor of `~/.true` are refused even if listed.
+- Activity never carries file contents, environment values or full tool inputs; one line per tool call, masked.
+
+### Tests
+`PeerLogicTests`: target parsing, dir allow-list (symlink, `..`, home refusal), activity batching (2 s / 8 KB / 20 per min), secret masking. `PeerEngineTests` over `FakeRelay`: say round-trip into a fake pane, steering off → nack, stop → failed, activity seq idempotence, say held during a permission prompt. `PeerEndToEndTests`: a `dir` job both ways. `swift build` + `swift test` green; the app is **not** launched by the builder (Yahia relaunches True himself).
+
+### Live checks owed to Yahia
+Relaunch True; in Peers add one allowed directory; with Mahmoud's True updated, send a `dir` job, `say` one follow-up, watch `true-peer tail -f`, `stop` it.
