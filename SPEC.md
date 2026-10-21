@@ -992,3 +992,13 @@ Same trust boundary as Runs 29/30: a typed envelope prompt is the only thing tha
 
 ### Live check owed to Yahia
 Mahmoud delegates two jobs on finance-director-os back to back; Yahia's True opens one `peer-mahmoud-s-macbook-air-finance-director-os` tab, the second job shows "In line", and starts in that same tab when the first finishes.
+
+### Deviations (builder)
+- The envelope's checkout step is `git fetch origin && git checkout -B <branch> origin/<base>` (the remote-tracking base, matching what `prepareWorktree` branches from), and it appears from a desk's second repo job on (also on the first job of a replacement pane whose desk worktree already exists).
+- `PeerText.firstPrompt` keeps its existing form (a short prompt naming the envelope file); that same prompt is what is typed into a reused desk pane.
+- A desk pane is reused only if it was opened under the **same inbound permission mode** as the new job; otherwise (e.g. the owner switched bypass → ask in between) the job opens a fresh pane, so a looser pane never serves a stricter job.
+- A pane stopped by the sender's Stop or the kill switch is marked retired and never fed another job while its tab lingers; the next in line opens a fresh pane. The kill switch ends in-line jobs too and starts nothing.
+- If the desk pane shows a permission dialog when a job is due, the job stays in line (re-tried every 3 s) instead of typing over it.
+- Scratch desks work in one stable folder per peer, `<engine root>/desks/<mailbox>/work`, not in a per-job folder.
+- In-line jobs are not restarted after an app relaunch (desk panes do not survive one either); they stay `accepted` until stopped.
+- Hub card: the desk line shows on the Hub's peer-job rows and on the job sheet; the Peers sheet lists live desks under the toggle.
