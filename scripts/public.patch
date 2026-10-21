@@ -1,6 +1,6 @@
 diff -ruN a/Sources/True/Agents/JevClient.swift b/Sources/True/Agents/JevClient.swift
---- a/Sources/True/Agents/JevClient.swift	2026-10-14 00:41:24
-+++ b/Sources/True/Agents/JevClient.swift	2026-10-14 00:36:30
+--- a/Sources/True/Agents/JevClient.swift	2026-10-22 00:50:19
++++ b/Sources/True/Agents/JevClient.swift	2026-10-22 00:50:19
 @@ -1,6 +1,6 @@
  import Foundation
  
@@ -9,7 +9,7 @@ diff -ruN a/Sources/True/Agents/JevClient.swift b/Sources/True/Agents/JevClient.
  /// never prose. Build with `.noul`, `.choice` or `.score`.
  struct JevQuestion: Sendable, Equatable {
      enum Kind: Sendable, Equatable {
-@@ -81,34 +81,16 @@
+@@ -81,24 +81,16 @@
      }
  }
  
@@ -23,17 +23,7 @@ diff -ruN a/Sources/True/Agents/JevClient.swift b/Sources/True/Agents/JevClient.
 -    /// Reads the key through `/usr/bin/security`, which owns the Keychain item, so no access dialog.
 -    /// The output is the secret: it is only trimmed and returned, never logged.
 -    static func fromKeychain() -> String? {
--        let p = Process()
--        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
--        p.arguments = ["find-generic-password", "-s", service, "-a", account, "-w"]
--        let out = Pipe()
--        p.standardOutput = out
--        p.standardError = FileHandle.nullDevice
--        p.standardInput = FileHandle.nullDevice
--        guard (try? p.run()) != nil else { return nil }
--        let data = out.fileHandleForReading.readDataToEndOfFile()
--        p.waitUntilExit()
--        guard p.terminationStatus == 0 else { return nil }
+-        guard let data = Subprocess.run("/usr/bin/security", ["find-generic-password", "-s", service, "-a", account, "-w"]) else { return nil }
 -        let key = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
 -        return key.isEmpty ? nil : key
 -    }
@@ -48,7 +38,7 @@ diff -ruN a/Sources/True/Agents/JevClient.swift b/Sources/True/Agents/JevClient.
      static let model = "jev-latest"
      static let shared = JevClient()
  
-@@ -130,8 +112,7 @@
+@@ -120,8 +112,7 @@
          lock.withLock {
              if resolved { return cachedKey }
              resolved = true
@@ -58,6 +48,52 @@ diff -ruN a/Sources/True/Agents/JevClient.swift b/Sources/True/Agents/JevClient.
              return cachedKey
          }
      }
+diff -ruN a/Sources/True/Views/SettingsView.swift b/Sources/True/Views/SettingsView.swift
+--- a/Sources/True/Views/SettingsView.swift	2026-10-22 00:50:19
++++ b/Sources/True/Views/SettingsView.swift	2026-10-22 00:50:19
+@@ -11,12 +11,6 @@
+     @AppStorage(TerminalSettings.claudeAutostartKey) private var claudeAutostart = TerminalSettings.claudeAutostartDefault()
+     @AppStorage(TerminalSettings.overseerKey) private var overseer = true
+     @AppStorage(TerminalSettings.watcherKey) private var watcher = true
+-    @AppStorage(TerminalSettings.jevRoutingKey) private var jevRouting = true
+-    @AppStorage(NovaSettings.enabledKey) private var novaOn = true
+-    @AppStorage(NovaSettings.wakeKey) private var novaWake = true
+-    @AppStorage(NovaSettings.hotkeyKey) private var novaKey = Hotkey.rightOption.rawValue
+-    @AppStorage(NovaSettings.effortKey) private var novaEffort = "low"
+-    @AppStorage(NovaSettings.timingsKey) private var novaTimings = false
+ 
+     var body: some View {
+         Form {
+@@ -40,27 +34,10 @@
+             Toggle("Start Claude in new tabs (skip permissions)", isOn: $claudeAutostart)
+                 .help("A new tab and a fresh launch open Claude with --dangerously-skip-permissions. Splits stay a plain shell.")
+             Toggle("Overseer", isOn: $overseer)
+-                .help("After each Claude turn in a True pane, Jev reads what was asked and answered and shows a verdict. Off: no calls.")
++                .help("After each Claude turn in a True pane, a judge reads what was asked and answered and shows a verdict. Needs a judging service, which this build does not include.")
+                 .onChange(of: overseer) { _, on in if !on { OverseerStore.shared.clearAll() } }
+             Toggle("Watcher", isOn: $watcher)
+-                .help("Watches your builders, unpushed work and failed sessions, and proposes fixes in the Hub for you to approve. Off: no calls, no runs.")
+-            Toggle("Jev routing", isOn: $jevRouting)
+-                .help("The Command bar (⌘K) asks Jev where each line should go. Off: prefix rules and defaults only, no calls.")
+-            Section("Nova (voice) — options below take effect on relaunch") {
+-                Toggle("Nova", isOn: $novaOn)
+-                    .onChange(of: novaOn) { _, on in on ? NovaEngine.shared.start() : NovaEngine.shared.stop() }
+-                Toggle("Wake word “Nova” (mic always on)", isOn: $novaWake)
+-                Picker("Push-to-talk", selection: $novaKey) { ForEach(Hotkey.allCases) { Text($0.label).tag($0.rawValue) } }
+-                Picker("Brain effort", selection: $novaEffort) { Text("low").tag("low"); Text("medium").tag("medium") }
+-                Toggle("Show timings (ms on each HUD line)", isOn: $novaTimings)
+-                LabeledContent("Haiku key", value: Vault.has("anthropic", envFallback: ["ANTHROPIC_API_KEY"]) ? "set" : "missing — reflex-only")
+-                LabeledContent("ElevenLabs key", value: Vault.has("elevenlabs") ? "set" : "none — system voice")
+-                ForEach([("Microphone", "Privacy_Microphone"), ("Speech Recognition", "Privacy_SpeechRecognition"), ("Accessibility", "Privacy_Accessibility"),
+-                         ("Screen Recording", "Privacy_ScreenCapture"), ("Automation", "Privacy_Automation")], id: \.0) { n, a in
+-                    LabeledContent(n) { Button("Open System Settings") {
+-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(a)")!) } }
+-                }
+-            }
++                .help("Watches your builders, unpushed work and failed sessions, and proposes fixes in the Hub for you to approve. Needs a judging service, which this build does not include.")
+         }
+         .formStyle(.grouped)
+         .frame(width: 420)
 diff -ruN a/Sources/True/Agents/PaneDelivery.swift b/Sources/True/Agents/PaneDelivery.swift
 --- a/Sources/True/Agents/PaneDelivery.swift	2026-10-14 00:41:24
 +++ b/Sources/True/Agents/PaneDelivery.swift	2026-10-14 00:36:24
@@ -94,51 +130,6 @@ diff -ruN a/Sources/True/TrueApp.swift b/Sources/True/TrueApp.swift
          // Launch side effect: paint the live Dock tile with the bare cursive T. The bundle icon alone gets
          // boxed into a grey tile by macOS 26; a runtime image is drawn as-is. One-shot, no ongoing cost.
          if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
-diff -ruN a/Sources/True/Views/SettingsView.swift b/Sources/True/Views/SettingsView.swift
---- a/Sources/True/Views/SettingsView.swift	2026-10-14 00:41:24
-+++ b/Sources/True/Views/SettingsView.swift	2026-10-14 00:36:24
-@@ -9,12 +9,6 @@
-     @AppStorage(TerminalSettings.colorKey) private var color = TerminalSettings.defaultColor
-     @AppStorage(TerminalSettings.overseerKey) private var overseer = true
-     @AppStorage(TerminalSettings.watcherKey) private var watcher = true
--    @AppStorage(TerminalSettings.jevRoutingKey) private var jevRouting = true
--    @AppStorage(NovaSettings.enabledKey) private var novaOn = true
--    @AppStorage(NovaSettings.wakeKey) private var novaWake = true
--    @AppStorage(NovaSettings.hotkeyKey) private var novaKey = Hotkey.rightOption.rawValue
--    @AppStorage(NovaSettings.effortKey) private var novaEffort = "low"
--    @AppStorage(NovaSettings.timingsKey) private var novaTimings = false
- 
-     var body: some View {
-         Form {
-@@ -32,26 +26,10 @@
-             }
-             Toggle("Colour in terminals", isOn: $color)
-             Toggle("Overseer", isOn: $overseer)
--                .help("After each Claude turn in a True pane, Jev reads what was asked and answered and shows a verdict. Off: no calls.")
-+                .help("After each Claude turn in a True pane, a judge reads what was asked and answered and shows a verdict. Needs a judging service, which this build does not include.")
-                 .onChange(of: overseer) { _, on in if !on { OverseerStore.shared.clearAll() } }
-             Toggle("Watcher", isOn: $watcher)
--                .help("Watches your builders, unpushed work and failed sessions, and proposes fixes in the Hub for you to approve. Off: no calls, no runs.")
--            Toggle("Jev routing", isOn: $jevRouting)
--                .help("The Command bar (⌘K) asks Jev where each line should go. Off: prefix rules and defaults only, no calls.")
--            Section("Nova (voice) — takes effect on relaunch") {
--                Toggle("Nova", isOn: $novaOn)
--                Toggle("Wake word “Nova” (mic always on)", isOn: $novaWake)
--                Picker("Push-to-talk", selection: $novaKey) { ForEach(Hotkey.allCases) { Text($0.label).tag($0.rawValue) } }
--                Picker("Brain effort", selection: $novaEffort) { Text("low").tag("low"); Text("medium").tag("medium") }
--                Toggle("Show timings (ms on each HUD line)", isOn: $novaTimings)
--                LabeledContent("Haiku key", value: Vault.has("anthropic", envFallback: ["ANTHROPIC_API_KEY"]) ? "set" : "missing — reflex-only")
--                LabeledContent("ElevenLabs key", value: Vault.has("elevenlabs") ? "set" : "none — system voice")
--                ForEach([("Microphone", "Privacy_Microphone"), ("Speech Recognition", "Privacy_SpeechRecognition"), ("Accessibility", "Privacy_Accessibility"),
--                         ("Screen Recording", "Privacy_ScreenCapture"), ("Automation", "Privacy_Automation")], id: \.0) { n, a in
--                    LabeledContent(n) { Button("Open System Settings") {
--                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?\(a)")!) } }
--                }
--            }
-+                .help("Watches your builders, unpushed work and failed sessions, and proposes fixes in the Hub for you to approve. Needs a judging service, which this build does not include.")
-         }
-         .formStyle(.grouped)
-         .frame(width: 420)
 diff -ruN a/Sources/True/Views/TabBar.swift b/Sources/True/Views/TabBar.swift
 --- a/Sources/True/Views/TabBar.swift	2026-10-14 00:41:24
 +++ b/Sources/True/Views/TabBar.swift	2026-10-14 00:36:24

@@ -19,7 +19,7 @@ func chatTmp() -> URL {
     return u
 }
 
-func chatBus(_ sink: ChatSink, root: URL = chatTmp(), mac: String = "Yahia") -> ChatBus {
+func chatBus(_ sink: ChatSink, root: URL = chatTmp(), mac: String = "Pat") -> ChatBus {
     ChatBus(root: root, mac: mac, seats: { [sink] in sink.awake }, deliver: { [sink] s, l in sink.add(s, l) },
             atPermissionPrompt: { [sink] in sink.isPrompting($0) })
 }
@@ -53,12 +53,12 @@ func chatBus(_ sink: ChatSink, root: URL = chatTmp(), mac: String = "Yahia") -> 
 
     @Test func membershipPersistsAndOnlyMembersGetARoom() throws {
         let root = chatTmp(); let sink = ChatSink(); let bus = chatBus(sink, root: root)
-        #expect(bus.join("a", "#mahmoud")); #expect(bus.join("b", "#mahmoud")); #expect(!bus.join("a", "@x"))
-        bus.leave("b", "#mahmoud")
-        #expect(bus.members("#mahmoud") == ["a"])
-        #expect(chatBus(sink, root: root).members("#mahmoud") == ["a"])      // reloaded from members.json
-        bus.post(channel: "#mahmoud", agent: "human", text: "hi")
-        #expect(sink.lines("a") == ["[#mahmoud human@yahia] hi"])
+        #expect(bus.join("a", "#sam")); #expect(bus.join("b", "#sam")); #expect(!bus.join("a", "@x"))
+        bus.leave("b", "#sam")
+        #expect(bus.members("#sam") == ["a"])
+        #expect(chatBus(sink, root: root).members("#sam") == ["a"])      // reloaded from members.json
+        bus.post(channel: "#sam", agent: "human", text: "hi")
+        #expect(sink.lines("a") == ["[#sam human@pat] hi"])
         #expect(sink.lines("b").isEmpty)
     }
 
@@ -67,7 +67,7 @@ func chatBus(_ sink: ChatSink, root: URL = chatTmp(), mac: String = "Yahia") -> 
         let bus = chatBus(sink)
         bus.post(channel: "#here", agent: "pm", text: "standup")
         #expect(sink.lines("pm").isEmpty)
-        #expect(sink.lines("dev") == ["[#here pm@yahia] standup"] && sink.lines("qa").count == 1)
+        #expect(sink.lines("dev") == ["[#here pm@pat] standup"] && sink.lines("qa").count == 1)
     }
 
     @Test func directLineGoesToThatSeatOnly() {
@@ -101,12 +101,12 @@ func chatBus(_ sink: ChatSink, root: URL = chatTmp(), mac: String = "Yahia") -> 
         let bus = chatBus(sink)
         bus.post(channel: "#here", agent: "pm", text: "first")
         #expect(sink.lines("dev").count == 1)
-        let m = ChatMessage(id: "ext1", ts: 1, channel: "#here", from: ChatSender(agent: "cli", mac: "yahia"), text: "from outside")
+        let m = ChatMessage(id: "ext1", ts: 1, channel: "#here", from: ChatSender(agent: "cli", mac: "pat"), text: "from outside")
         var d = try JSONEncoder().encode(m); d.append(10)
         let h = try FileHandle(forWritingTo: bus.url("#here")); try h.seekToEnd(); try h.write(contentsOf: d); try h.close()
         let end = Date().addingTimeInterval(3)
         while sink.lines("dev").count < 2 && Date() < end { Thread.sleep(forTimeInterval: 0.02) }
-        #expect(sink.lines("dev").last == "[#here cli@yahia] from outside")
+        #expect(sink.lines("dev").last == "[#here cli@pat] from outside")
         #expect(sink.lines("dev").count == 2)              // no double delivery from post + watcher
     }
 
@@ -114,12 +114,12 @@ func chatBus(_ sink: ChatSink, root: URL = chatTmp(), mac: String = "Yahia") -> 
         let sink = ChatSink(); let bus = chatBus(sink)
         bus.post(channel: "#here", agent: "pm", text: "a", ts: 100)
         bus.post(channel: "#x", agent: "pm", text: "b", ts: 200)
-        #expect(bus.presence()["pm@yahia"] == 200)
+        #expect(bus.presence()["pm@pat"] == 200)
     }
 
     @Test func addressSplitHandlesAgentAtMac() {
-        #expect(ChatNaming.split("@Dev@Mahmoud")?.channel == "@dev")
-        #expect(ChatNaming.split("@Dev@Mahmoud")?.mac == "mahmoud")
+        #expect(ChatNaming.split("@Dev@Sam")?.channel == "@dev")
+        #expect(ChatNaming.split("@Dev@Sam")?.mac == "sam")
         #expect(ChatNaming.split("#here")?.mac == nil)
         #expect(ChatNaming.split("here") == nil)
     }

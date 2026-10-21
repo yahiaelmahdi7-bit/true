@@ -17,7 +17,7 @@ import Foundation
 
     @Test func joinSendTailListLeaveEndToEnd() {
         let r = rig(); defer { r.a.close(); r.b.close() }
-        #expect(ok(call(r.a, "chat.join", ["channel": "#mahmoud", "from": "pm"])))
+        #expect(ok(call(r.a, "chat.join", ["channel": "#sam", "from": "pm"])))
         #expect(ok(call(r.a, "chat.join", ["channel": "#bea", "from": "pm"])))
         r.a.sink.awake = ["pm", "dev"]
         let s = call(r.a, "chat.send", ["channel": "#here", "text": "standup", "from": "dev"])
@@ -34,10 +34,10 @@ import Foundation
         let l = call(r.a, "chat.list", ["from": "pm"])
         let names = (l["channels"] as? [[String: Any]])?.compactMap { $0["channel"] as? String } ?? []
         #expect(names.contains("#here") && names.contains("#bea"))
-        #expect((l["joined"] as? [String])?.sorted() == ["#bea", "#mahmoud"])
+        #expect((l["joined"] as? [String])?.sorted() == ["#bea", "#sam"])
         #expect((l["presence"] as? [[String: Any]])?.contains { $0["who"] as? String == "human@al" } == true)
         // leave
-        #expect((call(r.a, "chat.leave", ["channel": "#mahmoud", "from": "pm"])["channels"] as? [String]) == ["#bea"])
+        #expect((call(r.a, "chat.leave", ["channel": "#sam", "from": "pm"])["channels"] as? [String]) == ["#bea"])
     }
 
     @Test func sendToAPeerChannelCrossesTheRelay() {
