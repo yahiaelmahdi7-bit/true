@@ -970,3 +970,25 @@ Mahmoud runs `true-peer offer <his repo url> --name demo <yahia>`; Yahia accepts
 - The sharer's side records the share on `ack` with the slug the accepter used; its `path` is whatever `resolveClone` finds for the URL (empty if none).
 - Offers persist in `~/.true/peers/offers.json`; a failed clone leaves the card with a "Try again" button. A decline/failed outgoing offer shows as a dismissable note.
 - `git clone` refuses an existing non-empty target and never prompts (`GIT_TERMINAL_PROMPT=0`); tests use a fake launcher, never real git.
+
+## Run 35 — One desk per peer project (inbound jobs feed one live session)
+
+**Why.** Yahia's call (2026-10-22, screenshot of three `peer-mahmoud-s-macbook-air-*` tabs): every inbound job opens its own Claude Code session, so three jobs from one peer on one repo tripled the load and each session re-grounded itself in the same repo from scratch. Jobs from the same peer on the same project must flow into **one live session** that keeps its context, one job after another.
+
+**Settled defaults (Yahia, 2026-10-22):** on by default (`peer.desk`, Peers sheet toggle "One session per peer project") · a desk is keyed by `(peer mailbox, project)` where project = the normalised repo URL (repo jobs), the resolved dir (dir jobs) or `scratch` · the first job opens the pane as today; later jobs are **typed into that same pane** when it is free, exactly as a Run 30 `say` is · while a desk is busy, later jobs wait **in line** (status `accepted`, note "In line behind <title>") and start the moment the running one ends · `ask` mode is unchanged (nothing enters the line before Approve) · background (builder) jobs are unchanged · the desk pane lives until the owner closes its tab; the next job then opens a fresh one.
+
+### Desk (`PeerEngine`, `PeerLogic`, `PeerModels`)
+- `PeerNaming.deskWorktree(clone:, label:)` = `<clone>.peers/<peer-slug>/desk`; `PeerNaming.deskAgentName(label:, project:)` = `peer-<peer-slug>-<project-slug>`. One worktree per desk, prepared once (`prepareWorktree` with the first job's branch). Each later repo job starts with `git checkout -B <branch> <base>` **run by the agent**: the envelope's first step says so and tells it to commit any leftovers from the previous job on their branch first. Dir and scratch desks have no branch step.
+- `InboundJob` gains `desk: String?` (the key). `pane` is set only when the job is actually delivered to the pane, never while in line, so `paneEvent`'s "non-final job on this pane" still names exactly the running job.
+- `run(jobId)`: resolve the desk key → if a non-final job with that key holds a live pane (`launcher.paneAlive(pane)`, new protocol method, default true in the fake) the job is marked in line and nothing else happens → else if a desk pane exists and is free (its last job final, pane alive) deliver `PeerText.firstPrompt(envelope)` with `deliverToPane` (wait while `atPermissionPrompt`, like `say`) → else launch a pane with `PeerText.roleCardDesk` (a desk role card: peer, worktree, "every job's envelope names its own branch and result path") and the first prompt. `end(jobId)` then starts the next in-line job for that desk, oldest first.
+- Stop on the running desk job kills the pane as today; the next in line opens a fresh pane. Decline on an in-line job just ends it.
+- The Hub job card shows the desk ("Desk: <peer> · <project> · N in line"); the Peers sheet lists live desks (peer, project, running job, in line) with the toggle.
+
+### Security
+Same trust boundary as Runs 29/30: a typed envelope prompt is the only thing that enters the pane, with the same marks. A desk never crosses peers or projects. Turning the toggle off only affects jobs that arrive afterwards.
+
+### Tests
+`PeerEngineTests` over `FakeRelay` + fake launcher counting `launchPane`/`deliverToPane`: two jobs same peer+repo → one `launchPane`, the second is in line until the first ends, then one `deliverToPane` with its envelope; different repos → two panes; pane gone (fake `paneAlive` false) → a new `launchPane`; `ask` mode: an in-line job never exists before Approve; `paneEvent` on the desk pane maps to the running job only; desk off → two panes as before; dir/scratch desks keyed correctly. `swift build` + `swift test --filter Peer` green. App not launched by the builder.
+
+### Live check owed to Yahia
+Mahmoud delegates two jobs on finance-director-os back to back; Yahia's True opens one `peer-mahmoud-s-macbook-air-finance-director-os` tab, the second job shows "In line", and starts in that same tab when the first finishes.
