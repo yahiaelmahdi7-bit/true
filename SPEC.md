@@ -841,6 +841,13 @@ Relaunch True; in Peers add one allowed directory; with Mahmoud's True updated, 
 ### Live checks owed to Yahia
 After the next public release: Yahia's True (auto-install on) restarts itself idle within 60 s of the staged update; Mahmoud's v1.1.2 still installs at quit once, then has this.
 
+### Deviations (builder)
+- **Toast host:** the toast is a borderless non-activating child `NSPanel` of the key window (bottom-right), driven from `RestartPill.swift`, because the main content view is outside the allowed file lane. Same glass as the HUD (`glassSurface`).
+- **Input/dialog re-check:** keyboard/mouse idleness and open dialogs fire no observable event, so while an update is staged and a `.wait("recent input")` blocks, one bounded one-shot re-look is scheduled (idle floor remaining, min 5 s; 60 s for other waits). No polling loop; nothing runs when nothing is staged.
+- **Three-strikes input:** `restartDecision` keeps the spec signature; the 3-cancel fallback is `UpdateLogic.autoRestartAllowed(setting:deferrals:)`, applied by `Updater` before the decision. The settings toggle is disabled (not hidden) when "Install updates automatically" is off.
+- **Claude "needsYou":** the working count reuses `BuildFreshnessWatcher.workingCount()` (busy sessions under True), now internal instead of private; sessions waiting on the person are not counted separately.
+- **Peer jobs** are read only on a Mac that already has `peers.json`, so the check never creates peer keys.
+
 ## Run 32 — Channels (live cross-session chat, local and across peers)
 
 **Why.** Run 29 is jobs, Run 30 is steering one job. Yahia's call (2026-10-22): **live, real-time communication between sessions**: any Claude session in True (his or a paired friend's) and either human can post a line and every subscribed session sees it within a second, on the same Mac or across the relay. One bus, one name per thing: a **channel**.
