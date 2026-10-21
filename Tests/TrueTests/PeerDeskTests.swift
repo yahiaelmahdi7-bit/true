@@ -159,4 +159,14 @@ import Foundation
         let dirKeys = Set(r.b.engine.desks().map(\.key).filter { $0.contains("|dir:") })
         #expect(dirKeys.count == 2)
     }
+
+    @Test func namingAndCardLines() {
+        #expect(PeerNaming.deskWorktree(clone: "/p/app", label: "Al Bo") == "/p/app.peers/al-bo/desk")
+        #expect(PeerNaming.deskAgentName(label: "Mahmoud's MacBook Air", project: "finance-director-os") == "peer-mahmoud-s-macbook-air-finance-director-os")
+        #expect(PeerNaming.deskProject("mb|repo:github.com/acme/app") == "app" && PeerNaming.deskProject("mb|dir:/Users/y/Docs") == "Docs" && PeerNaming.deskProject("mb|scratch") == "scratch")
+        #expect(PeerText.deskLine(peer: "Al", project: "app", inLine: 2) == "Desk: Al · app · 2 in line")
+        #expect(PeerText.deskLine(peer: "Al", project: "app", inLine: 0) == "Desk: Al · app")
+        let role = PeerText.roleCardDesk(label: "Al", workDir: "/w")
+        #expect(role.contains("/w") && role.contains("its own branch") && role.contains("result path"))
+    }
 }
