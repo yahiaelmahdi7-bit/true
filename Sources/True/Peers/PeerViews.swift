@@ -261,6 +261,7 @@ struct PeersView: View {
     @State private var relayURL = PeerRelay.url
     @State private var showAdvanced = false
     @State private var steering = PeerSettings.steering
+    @State private var chatOn = PeerSettings.chat
     @State private var share = PeerSettings.share
     @State private var dirs = PeerSettings.allowedDirs
     @State private var dirNote: String?
@@ -306,6 +307,7 @@ struct PeersView: View {
                 if let dirNote { Text(dirNote).font(.caption).foregroundStyle(.secondary) }
             }
             Toggle("Let peers send follow-ups", isOn: Binding(get: { steering }, set: { steering = $0; PeerSettings.steering = $0 }))
+            Toggle("Let peers chat with my agents", isOn: Binding(get: { chatOn }, set: { chatOn = $0; PeerSettings.chat = $0 }))
             Picker("Share with the sender", selection: Binding(get: { share }, set: { share = $0; PeerSettings.share = $0 })) {
                 Text("Status only").tag(PeerShare.status)
                 Text("Activity").tag(PeerShare.activity)

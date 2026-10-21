@@ -254,7 +254,9 @@ struct HubPanelContent: View {
         let buckets = filter == .all ? self.buckets : []
         VStack(spacing: 0) {
             header(buckets)
-            if filter == .crew {
+            if filter == .chat {
+                ChatView(roster: allSeats.map(\.name))
+            } else if filter == .crew {
                 CrewTabView(snapshot: crew, notice: crewNotice, onPick: onCrewPick)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: crewNotice)
             } else if groups.isEmpty && allSeats.isEmpty && buckets.allSatisfy({ $0.count == 0 }) {
@@ -290,7 +292,7 @@ struct HubPanelContent: View {
             }
         }
         // Seats and Crew read best narrow; the All tab uses the whole card.
-        .frame(maxWidth: filter == .all ? .infinity : Self.width)
+        .frame(maxWidth: filter == .all || filter == .chat ? .infinity : Self.width)
         .frame(maxWidth: .infinity)
     }
 
@@ -306,7 +308,7 @@ struct HubPanelContent: View {
                     Text("Hub").font(.title2.weight(.semibold)).foregroundStyle(Theme.text)
                     if filter == .all { cloudPill }
                 }
-                if filter != .crew { summary(buckets) }
+                if filter != .crew && filter != .chat { summary(buckets) }
             }
             .layoutPriority(1)
             Spacer(minLength: 8)
@@ -314,8 +316,9 @@ struct HubPanelContent: View {
                 Text("All").tag(HubFilter.all)
                 Text("Agents").tag(HubFilter.seats)
                 Text("Crew").tag(HubFilter.crew)
+                Text("Chat").tag(HubFilter.chat)
             }
-            .pickerStyle(.segmented).labelsHidden().frame(width: 190)
+            .pickerStyle(.segmented).labelsHidden().frame(width: 250)
             .accessibilityLabel("Show")
             .accessibilityHint("All: everything running and your agents. Agents: only your agents. Crew: specialists Claude can call in.")
             if filter == .all { headerButton("icloud.and.arrow.up", help: "Run in cloud", hint: "Sends a repo and a prompt to the cloud factory", action: onRunCloud) }

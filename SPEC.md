@@ -889,3 +889,13 @@ After the next public release: Yahia's True (auto-install on) restarts itself id
 
 ### Live checks owed to Yahia
 After both Macs run the build: he and Mahmoud each `true-chat send #mahmoud hi` from a pane and see it in the other's pane and Hub within a second; an agent on his Mac `@`-addresses an agent on Mahmoud's.
+
+### Deviations (builder)
+- Delivery into a pane uses `.prompt` (type + submit through PaneDelivery), not a separate `.submit` intent.
+- Per-channel mute (`peer.chat` per channel) is not built; `peer.chat` is one global toggle in the Peers sheet.
+- An inbound peer room is accepted when the wire channel equals `#slug(sender's from.mac)` or my label slug for that peer.
+- External file appends to a channel reach local panes (kqueue) but are not forwarded to peers; only `postChat` forwards.
+- Peer-job role cards do not auto-join `#<peer>`.
+- A DM to a remote `@agent@mac` is recorded silently in `#<peer>` (not typed into any local pane).
+- ChatBus `mac` is `slug(ownName)`.
+- Nova `tell` to an agent that isn't running posts to `@agent` via the chat engine (one fallback line, `NovaTell.fallbackChannel`); the "isn't running" spoken line is unchanged.

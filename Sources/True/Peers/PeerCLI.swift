@@ -17,6 +17,7 @@ enum PeerCLI {
             try? body.write(toFile: path, atomically: true, encoding: .utf8)
         }
         chmod(path, 0o755)
+        ChatCLI.install(paths: paths)
     }
 
     // MARK: request handling (pure given an engine — unit-tested)
@@ -72,6 +73,7 @@ enum PeerCLI {
             guard let id = req["jobId"] as? String, !engine.status(jobId: id).isEmpty else { return fail("no such job") }
             return ["ok": true, "path": engine.eventsURL(id).path]
         default:
+            if (req["op"] as? String)?.hasPrefix("chat.") == true { return ChatCLI.handle(req, engine: engine) }
             return fail("unknown op")
         }
     }

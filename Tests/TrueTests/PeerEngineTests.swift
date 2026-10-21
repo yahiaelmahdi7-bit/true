@@ -93,17 +93,26 @@ final class RelayTestTransport: PeerTransport, @unchecked Sendable {
 final class PeerSide: @unchecked Sendable {
     final class Delays: @unchecked Sendable { var v: [TimeInterval] = [] }
     let root: URL, identity: PeerIdentity, launcher = FakeLauncher(), transport: RelayTestTransport, engine: PeerEngine
-    let delays = Delays()
-    final class Knobs: @unchecked Sendable { var steering = true; var share = PeerShare.activity; var dirs: [String] = [] }
+    let delays = Delays(); let name: String
+    final class Knobs: @unchecked Sendable { var steering = true; var share = PeerShare.activity; var dirs: [String] = []; var chat = true }
     let knobs = Knobs()
     init(_ name: String, relay: FakeRelay, clock: Clock, mode: PeerInboundMode = .bypass) {
+        self.name = name
         root = FileManager.default.temporaryDirectory.appendingPathComponent("true-peers-\(UUID().uuidString)")
         identity = PeerIdentity.generate()
         transport = relay.transport(for: identity.mailboxId)
         let d = delays, k = knobs
         engine = PeerEngine(root: root, identity: identity, launcher: launcher, transport: transport, inboundMode: { mode },
-                            ownName: name, steering: { k.steering }, share: { k.share }, allowedDirs: { k.dirs },
+                            ownName: name, steering: { k.steering }, share: { k.share }, allowedDirs: { k.dirs }, chatOn: { k.chat },
                             now: { clock.now() }, scheduler: { s, _ in d.v.append(s) })
+    }
+    /// Run 32: a local chat bus per side; `sink` records what would be typed into panes.
+    let sink = ChatSink()
+    func attachChat() -> ChatBus {
+        let sk = sink
+        let bus = ChatBus(root: root, mac: name, seats: { sk.awake }, deliver: { sk.add($0, $1) })
+        engine.chat = bus
+        return bus
     }
     func close() { try? FileManager.default.removeItem(at: root) }
 }

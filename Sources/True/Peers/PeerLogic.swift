@@ -369,7 +369,11 @@ enum PeerBackoff {
 
 /// The receiver's settings for Drive. Defaults per SPEC: steering on, share activity, no allowed folders.
 enum PeerSettings {
-    static let steeringKey = "peer.steering", shareKey = "peer.share", dirsKey = "peer.allowedDirs"
+    static let steeringKey = "peer.steering", shareKey = "peer.share", dirsKey = "peer.allowedDirs", chatKey = "peer.chat"
+    static var chat: Bool {
+        get { UserDefaults.standard.object(forKey: chatKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: chatKey) }
+    }
     static var steering: Bool {
         get { UserDefaults.standard.object(forKey: steeringKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: steeringKey) }
