@@ -931,6 +931,15 @@ After both Macs run the build: he and Mahmoud each `true-chat send #mahmoud hi` 
 ### Live checks owed to Yahia
 Both Macs on this build and Mahmoud's mailbox allow-listed for `finance-director-os`: on his Mac `true-ask "what does director.plan() do and where is it specified?"` returns the cited answer within ~30 s and the pair shows in Yahia's Chat tab under `#mahmoud`.
 
+### Deviations (builder)
+- `chat.ask` returns `{id,path}` immediately; the python client does the waiting (kqueue on the answer file), not the server. Exit 2 on timeout, 1 on refusal, as specced.
+- `true-ask` is the same script as `true-chat`, installed under a second name (basename dispatch); `true-chat ask` also works. The installer does not write `TRUE_ASK_TO`; the script reads the env var or `~/.true/env` (`KEY=VALUE`).
+- `postChat` gained `recordLocal:` so Oracle records its own `A:` line instead of the automatic "@agent@peer text" DM copy.
+- `ChatBus.expect()`: a `true-ask` caller name (e.g. `human`) is accepted as an inbound `@name` seat for 15 min so a peer's answer isn't dropped as "not authorised".
+- The asking-off reply is bare `asking is off`; local asker failure lines drop the "#peer" tail. Questions are not InjectionScreen-labelled (never typed anywhere); answers are screened by `ChatNaming.line` when typed into a pane.
+- The `↩` quote searches the newest 200 lines of every channel and falls back to "an earlier question".
+- Live scope check uses `/api/status` `projects[].project_id/scope` (verified against server.py).
+
 ## Run 34 — Shared projects (a peer shares a repo and works on it with the owner's Claude)
 
 **Why.** Yahia's call (2026-10-22): Mahmoud must be able to share one of his projects and have Yahia's True/Claude work on it, the reverse of Run 29. Today an inbound job fails on the receiver without a local clone, and Run 30 dir jobs need a pre-listed directory.
