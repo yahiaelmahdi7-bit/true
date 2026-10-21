@@ -72,6 +72,7 @@ struct SettingsView: View {
 private struct UpdateSettingsSection: View {
     @AppStorage(UpdateLogic.autoKey) private var auto = true
     @AppStorage(UpdateLogic.installKey) private var install = true
+    @AppStorage(UpdateLogic.autoRestartKey) private var restartIdle = true
 
     var body: some View {
         let updater = Updater.shared
@@ -80,6 +81,9 @@ private struct UpdateSettingsSection: View {
                 Toggle("Check for updates automatically", isOn: $auto)
                 Toggle("Install updates automatically", isOn: $install)
                     .help("A downloaded, verified update is installed when you quit True.")
+                Toggle("Restart to update when idle", isOn: $restartIdle)
+                    .disabled(!install)
+                    .help("When you've been away a couple of minutes and nothing is running, True restarts itself to finish the update. You get a 60 s countdown and can cancel.")
                 LabeledContent(updater.status.isEmpty ? "Version \(updater.ownVersion)" : updater.status) {
                     Button("Check now") { Task { await updater.check(manual: true) } }.disabled(updater.checking)
                 }
