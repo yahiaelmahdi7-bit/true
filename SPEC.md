@@ -962,3 +962,11 @@ Repo URLs are text until the owner clicks Accept; the clone runs with the owner'
 
 ### Live checks owed to Yahia
 Mahmoud runs `true-peer offer <his repo url> --name demo <yahia>`; Yahia accepts in the Peers sheet; Mahmoud delegates a job on it; Yahia's Hub asks him to approve; after Approve the job runs and returns its branch.
+
+### Deviations (builder)
+- Shared paths do **not** get appended to the global `peer.allowedDirs`. That list applies to every peer, which would break "only for the peer that offered them". Instead a dir job from peer X is allowed in X's own `PeerSettings.sharedRepos[X]` paths plus the global list; Remove therefore drops access by deleting the share entry alone.
+- The forced-`ask` rule applies on a share's both sides and to any peer's job whose repo URL equals a share's URL (or whose dir is at/inside a share path), not only the peer that offered it.
+- `#<slug>` membership uses a built-in `shared` seat on the ChatBus (a no-op handler: the room is a record, nothing is typed into a pane); Remove leaves the room only when no other share uses the slug.
+- The sharer's side records the share on `ack` with the slug the accepter used; its `path` is whatever `resolveClone` finds for the URL (empty if none).
+- Offers persist in `~/.true/peers/offers.json`; a failed clone leaves the card with a "Try again" button. A decline/failed outgoing offer shows as a dismissable note.
+- `git clone` refuses an existing non-empty target and never prompts (`GIT_TERMINAL_PROMPT=0`); tests use a fake launcher, never real git.
