@@ -840,3 +840,34 @@ Relaunch True; in Peers add one allowed directory; with Mahmoud's True updated, 
 
 ### Live checks owed to Yahia
 After the next public release: Yahia's True (auto-install on) restarts itself idle within 60 s of the staged update; Mahmoud's v1.1.2 still installs at quit once, then has this.
+
+## Run 32 — Channels (live cross-session chat, local and across peers)
+
+**Why.** Run 29 is jobs, Run 30 is steering one job. Yahia's call (2026-10-22): **live, real-time communication between sessions**: any Claude session in True (his or a paired friend's) and either human can post a line and every subscribed session sees it within a second, on the same Mac or across the relay. One bus, one name per thing: a **channel**.
+
+**Settled defaults:** every Mac has a local channel `#here` (all panes on this Mac) · each paired peer gets a shared channel `#<label-slug>` (e.g. `#mahmoud`, the same channel from both sides) · a session must **join** a channel to receive it (the role card of a peer job joins `#<peer>` automatically; local panes join `#here` automatically, any other channel on request) · delivery into a pane is a single line `[#channel <who>@<mac>] text`, queued by Claude Code if the pane is mid-tool · receiver switches `peer.chat` (on by default) and per-channel mute · the relay stays untrusted; a channel message is a sealed `chat` payload to each peer in it (no fan-out server).
+
+### Local bus (`Peers/ChatBus.swift`, `Peers/ChatCLI.swift`)
+- Store `~/.true/chat/<channel>.jsonl` (0600, one `{id, ts, channel, from{agent, mac}, text ≤ 4 KB}` per line, 2,000 lines kept per channel, older trimmed). Membership `~/.true/chat/members.json` (pane UUID or agent name → channels).
+- Delivery: on append, every joined pane on this Mac gets the line through `PaneDelivery.write(.submit)` (wake if asleep, hold while a permission prompt is up, same rules as Run 30 `say`); the sender's own pane is skipped. `InjectionScreen` on every text. No polling: a kqueue vnode source on the channel file wakes delivery.
+- `true-chat` CLI over `~/.true/peer.sock` (ops `chat.send`, `chat.join`, `chat.leave`, `chat.tail`, `chat.list`): `send <#channel|@agent> <text|-->` (an `@agent` target is a direct line, channel `@<agent>`, delivered to that one pane, local or `@agent@mac` for a peer's) · `join <#channel>` · `leave` · `tail [#channel] [-f] [-n N]` (file watch, no timer) · `list`. `$TRUE_AGENT` names the sender; a plain shell with no agent name sends as `human`.
+- Humans: Hub gains a **Chat** tab (channel list left, 200-line transcript, input with ⌘↩; `@` completes agent names from the roster). Sends go through the same bus.
+
+### Across peers (`PeerEngine`, `PeerModels`)
+- New payload `chat` `{id, ts, channel, from{agent, mac}, text}`; accepted only from a pinned peer and only for channels that peer is in (`#<its slug>`, `@<agent>@<my mac>`, or a channel both sides joined by name); else dropped with a reason code. Each side appends to its own file and delivers locally; ids dedupe (`seen.json` as today).
+- Batching: lines to the same peer coalesce for 300 ms into one envelope; hard cap 20 sends/min per peer (relay is 60/min per socket), overflow is queued in the outbox in order, never dropped.
+- Presence is implicit: the last `ts` seen per agent is shown in the Chat tab as "active 2 min ago"; no heartbeat, no timer.
+- `peer.chat` off → inbound chat is nacked once per peer per hour and not delivered; outbound still works.
+
+### Interplay
+- Run 30 `say` stays the job-scoped channel (`@peer-<label>-<shortId>` is its direct address); Run 32 does not replace it. Nova "tell <agent>" (Run 26e) posts to `@agent` on this bus when the agent is not a local pane.
+- Claude Code's own `SendMessage` between local sessions is untouched; True's bus is the cross-Mac and human-visible layer.
+
+### Security
+- Same envelope, keys, pinning and drop rules as Run 29. A chat line never carries files; paths are plain text. Texts are masked for secrets like Run 30 activity. Nothing a chat line says is executed: it is a line in a pane, screened and labelled with its origin.
+
+### Tests
+`ChatBusTests`: append/trim, membership, delivery skips sender, hold during permission prompt, kqueue wake. `PeerEngineTests` over `FakeRelay`: chat round-trip both ways, channel authorisation (foreign channel dropped), dedupe, 300 ms coalescing, 20/min cap with ordered overflow, `peer.chat` off nack. `ChatCLITests`: every op. `swift build` + `swift test --filter Chat` green. App not launched by the builder.
+
+### Live checks owed to Yahia
+After both Macs run the build: he and Mahmoud each `true-chat send #mahmoud hi` from a pane and see it in the other's pane and Hub within a second; an agent on his Mac `@`-addresses an agent on Mahmoud's.
