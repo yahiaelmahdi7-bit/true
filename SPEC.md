@@ -931,6 +931,15 @@ After both Macs run the build: he and Mahmoud each `true-chat send #mahmoud hi` 
 ### Live checks owed to Yahia
 Both Macs on this build and Mahmoud's mailbox allow-listed for `finance-director-os`: on his Mac `true-ask "what does director.plan() do and where is it specified?"` returns the cited answer within ~30 s and the pair shows in Yahia's Chat tab under `#mahmoud`.
 
+### Deviations (builder)
+- `chat.ask` returns `{id,path}` immediately; the python client does the waiting (kqueue on the answer file), not the server. Exit 2 on timeout, 1 on refusal, as specced.
+- `true-ask` is the same script as `true-chat`, installed under a second name (basename dispatch); `true-chat ask` also works. The installer does not write `TRUE_ASK_TO`; the script reads the env var or `~/.true/env` (`KEY=VALUE`).
+- `postChat` gained `recordLocal:` so Oracle records its own `A:` line instead of the automatic "@agent@peer text" DM copy.
+- `ChatBus.expect()`: a `true-ask` caller name (e.g. `human`) is accepted as an inbound `@name` seat for 15 min so a peer's answer isn't dropped as "not authorised".
+- The asking-off reply is bare `asking is off`; local asker failure lines drop the "#peer" tail. Questions are not InjectionScreen-labelled (never typed anywhere); answers are screened by `ChatNaming.line` when typed into a pane.
+- The `↩` quote searches the newest 200 lines of every channel and falls back to "an earlier question".
+- Live scope check uses `/api/status` `projects[].project_id/scope` (verified against server.py).
+
 ## Run 34 — Shared projects (a peer shares a repo and works on it with the owner's Claude)
 
 **Why.** Yahia's call (2026-10-22): Mahmoud must be able to share one of his projects and have Yahia's True/Claude work on it, the reverse of Run 29. Today an inbound job fails on the receiver without a local clone, and Run 30 dir jobs need a pre-listed directory.
@@ -953,3 +962,11 @@ Repo URLs are text until the owner clicks Accept; the clone runs with the owner'
 
 ### Live checks owed to Yahia
 Mahmoud runs `true-peer offer <his repo url> --name demo <yahia>`; Yahia accepts in the Peers sheet; Mahmoud delegates a job on it; Yahia's Hub asks him to approve; after Approve the job runs and returns its branch.
+
+### Deviations (builder)
+- Shared paths do **not** get appended to the global `peer.allowedDirs`. That list applies to every peer, which would break "only for the peer that offered them". Instead a dir job from peer X is allowed in X's own `PeerSettings.sharedRepos[X]` paths plus the global list; Remove therefore drops access by deleting the share entry alone.
+- The forced-`ask` rule applies on a share's both sides and to any peer's job whose repo URL equals a share's URL (or whose dir is at/inside a share path), not only the peer that offered it.
+- `#<slug>` membership uses a built-in `shared` seat on the ChatBus (a no-op handler: the room is a record, nothing is typed into a pane); Remove leaves the room only when no other share uses the slug.
+- The sharer's side records the share on `ack` with the slug the accepter used; its `path` is whatever `resolveClone` finds for the URL (empty if none).
+- Offers persist in `~/.true/peers/offers.json`; a failed clone leaves the card with a "Try again" button. A decline/failed outgoing offer shows as a dismissable note.
+- `git clone` refuses an existing non-empty target and never prompts (`GIT_TERMINAL_PROMPT=0`); tests use a fake launcher, never real git.
