@@ -76,7 +76,7 @@ enum HubScanner {
     }
 }
 
-enum HubFilter: Hashable, CaseIterable { case all, seats, crew }
+enum HubFilter: Hashable, CaseIterable { case all, seats, crew, chat }
 
 /// The Hub's live data: peer sessions and builders, refreshed when either directory changes (and when
 /// the Hub becomes visible). Event-driven — no timers: a DispatchSource per watched path parks in

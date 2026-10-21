@@ -73,3 +73,10 @@ import Foundation
         #expect(p.terminationStatus == 0)
     }
 }
+
+@Suite struct NovaTellChatFallbackTests {
+    @Test func offlineTellFallsBackToAgentInbox() {
+        #expect(NovaTell.fallbackChannel(for: "scout") == "@scout")
+        #expect(ChatNaming.normalize(NovaTell.fallbackChannel(for: "scout")) != nil)
+    }
+}

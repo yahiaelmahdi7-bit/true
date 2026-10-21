@@ -236,6 +236,7 @@ final class NovaEngine: ObservableObject {
             return NovaTell.deliverable(awake: r.isAwake(t.target), status: r.statusOf(t.target), screen: screen)
         }
         guard live else {
+            _ = PeerService.engine.postChat(channel: NovaTell.fallbackChannel(for: t.target), agent: "nova", text: t.text)
             lines.append(.init(text: "\(t.target) isn't running", ok: false, tool: "tell")); state = .done
             say("\(t.target) isn't running"); flushRecord(path: "tell"); return true
         }

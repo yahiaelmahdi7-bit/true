@@ -307,6 +307,8 @@ enum NovaTell {
         if status == .asleep || status == .failed { return false }
         return !screen.contains("'claude' was not found on PATH")
     }
+    /// A tell to an agent that isn't running here goes to its chat inbox instead (`@agent`).
+    static func fallbackChannel(for target: String) -> String { "@" + target }
     static let verbs: Set<String> = ["tell", "ask", "message"]
 
     /// "tell/ask/message <agent> [to] <rest>": longest agent phrase wins; two agents behind one phrase = ambiguous = nil.
