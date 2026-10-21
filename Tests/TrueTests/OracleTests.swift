@@ -152,3 +152,20 @@ final class OracleKnobs: @unchecked Sendable { var on = true; var projects: [Str
         #expect(room.count == 2)
     }
 }
+
+@Suite(.serialized) struct OracleSettingsTests {
+    @Test func slugsAreTrimmedLowercasedAndDeduped() {
+        #expect(PeerSettings.parseSlugs(" Finance-Director-OS , prism,,PRISM ") == ["finance-director-os", "prism"])
+        #expect(PeerSettings.parseSlugs("  ").isEmpty)
+    }
+
+    @Test func answerLineQuotesItsQuestionAcrossChannels() async {
+        let r = OracleTests().rig(); defer { r.a.close(); r.b.close() }
+        let id = await OracleTests().ask(r, String(repeating: "w", count: 80))
+        // either side finds the question text (owner: @oracle / #al copies, asker: #bea) and previews it
+        #expect(r.bbus.question(for: id)?.contains("www") == true)
+        #expect((r.bbus.question(for: id)?.count ?? 0) <= 61)             // 60 chars + "…"
+        #expect(r.abus.question(for: id)?.contains("www") == true)
+        #expect(r.abus.question(for: "nope") == nil)
+    }
+}

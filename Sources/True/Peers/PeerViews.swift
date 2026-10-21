@@ -262,6 +262,7 @@ struct PeersView: View {
     @State private var showAdvanced = false
     @State private var steering = PeerSettings.steering
     @State private var chatOn = PeerSettings.chat
+    @State private var askOn = PeerSettings.ask
     @State private var share = PeerSettings.share
     @State private var dirs = PeerSettings.allowedDirs
     @State private var dirNote: String?
@@ -308,6 +309,7 @@ struct PeersView: View {
             }
             Toggle("Let peers send follow-ups", isOn: Binding(get: { steering }, set: { steering = $0; PeerSettings.steering = $0 }))
             Toggle("Let peers chat with my agents", isOn: Binding(get: { chatOn }, set: { chatOn = $0; PeerSettings.chat = $0 }))
+            Toggle("Answer peers' questions from my brain", isOn: Binding(get: { askOn }, set: { askOn = $0; PeerSettings.ask = $0 }))
             Picker("Share with the sender", selection: Binding(get: { share }, set: { share = $0; PeerSettings.share = $0 })) {
                 Text("Status only").tag(PeerShare.status)
                 Text("Activity").tag(PeerShare.activity)
@@ -339,6 +341,7 @@ struct PeersView: View {
                     VStack(alignment: .leading) {
                         Text(l.label)
                         if !l.confirmed { Text("Waiting for them to accept").font(.caption).foregroundStyle(.secondary) }
+                        AskProjectsField(mailboxId: l.mailboxId)
                     }
                     Spacer()
                     Button("Revoke", role: .destructive) { PeerService.engine.revoke(mailboxId: l.mailboxId) }
@@ -378,5 +381,31 @@ struct PeersView: View {
         case .failure(let e): if case .invalid(let m) = e { addNote = m }
         }
         reload()
+    }
+}
+
+/// Run 33: which brain projects one peer may ask about (`peer.ask.projects`). Comma-separated slugs; empty = they can't ask.
+struct AskProjectsField: View {
+    let mailboxId: String
+    @State private var text: String
+
+    init(mailboxId: String) {
+        self.mailboxId = mailboxId
+        _text = State(initialValue: (PeerSettings.askProjects[mailboxId] ?? []).joined(separator: ", "))
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("Can ask my brain about:").font(.caption).foregroundStyle(.secondary)
+            TextField("project names, comma-separated", text: $text).textFieldStyle(.roundedBorder).font(.caption).onSubmit(save)
+        }
+        .onChange(of: text) { _, _ in save() }
+    }
+
+    private func save() {
+        var all = PeerSettings.askProjects
+        let slugs = PeerSettings.parseSlugs(text)
+        all[mailboxId] = slugs.isEmpty ? nil : slugs
+        PeerSettings.askProjects = all
     }
 }

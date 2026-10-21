@@ -45,6 +45,12 @@ enum ChatNaming {
 
     static func fileName(_ channel: String) -> String { (channel.hasPrefix("#") ? String(channel.dropFirst()) : channel) + ".jsonl" }
 
+    /// A one-line preview, first 60 characters.
+    static func quote(_ text: String) -> String {
+        let one = text.replacingOccurrences(of: "\n", with: " ")
+        return one.count > 60 ? String(one.prefix(60)) + "…" : one
+    }
+
     /// Strip control characters, mask secrets, cap — what is stored and shown.
     static func clean(_ text: String) -> String {
         var t = PaneDelivery.sanitize(text).replacingOccurrences(of: "\r", with: "")
@@ -171,6 +177,16 @@ final class ChatBus: @unchecked Sendable {
     func tail(_ channel: String, last n: Int = 200) -> [ChatMessage] {
         guard let c = ChatNaming.normalize(channel), let d = try? Data(contentsOf: url(c)) else { return [] }
         return d.split(separator: 10).suffix(n).compactMap { try? JSONDecoder().decode(ChatMessage.self, from: Data($0)) }
+    }
+
+    /// Run 33: the first 60 characters of the line a `re` points at (the question an answer belongs to), searched
+    /// across every channel's newest lines. Matches the id itself or `<id>:q` (the owner's recorded copy of a peer's question).
+    func question(for re: String) -> String? {
+        for f in (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [] where f.hasSuffix(".jsonl") {
+            let n = String(f.dropLast(6))
+            if let m = tail(n.hasPrefix("@") ? n : "#" + n, last: 200).first(where: { $0.id == re || $0.id == re + ":q" }) { return ChatNaming.quote(m.text) }
+        }
+        return nil
     }
 
     /// Every channel with a file or a member, newest activity first: (channel, members, last message).
