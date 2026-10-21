@@ -97,6 +97,20 @@ final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
         }
     }
 
+    /// A follow-up typed into a peer job's own pane (Run 30). False when the pane is gone.
+    func deliverToPane(_ pane: UUID, line: String) -> Bool {
+        Self.onMain {
+            guard TerminalRegistry.shared.view(for: pane) != nil else { return false }
+            PaneDelivery.write(line, intent: .prompt, to: pane)
+            return true
+        }
+    }
+
+    /// True while Claude Code's permission dialog is on that pane's screen: a typed line would answer it.
+    func atPermissionPrompt(pane: UUID) -> Bool {
+        Self.onMain { TerminalRegistry.shared.view(for: pane).map { PermissionDialog.isVisible(in: $0.screenText()) } ?? false }
+    }
+
     /// Panes end the way an agent goes to sleep (TERM to the group, KILL after 3 s); builders get `builder kill`.
     func stop(panes: [UUID], builders: [String]) {
         Self.onMain {

@@ -822,6 +822,17 @@ Yahia's agents (and Yahia) hand a task to a paired friend's True, which runs it 
 ### Live checks owed to Yahia
 Relaunch True; in Peers add one allowed directory; with Mahmoud's True updated, send a `dir` job, `say` one follow-up, watch `true-peer tail -f`, `stop` it.
 
+### Deviations (builder)
+- **`.prompt`, not `.submit`**: `PaneDelivery.Intent` has no `.submit`; follow-ups are typed with `.prompt` (type, submit, verify).
+- **No wake**: peer job panes aren't agents, so a `say` to a pane that no longer exists is nacked ("job not running") rather than waking anything.
+- **Tool items carry the tool name only**: the hook forwarder (AgentHooks.swift, out of lane) sends PreToolUse's tool name but no input line. `PeerEngine.items` already takes `detail`, so a richer forwarder lights it up with no engine change.
+- **One out-of-lane line**: `AgentRegistry.handle` now passes `message/tool/detail` into `PeerService.engine.paneEvent`.
+- **Permission-prompt hold** is keyed on PermissionRequest events (`kind == .need` with a tool) plus a live screen check (`PermissionDialog.isVisible`); held lines go out on the next non-`.need` event.
+- **Steering is checked live** on every `say`/`stop` (the value stored on the job at receipt is a snapshot for display only).
+- **Activity `seq`** = max(previous + 1, unix seconds), so it stays monotonic across restarts; the sender drops any `seq` it has already seen.
+- **Sent-to-peers row**: live activity, the "Say to <label>…" field (⌘↩) and Stop live in the job's detail sheet (tap the row), not inline in the Hub row, to keep the Hub row compact and out of HubPanel.swift.
+- **Step 1 commit** (models + logic) doesn't build on its own; steps 1+2 landed as one WIP commit.
+
 ## Run 31 — Restart to update by itself
 
 **Why.** The Run 29/30 peer path only works when both Trues run the same build. Today a verified update is staged and installed **at quit**, and the pill waits for a click, so a friend's True (Mahmoud, on v1.1.2) stays old until he happens to quit. Yahia's call (2026-10-22): a True with "Install updates automatically" on **restarts itself** to adopt a staged update, as soon as that is safe, with a visible countdown the person can cancel.

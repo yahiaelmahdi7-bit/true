@@ -23,6 +23,10 @@ final class FakeLauncher: PeerLauncher, @unchecked Sendable {
     func headSHA(worktree: String) -> String? { "abc1234" }
     func remoteURL(ofRepoAt path: String) -> String? { "git@github.com:acme/app.git" }
     func deliverLine(agent: String, line: String) { lock.lock(); lines.append((agent, line)); lock.unlock() }
+    var paneLines: [String] = []
+    var prompting = false
+    func deliverToPane(_ pane: UUID, line: String) -> Bool { lock.lock(); paneLines.append(line); lock.unlock(); return true }
+    func atPermissionPrompt(pane: UUID) -> Bool { prompting }
     func stop(panes: [UUID], builders: [String]) { lock.lock(); stopped = (panes, builders); lock.unlock() }
 }
 
@@ -90,13 +94,16 @@ final class PeerSide: @unchecked Sendable {
     final class Delays: @unchecked Sendable { var v: [TimeInterval] = [] }
     let root: URL, identity: PeerIdentity, launcher = FakeLauncher(), transport: RelayTestTransport, engine: PeerEngine
     let delays = Delays()
+    final class Knobs: @unchecked Sendable { var steering = true; var share = PeerShare.activity; var dirs: [String] = [] }
+    let knobs = Knobs()
     init(_ name: String, relay: FakeRelay, clock: Clock, mode: PeerInboundMode = .bypass) {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("true-peers-\(UUID().uuidString)")
         identity = PeerIdentity.generate()
         transport = relay.transport(for: identity.mailboxId)
-        let d = delays
+        let d = delays, k = knobs
         engine = PeerEngine(root: root, identity: identity, launcher: launcher, transport: transport, inboundMode: { mode },
-                            ownName: name, now: { clock.now() }, scheduler: { s, _ in d.v.append(s) })
+                            ownName: name, steering: { k.steering }, share: { k.share }, allowedDirs: { k.dirs },
+                            now: { clock.now() }, scheduler: { s, _ in d.v.append(s) })
     }
     func close() { try? FileManager.default.removeItem(at: root) }
 }
@@ -339,4 +346,99 @@ func craftedJob(from: PeerIdentity, to: PeerSide, id: String = UUID().uuidString
         let r = rig(); defer { r.close() }
         if case .success = r.a.engine.delegate(peer: "Nobody", repo: testRepo, title: "T", brief: "B") { Issue.record("should fail") }
     }
+
+    // MARK: Run 30 — Drive
+
+    @Test func sayReachesTheReceiversPane() throws {
+        let r = rig(); defer { r.close() }
+        let id = try #require(delegate(r))
+        #expect(r.a.engine.say(jobId: id, text: "also check the tests\nplease", fromAgent: "lead-1").isSuccess)
+        settle(r.a, r.b)
+        #expect(r.b.launcher.paneLines == ["[from Al] also check the tests please"])
+        #expect(r.a.engine.activity(jobId: id).contains { $0.text.hasPrefix("You: also check") })
+    }
+
+    @Test func sayWithSteeringOffIsNackedAtTheSender() throws {
+        let r = rig(); defer { r.close() }
+        let id = try #require(delegate(r))
+        r.b.knobs.steering = false
+        _ = r.a.engine.say(jobId: id, text: "hello"); settle(r.a, r.b)
+        #expect(r.b.launcher.paneLines.isEmpty)
+        #expect(r.a.engine.activity(jobId: id).contains { $0.kind == .nack && $0.text == "steering off" })
+    }
+
+    @Test func stopEndsTheJobAtBothEnds() throws {
+        let r = rig(); defer { r.close() }
+        let id = try #require(delegate(r))
+        #expect(r.a.engine.stopJob(jobId: id).isSuccess); settle(r.a, r.b)
+        #expect(r.b.launcher.stopped.0 == [r.b.launcher.pane])
+        let done = try #require(r.a.engine.result(jobId: id))
+        #expect(done.status == .failed && done.note.contains("Stopped by sender"))
+    }
+
+    @Test func stopWithSteeringOffIsRefused() throws {
+        let r = rig(); defer { r.close() }
+        let id = try #require(delegate(r))
+        r.b.knobs.steering = false
+        _ = r.a.engine.stopJob(jobId: id); settle(r.a, r.b)
+        #expect(r.b.launcher.stopped.0.isEmpty)
+        #expect(r.a.engine.activity(jobId: id).contains { $0.kind == .nack })
+    }
+
+    @Test func activityIsBatchedAndRepeatsAreIgnored() throws {
+        let r = rig(); defer { r.close() }
+        let id = try #require(delegate(r))
+        let pane = r.b.launcher.pane
+        r.b.engine.paneEvent(pane: pane, kind: .progress, message: "Read", tool: nil, detail: "a.swift")
+        r.b.engine.paneEvent(pane: pane, kind: .progress, message: "Edit", tool: nil, detail: "a.swift")
+        settle(r.a, r.b)
+        #expect(r.a.engine.activity(jobId: id).isEmpty)          // inside the 2 s window
+        r.clock.t += 3
+        r.b.engine.flushActivity(id); settle(r.a, r.b)
+        let got = r.a.engine.activity(jobId: id).filter { $0.kind == .tool }       // status lines ride along too
+        #expect(got.count == 2)
+        // a replayed batch (same seq) adds nothing
+        let seq = Int(r.clock.t.timeIntervalSince1970)
+        let body = try JSONSerialization.data(withJSONObject: ["t": "activity", "jobId": id, "seq": seq, "items": [["t": 1, "kind": "tool", "text": "dup"]]])
+        r.a.engine.receive(try #require(PeerSeal.seal(payload: body, now: r.clock.now(), from: r.b.identity, to: r.a.identity.keys)))
+        #expect(r.a.engine.activity(jobId: id).filter { $0.kind == .tool }.count == 2)
+    }
+
+    @Test func statusOnlyShareSendsNoActivity() throws {
+        let r = rig(); defer { r.close() }
+        r.b.knobs.share = .status
+        let id = try #require(delegate(r))
+        r.b.engine.paneEvent(pane: r.b.launcher.pane, kind: .progress, message: "Read", tool: nil, detail: "a.swift")
+        r.clock.t += 3
+        r.b.engine.flushActivity(id); settle(r.a, r.b)
+        #expect(r.a.engine.activity(jobId: id).isEmpty)
+    }
+
+    @Test func sayIsHeldWhileAPermissionPromptIsOpen() throws {
+        let r = rig(); defer { r.close() }
+        let id = try #require(delegate(r))
+        let pane = r.b.launcher.pane
+        r.b.engine.paneEvent(pane: pane, kind: .need, message: "needs permission", tool: "Bash", detail: nil)
+        _ = r.a.engine.say(jobId: id, text: "later"); settle(r.a, r.b)
+        #expect(r.b.launcher.paneLines.isEmpty)
+        r.b.engine.paneEvent(pane: pane, kind: .progress, message: "Bash"); settle(r.a, r.b)
+        #expect(r.b.launcher.paneLines == ["[from Al] later"])
+    }
+
+    @Test func dirJobRunsInAnAllowedDirectoryOnly() throws {
+        let r = rig(); defer { r.close() }
+        let dir = r.b.root.appendingPathComponent("work"); try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let real = dir.resolvingSymlinksInPath().path
+        r.b.knobs.dirs = [real]
+        guard case .success(let id) = r.a.engine.delegate(peer: "Bea", title: "Look", brief: "look around", mode: .pane, fromAgent: "lead-1", dir: real) else { Issue.record("delegate"); return }
+        settle(r.a, r.b)
+        #expect(r.b.launcher.panes.first?.cwd == real)
+        guard case .success(let id2) = r.a.engine.delegate(peer: "Bea", title: "Peek", brief: "peek", mode: .pane, fromAgent: "lead-1", dir: "/etc") else { Issue.record("delegate"); return }
+        settle(r.a, r.b)
+        #expect(r.b.launcher.panes.count == 1)
+        #expect(r.a.engine.status(jobId: id2).first?.status == .failed)
+        #expect(r.a.engine.status(jobId: id).first?.status == .accepted)
+    }
 }
+
+extension Result { var isSuccess: Bool { if case .success = self { return true }; return false } }
