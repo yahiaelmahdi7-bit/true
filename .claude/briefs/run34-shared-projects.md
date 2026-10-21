@@ -1,0 +1,15 @@
+Continue on THIS branch (Run 33 Ask desk is already built here; keep it green — do not revisit it except to fix a gate you broke). Build True "Run 34 — Shared projects" exactly as specified in SPEC.md (section "## Run 34", the last section; it is already on this branch). SPEC.md is the source of truth; read Run 29, 30, 32, 33 and 34, then Sources/True/Peers/* (your previous work: PeerEngine, PeerModels, PeerLogic, PeerViews, PeerCLI, PeerLauncherLive, ChatBus), Hub/* for the job card Approve/Decline, and the Peer* tests (FakeRelay rig). Also CLAUDE.md and docs/kb/index.md.
+
+Scope: the `offer` payload + ack/nack in PeerEngine/PeerModels, `PeerSettings.sharedRepos` + allowedDirs/membership updates in PeerLogic, the pending-offer card + shares list + Remove in PeerViews (Peers sheet), `true-peer offer` / `true-peer shares` in PeerCLI, the clone step (git clone with the owner's credentials, path ~/Projects/<slug>.peers/<peer-slug>/) in PeerLauncherLive behind a protocol so tests use a fake, the forced-`ask` rule for inbound jobs (repo or dir) on a shared repo, and new tests. Do not touch the relay, Nova, Remote, Capture, the Updater, ChatBus/ChatCLI/Oracle beyond auto-joining `#<slug>`.
+
+Order: 1) offer/accept/decline round trip over FakeRelay + settings + tests, 2) forced-ask for inbound jobs on shared repos (repo and dir forms) + tests, 3) clone step behind a fake + Peers sheet UI, 4) CLI ops + tests. Commit after each step. Gate = `swift build` then `swift test --filter Peer`, `swift test --filter Chat`, `swift test --filter Oracle` in the foreground; the last commit must paste all passing. Unbuildable SPEC line → nearest safe behaviour + a "### Deviations (builder)" block under Run 34 in SPEC.md.
+
+Memory rules: SourceKit "cannot find X in scope" diagnostics are false positives, trust `swift build`. Never launch or quit True.app. Never pkill by name. Never run a real `git clone` in tests.
+
+DISCIPLINE (non-negotiable):
+- Lane: you work ONLY on the files above, on your own worktree branch. Do not touch, checkout, or revert any file outside it — other agents have uncommitted work in this tree.
+- Commits: atomic, one logical change per commit, message says what+why. NEVER push, NEVER merge, NEVER 'ship' — the user pushes, not you. Do not suggest pushing more than once.
+- Gates: run build/tests in the FOREGROUND and wait for them. NO background shells, NO watch modes, NO until-loops. Kill anything you started before finishing.
+- Claims: 'done' means you ran the gate and pasted the passing output. Local commit ≠ 'pushed'; code written ≠ 'working'. Never report a state you didn't verify this session.
+- Decisions: if your change adds or touches a classify / route / gate / rank / verify step, make it a Jev call through the repo's vendored jev-kit (see the jev skill): code owns the flow, Jev answers narrow typed questions, route on confidence, log the decision. No LLM prompt-and-parse, no keyword lists.
+- If blocked or idle: say BLOCKED/IDLE + one line why. Do not invent extra scope.
