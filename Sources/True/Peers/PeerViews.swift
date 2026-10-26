@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+@preconcurrency import UserNotifications
 
 /// Plain words for a peer job's status, in the same voice as the rest of the Hub.
 extension PeerStatus {
@@ -260,6 +261,15 @@ final class PeersWindow {
                 MainActor.assumeIsolated { self?.lan.close() }
             }
         }
+        lan.onPrompt = { [weak self] p in
+            guard let self, let w = self.window else { return }
+            if !w.isKeyWindow { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+            guard Bundle.main.bundleIdentifier != nil, Bundle.main.bundleURL.pathExtension == "app" else { return }
+            let c = UNMutableNotificationContent()
+            c.title = "\(p.name) wants to pair"
+            c.body = "Open Peers to accept."
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "peer-lan-pair", content: c, trigger: nil))
+        }
         lan.open()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -449,14 +459,51 @@ struct PeerLanSection: View {
                         .font(.callout).foregroundStyle(.secondary)
                 }
             }
+            if let p = lan.prompt {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("\(p.name) wants to pair. Check it shows:").font(.callout)
+                    Text(p.code).font(.system(size: 34, weight: .semibold, design: .monospaced)).textSelection(.enabled)
+                    HStack {
+                        Button("Accept") { lan.accept() }.keyboardShortcut(.defaultAction)
+                        Button("Decline") { lan.cancelSession() }
+                    }
+                }
+                .padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            }
             ForEach(lan.rows) { r in
-                HStack {
-                    Text(r.name)
-                    Spacer()
-                    if r.paired { Text("Paired").font(.callout).foregroundStyle(.secondary) }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(r.name)
+                        Spacer()
+                        trailing(r)
+                    }
+                    if case .check(let code)? = lan.sendState[r.id] {
+                        Text("Check \(r.name) shows:").font(.callout).foregroundStyle(.secondary)
+                        Text(code).font(.system(size: 34, weight: .semibold, design: .monospaced)).textSelection(.enabled)
+                    }
                 }
             }
             Divider()
+        }
+    }
+
+    private func note(_ s: String) -> some View { Text(s).font(.callout).foregroundStyle(.secondary) }
+
+    @ViewBuilder private func trailing(_ r: PeerLanCoordinator.Row) -> some View {
+        switch lan.sendState[r.id] {
+        case nil:
+            if r.paired { note("Paired") } else { Button("Invite") { lan.invite(rowId: r.id) } }
+        case .connecting?: note("Connecting…")
+        case .cantReach?: HStack { note("Can't reach this Mac"); Button("Invite again") { lan.invite(rowId: r.id) } }
+        case .check?: HStack { Button("Pair") { lan.confirmSend() }.keyboardShortcut(.defaultAction); Button("Cancel") { lan.cancelSession() } }
+        case .waitingAccept?: note("Waiting for \(r.name) to accept…")
+        case .pairing?: note("Pairing…")
+        case .paired?: note("Paired")
+        case .declined?: HStack { note("\(r.name) declined"); Button("Invite") { lan.invite(rowId: r.id) } }
+        case .busy?: HStack { note("Busy. Try again in a moment"); Button("Invite") { lan.invite(rowId: r.id) } }
+        case .timedOut?: HStack { note("Timed out"); Button("Invite") { lan.invite(rowId: r.id) } }
+        case .failed?: HStack { note("Couldn't pair. Try again."); Button("Invite") { lan.invite(rowId: r.id) } }
+        case .relayTimeout?: note("Couldn't reach the relay. Check the internet and try again.")
         }
     }
 }
