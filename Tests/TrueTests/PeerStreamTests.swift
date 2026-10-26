@@ -75,7 +75,7 @@ import Foundation
         pairUp(a, b)
         b.knobs.share = .everything
         guard case .success(let id) = a.engine.delegate(peer: "Bea", repo: testRepo, title: "Fix it", brief: "do it", mode: .background, fromAgent: "lead-1") else { Issue.record("delegate failed"); return }
-        settle(a, b)
+        a.engine.watchJob(jobId: id); settle(a, b)
         let name = try #require(b.launcher.builders.first)
         let dir = try tmpDir(); defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("stream.jsonl")

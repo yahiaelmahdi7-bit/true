@@ -139,6 +139,8 @@ struct SentJobSheet: View {
         let items = PeerService.engine.activity(jobId: job.jobId, last: 200)
         VStack(alignment: .leading, spacing: 12) {
             Text(live.title).font(.title3.weight(.semibold))
+                .onAppear { PeerService.engine.watchJob(jobId: job.jobId) }
+                .onDisappear { PeerService.engine.unwatchJob(jobId: job.jobId) }
             Text("\(live.peerLabel) · \(live.status.pillLabel)\(live.note.isEmpty ? "" : " · \(live.note)")")
                 .font(.callout).foregroundStyle(.secondary)
             if let branch = live.branch {

@@ -44,6 +44,11 @@ final class PeerEngine: @unchecked Sendable {
     private var batchers: [String: PeerBatcher] = [:]
     private var activitySeq: [String: Int] = [:]
     private var flushScheduled: Set<String> = []
+    // Run 36a — watch leases (jobId → expiry), engine-wide activity send times, sender-side watch renewals
+    private var leases: [String: Date] = [:]
+    private var activitySendTimes: [Date] = []
+    private var watching: [String: Date] = [:]
+    static let leaseSeconds: TimeInterval = 90, watchRenewSeconds: TimeInterval = 60, activityPerMinute = 20, backlogCap = 200
     private var heldSays: [String: [String]] = [:]
     private var lastErrors: [String: String] = [:]
     private var tailers: [String: PeerStreamTailer] = [:]
@@ -305,11 +310,11 @@ final class PeerEngine: @unchecked Sendable {
         return PeerSeal.seal(payload: body, now: now(), from: identity, to: link.keys) != nil
     }
 
-    private func sealAndQueue(_ payload: [String: Any], to link: PeerLink, jobId: String? = nil, owner: String?, at: Date? = nil) -> Bool {
+    private func sealAndQueue(_ payload: [String: Any], to link: PeerLink, jobId: String? = nil, owner: String?, at: Date? = nil, lane: String? = nil) -> Bool {
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return false }
         let id = UUID().uuidString.lowercased()
         guard let blob = PeerSeal.seal(payload: body, id: id, now: now(), from: identity, to: link.keys) else { return false }
-        enqueue(OutboxItem(id: id, jobId: jobId, to: link.mailboxId, blob: blob, attempt: 0, nextAt: at ?? now(), owner: owner))
+        enqueue(OutboxItem(id: id, jobId: jobId, to: link.mailboxId, blob: blob, attempt: 0, nextAt: at ?? now(), owner: owner, lane: lane))
         return true
     }
 
@@ -463,6 +468,9 @@ final class PeerEngine: @unchecked Sendable {
         changed()
     }
 
+    /// Treat the peer as never having announced (an older True) — for tests of the old-peer path.
+    func forgetCaps(_ mailbox: String) { lock.lock(); caps[mailbox] = nil; saveCaps(); lock.unlock() }
+
     func peerCaps(_ mailbox: String) -> PeerCaps? { lock.lock(); defer { lock.unlock() }; return caps[mailbox] }
 
     /// Whether the peer's True supports `feature`: yes, no (it announced and lacks it), or wait (never announced; 60 s grace from the first ask).
@@ -568,6 +576,7 @@ final class PeerEngine: @unchecked Sendable {
             lock.unlock()
             guard let item = due else { break }
             let r = transport.send(to: item.to, id: item.id, blob: item.blob)
+            var backedOff = false
             lock.lock()
             guard let idx = outbox.firstIndex(where: { $0.id == item.id }) else { lock.unlock(); continue }   // revoked meanwhile
             switch r {
@@ -576,8 +585,9 @@ final class PeerEngine: @unchecked Sendable {
                 if let jid = item.jobId, let s = sent.firstIndex(where: { $0.jobId == jid }), sent[s].status == .queued {
                     sent[s].note = "Delivered"; sent[s].updated = now(); saveSent()
                 }
-            case .retry:
+            case .retry(let why):
                 outbox[idx].nextAt = now().addingTimeInterval(PeerBackoff.delay(attempt: item.attempt))
+                if item.lane == "activity", why != .offline { backedOff = true }
                 outbox[idx].attempt += 1
                 saveOutbox(outbox[idx])
             case .refused:
@@ -588,7 +598,7 @@ final class PeerEngine: @unchecked Sendable {
             }
             lock.unlock()
             changed()
-            if r == .retry { break }       // not connected / full: the rest would fail the same way; wait for the timer or a reconnect
+            if case .retry = r, !backedOff { break }       // not connected / full: the rest would fail the same way; wait for the timer or a reconnect
         }
         updateWanted()
         lock.lock()
@@ -650,6 +660,7 @@ final class PeerEngine: @unchecked Sendable {
             case "chat": if obj["nack"] is String { handleChatNack(obj, from: o.envelope.from) } else { handleChat(obj, from: o.envelope.from) }
             case "offer": handleOffer(obj, from: o.envelope.from)
             case "caps": handleCaps(obj, from: o.envelope.from)
+            case "watch": handleWatch(obj, from: o.envelope.from)
             case "activity": if let a = PeerActivity.parse(obj) { receiveActivity(a, from: o.envelope.from) } else { drop("activity payload") }
             default: drop("unknown kind")
             }
@@ -1318,38 +1329,98 @@ final class PeerEngine: @unchecked Sendable {
 
     /// Add items to the job's outgoing batch; send when the batcher says so, else arm one timer.
     private func queueActivity(_ j: InboundJob, _ items: [PeerActivityItem], final: Bool = false) {
-        if share() != .status, !items.isEmpty {
+        let watchPeer = peerCaps(j.peerMailbox)?.features.contains("watch") == true
+        var rest = items
+        if watchPeer {
+            // A question must reach the peer even with nobody watching.
+            let urgent = items.filter { $0.kind == .question }
+            rest = items.filter { $0.kind != .question }
+            if !urgent.isEmpty, let l = link(j.peerMailbox) { sendActivity(urgent, jobId: j.id, to: l) }
+        }
+        if share() != .status, !rest.isEmpty {
             lock.lock()
             var b = batchers[j.id] ?? PeerBatcher()
-            for it in items { b.add(it, at: now()) }
+            for it in rest { b.add(it, at: now()) }
+            if watchPeer { b.trim(to: Self.backlogCap) }
             batchers[j.id] = b
             lock.unlock()
         }
         flushActivity(j.id, force: final)
     }
 
+    private func sendActivity(_ batch: [PeerActivityItem], jobId: String, to l: PeerLink) {
+        lock.lock()
+        let seq = max((activitySeq[jobId] ?? 0) + 1, Int(now().timeIntervalSince1970)); activitySeq[jobId] = seq
+        lock.unlock()
+        sealAndQueue(["t": "activity", "jobId": jobId, "seq": seq, "items": batch.map(\.wire)], to: l, owner: l.mailboxId, lane: "activity")
+    }
+
+    private func handleWatch(_ obj: [String: Any], from mailbox: String) {
+        guard let id = obj["jobId"] as? String, inboundJob(id, from: mailbox) != nil else { drop("watch for a job not from this peer"); return }
+        lock.lock(); leases[id] = now().addingTimeInterval(Self.leaseSeconds); lock.unlock()
+        flushActivity(id)
+    }
+
     /// Send what is due for a job (tests call this after moving the clock).
     func flushActivity(_ jobId: String, force: Bool = false) {
         lock.lock()
         guard var b = batchers[jobId] else { lock.unlock(); return }
-        let batch = b.take(at: now(), force: force)
-        let nextAt = force ? nil : b.nextDue(at: now())
+        let t = now()
+        let peer = inbound.first { $0.req.jobId == jobId }?.peerMailbox
+        let watchPeer = peer.flatMap { caps[$0] }?.features.contains("watch") == true
+        let leased = !watchPeer || (leases[jobId].map { $0 > t } ?? false)
+        activitySendTimes.removeAll { t.timeIntervalSince($0) >= 60 }
+        let budgetOK = force || activitySendTimes.count < Self.activityPerMinute
+        let batch = (leased && budgetOK) ? b.take(at: t, force: force) : nil
+        var nextAt: Date? = force ? nil : b.nextDue(at: t)
+        if leased, !budgetOK, b.hasPending, let o = activitySendTimes.first { nextAt = max(nextAt ?? t, o.addingTimeInterval(60)) }
+        if !leased { nextAt = leases[jobId].flatMap { $0 > t ? $0 : nil } }   // an expired/absent lease needs a new watch, not a timer
         if force || !b.hasPending { batchers[jobId] = force ? nil : b } else { batchers[jobId] = b }
-        var seq = 0
-        if batch != nil { seq = max((activitySeq[jobId] ?? 0) + 1, Int(now().timeIntervalSince1970)); activitySeq[jobId] = seq }
+        if batch != nil { activitySendTimes.append(t) }
         let l = inbound.first { $0.req.jobId == jobId }.flatMap { j in links.first { $0.mailboxId == j.peerMailbox } }
         var arm: Date?
-        if let nextAt, b.hasPending, !flushScheduled.contains(jobId) { flushScheduled.insert(jobId); arm = nextAt }
+        if let nextAt, b.hasPending, leased, !flushScheduled.contains(jobId) { flushScheduled.insert(jobId); arm = nextAt }
         lock.unlock()
-        if let batch, let l {
-            sealAndQueue(["t": "activity", "jobId": jobId, "seq": seq, "items": batch.map(\.wire)], to: l, owner: l.mailboxId)
-        }
+        if let batch, let l { sendActivity(batch, jobId: jobId, to: l) }
         if let arm {
             scheduler(max(0.05, arm.timeIntervalSince(now()))) { [weak self] in
                 guard let self else { return }
                 self.lock.lock(); self.flushScheduled.remove(jobId); self.lock.unlock()
                 self.flushActivity(jobId)
             }
+        }
+    }
+
+    // MARK: sender — watching a peer's job (Run 36a)
+
+    /// Ask the peer's True to stream this job's activity for the next while (renewed every minute until `forSeconds` passes
+    /// or the job ends). No-op for a peer whose True predates `watch` — that one streams as before.
+    func watchJob(jobId: String, forSeconds: TimeInterval = 600) {
+        lock.lock()
+        let job = sent.first { $0.jobId == jobId }
+        let already = watching[jobId] != nil
+        watching[jobId] = now().addingTimeInterval(forSeconds)
+        lock.unlock()
+        guard let job, !job.status.isFinal, let l = link(job.peerMailbox), capsState(mailbox: l.mailboxId, feature: "watch") == .yes else { return }
+        sealAndQueue(["t": "watch", "jobId": jobId, "since": job.seq ?? 0], to: l, owner: l.mailboxId, lane: "activity")
+        if !already { scheduleWatchRenewal(jobId) }
+    }
+
+    func activitySendsInLastMinute() -> Int { lock.lock(); defer { lock.unlock() }; return activitySendTimes.filter { now().timeIntervalSince($0) < 60 }.count }
+
+    func unwatchJob(jobId: String) { lock.lock(); watching[jobId] = nil; lock.unlock() }
+
+    private func scheduleWatchRenewal(_ jobId: String) {
+        scheduler(Self.watchRenewSeconds) { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            let until = self.watching[jobId]
+            let live = until.map { $0 > self.now() } ?? false
+            if !live { self.watching[jobId] = nil }
+            self.lock.unlock()
+            guard live else { return }
+            self.lock.lock(); self.watching[jobId] = nil; self.lock.unlock()
+            self.watchJob(jobId: jobId, forSeconds: until!.timeIntervalSince(self.now()))
         }
     }
 

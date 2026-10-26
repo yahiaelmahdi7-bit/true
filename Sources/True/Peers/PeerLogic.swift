@@ -642,6 +642,13 @@ struct PeerBatcher: Equatable, Sendable {
 
     private mutating func prune(_ now: Date) { sends.removeAll { now.timeIntervalSince($0) >= 60 } }
 
+    /// Keep only the newest `n` pending items (a backlog nobody is watching must not grow without bound).
+    mutating func trim(to n: Int) {
+        guard pending.count > n else { return }
+        pending.removeFirst(pending.count - n)
+        bytes = pending.reduce(0) { $0 + $1.text.utf8.count + 24 }
+    }
+
     /// The batch to send now, or nil (nothing due, or the per-minute budget is spent). `force` skips both limits (job end).
     mutating func take(at now: Date, force: Bool = false) -> [PeerActivityItem]? {
         guard !pending.isEmpty else { return nil }

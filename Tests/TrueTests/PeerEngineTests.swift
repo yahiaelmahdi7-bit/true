@@ -88,6 +88,8 @@ final class RelayTestTransport: PeerTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var _online = true
     private(set) var wanted = false
+    /// The next send is turned away with a relay `rate` nack (once).
+    var rateNext = false
     var onMessage: (@Sendable (String, String, Data) -> Void)?
     var onStatus: (@Sendable (Bool) -> Void)?
     init(hub: FakeRelay, mailbox: String) { self.hub = hub; self.mailbox = mailbox }
@@ -95,7 +97,9 @@ final class RelayTestTransport: PeerTransport, @unchecked Sendable {
     var isConnected: Bool { online }
     func setWanted(_ on: Bool) { lock.lock(); wanted = on; lock.unlock() }
     func send(to: String, id: String, blob: Data) -> PeerSendResult {
-        guard online else { return .retry }
+        guard online else { return .retry(.offline) }
+        lock.lock(); let rate = rateNext; rateNext = false; lock.unlock()
+        if rate { return .retry(.rate) }
         hub.deliver(from: mailbox, to: to, id: id, blob: blob)
         return .delivered
     }
@@ -418,6 +422,7 @@ func craftedJob(from: PeerIdentity, to: PeerSide, id: String = UUID().uuidString
     @Test func activityIsBatchedAndRepeatsAreIgnored() throws {
         let r = rig(); defer { r.close() }
         let id = try #require(delegate(r))
+        r.a.engine.watchJob(jobId: id); settle(r.a, r.b)
         let pane = r.b.launcher.pane
         r.b.engine.paneEvent(pane: pane, kind: .progress, message: "Read", tool: nil, detail: "a.swift")
         r.b.engine.paneEvent(pane: pane, kind: .progress, message: "Edit", tool: nil, detail: "a.swift")

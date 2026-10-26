@@ -106,6 +106,8 @@ struct OutboxItem: Codable, Equatable, Sendable {
     var attempt: Int
     var nextAt: Date
     var owner: String?
+    /// `activity` = a droppable progress batch: a busy relay backs it off without holding chat behind it.
+    var lane: String?
 }
 
 /// What the engine needs from the Mac: finding the clone, making the worktree, opening the work, nudging a lead.
@@ -140,11 +142,13 @@ extension PeerLauncher {
     func deliverToPane(_ pane: UUID, line: String) -> Bool { false }
 }
 
+enum PeerRetryReason: String, Equatable, Sendable { case offline, rate, full }
+
 enum PeerSendResult: Equatable, Sendable {
     /// The relay took it.
     case delivered
     /// Not connected, rate-limited or queue full: try again later.
-    case retry
+    case retry(PeerRetryReason)
     /// The relay will never take it (too large).
     case refused
 }

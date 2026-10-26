@@ -79,6 +79,7 @@ enum PeerCLI {
             return ["ok": true, "shares": engine.shares().map { ["peer": $0.peer, "slug": $0.repo.slug, "url": $0.repo.url, "path": $0.repo.path] }]
         case "tail":
             guard let id = req["jobId"] as? String, !engine.status(jobId: id).isEmpty else { return fail("no such job") }
+            engine.watchJob(jobId: id)      // a lease: the peer streams while someone is looking
             return ["ok": true, "path": engine.eventsURL(id).path]
         default:
             if (req["op"] as? String)?.hasPrefix("chat.") == true { return ChatCLI.handle(req, engine: engine) }
