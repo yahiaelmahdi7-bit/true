@@ -1002,3 +1002,27 @@ Mahmoud delegates two jobs on finance-director-os back to back; Yahia's True ope
 - Scratch desks work in one stable folder per peer, `<engine root>/desks/<mailbox>/work`, not in a per-job folder.
 - In-line jobs are not restarted after an app relaunch (desk panes do not survive one either); they stay `accepted` until stopped.
 - Hub card: the desk line shows on the Hub's peer-job rows and on the job sheet; the Peers sheet lists live desks under the toggle.
+
+## Run 36 — Peer workspace
+
+**Why.** Real use on 2026-10-22..26 kept hitting walls: a background job was a black box until it ended, pane jobs showed only tool names, failures gave no reason, results were cut at 16 KB, agents passed paths from their own Mac, and "ask" said the brain was asleep when it was only cold. Evidence and the full plan: `docs/designs/peer-workspace.md`. Run 36 is built in two parts; this run is 36a.
+
+### Vocabulary
+- **Share level** — how much of a job's work the receiver shows the sender: `peer.share` / `PeerShare`, global. UI labels: Status · Activity (today) · Everything (new).
+- **Folder list** — `peer.allowedDirs` (global). **Shares** — Run 34 shared repos (per peer). **Offer card** — the Run 34 Peers-sheet card (`PeerOfferStatus`).
+- **Caps** — what a peer's True can do (version + features), announced on connect.
+- **Job folders** — `in/` and `out/` inside `~/.true/peers/jobs/<id>/` (36b).
+- **Secrets list** — never sent, on either side (36b).
+
+### 36a — Live view
+- **A0.** Results to 64 KB counted in UTF-8 bytes; the sealed status is size-checked and cut further ("(cut — full result in result.md)") if it would pass `PeerSeal.maxBlob`. "Hit an error" / "Ended without a result" add the last error (masked, ≤ 400 chars). Role cards and `true-peer help` say paths are on the peer's Mac.
+- **A1.** Sealed `caps {version, features: ["watch"], home}` on every connect and pairing, persisted per peer in `~/.true/peers/caps.json`. Unknown caps wait up to 60 s before "needs the update (v1.3+)".
+- **A2.** Own-path guard: a `--dir` under the sender's home that exists locally and differs from the peer's announced `home` is rejected.
+- **A3.** The forwarder sends PreToolUse input; the 300-char clips and `PeerActivityItem.maxText` rise to 1 KB. Share level × content: Status none/none · Activity name + safe detail (`file_path`, `pattern`, URL host) / first line ≤ 1 KB · Everything name + first line of command/file_path/pattern/url/prompt ≤ 1 KB / ≤ 8 KB. `PeerMask` gains PEM, key=value secrets, Resend, AWS, JWT, Slack, GitHub PAT, Stripe live, and URL-credential patterns.
+- **A4.** A builder's `stream.jsonl` becomes `PeerActivityItem`s (job matched by `BuilderRecord.name == job.agentName`); a rotated file is re-opened.
+- **A5.** Watch lease extends `queueActivity`: toward a `watch` peer, activity flows only while it holds a lease (`watch {jobId, since}`, TTL 90 s, renewed every 60 s, owner = `job.peerMailbox`). Old peers keep today's stream. ≤ 20 activity envelopes/min per True; `PeerSendResult.retry` carries a reason (`offline`, `rate`, `full`); `pump()` backs off activity only.
+- **A6.** Oracle: "Waking the brain…" line, the question runs in its own task, polls `/api/status` every 2 s up to 45 s, then "The brain is still waking up — ask again in a minute."; `launchctl kickstart` (never `-k`) only if `launchctl print` shows no pid.
+
+36b (files + workspace) — next run, see docs/designs/peer-workspace.md
+
+### Deviations (builder)
