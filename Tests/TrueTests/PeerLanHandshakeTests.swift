@@ -148,7 +148,7 @@ final class Duo {
         // Receiver declines (userCancel) → sender hears bye
         var d = Duo()
         d.toPrompts(); d.feedR(.userCancel); d.pump()
-        #expect(d.sOutcome == .cancelled && d.rOutcome == .cancelled && d.s.engine.liveInviteCount() == 0)
+        #expect(d.sOutcome == .declined && d.rOutcome == .cancelled && d.s.engine.liveInviteCount() == 0)
         d.close()
         // Sender cancels
         d = Duo(); d.toPrompts(); d.feedS(.userConfirm); d.feedS(.userCancel); d.pump()

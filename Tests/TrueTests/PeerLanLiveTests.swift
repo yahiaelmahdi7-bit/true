@@ -11,8 +11,8 @@ import Foundation
         let identity = PeerIdentity.generate(), launcher = FakeLauncher()
         let engine: PeerEngine
         let lan: PeerLanCoordinator
-        init(_ name: String, relay: PeerTransport) {
-            engine = PeerEngine(root: root, identity: identity, launcher: launcher, transport: relay, inboundMode: { .bypass },
+        init(_ name: String, relay: (PeerIdentity) -> PeerTransport) {
+            engine = PeerEngine(root: root, identity: identity, launcher: launcher, transport: relay(identity), inboundMode: { .bypass },
                                 ownName: name, steering: { true }, share: { .activity }, allowedDirs: { [] }, chatOn: { false },
                                 sharedRepos: { [:] }, setSharedRepos: { _ in }, desk: { false }, projectsRoot: root.path + "/Projects",
                                 now: { Date() }, scheduler: { s, f in DispatchQueue.global().asyncAfter(deadline: .now() + s, execute: f) })
@@ -29,7 +29,7 @@ import Foundation
 
     @Test func eachSeesTheOtherWithinFiveSecondsAndPairedAfterPinning() async throws {
         let relay = FakeRelay()
-        let a = Side("Live Al \(UUID().uuidString.prefix(4))", relay: relay.transport(for: "a")), b = Side("Live Bo \(UUID().uuidString.prefix(4))", relay: relay.transport(for: "b"))
+        let a = Side("Live Al \(UUID().uuidString.prefix(4))", relay: { _ in relay.transport(for: "a") }), b = Side("Live Bo \(UUID().uuidString.prefix(4))", relay: { _ in relay.transport(for: "b") })
         defer { a.close(); b.close() }
         a.lan.open(); b.lan.open()
         #expect(await until(5) { a.lan.rows.contains { $0.name == b.engine.ownName } && b.lan.rows.contains { $0.name == a.engine.ownName } })
@@ -37,5 +37,23 @@ import Foundation
         _ = a.engine.pairWithInvite(b.engine.invite(), label: "Bea")
         a.lan.close(); a.lan.open()
         #expect(await until(5) { a.lan.rows.first { $0.name == b.engine.ownName }?.paired == true })
+    }
+
+    /// Steps 1 + 3 together: real Bonjour, real handshake, real relay. Both temp engines end with a confirmed link.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["TRUE_LIVE_RELAY"] == "1"))
+    func fullFlowOverRealBonjourAndRelay() async throws {
+        let a = Side("Live Al \(UUID().uuidString.prefix(4))", relay: { PeerRelayLive(identity: $0, relayURL: { PeerRelay.defaultURL }) })
+        let b = Side("Live Bo \(UUID().uuidString.prefix(4))", relay: { PeerRelayLive(identity: $0, relayURL: { PeerRelay.defaultURL }) })
+        defer { a.close(); b.close() }
+        a.lan.open(); b.lan.open()
+        #expect(await until(5) { a.lan.rows.contains { $0.name == b.engine.ownName } })
+        let row = try #require(a.lan.rows.first { $0.name == b.engine.ownName }).id
+        a.lan.invite(rowId: row)
+        #expect(await until(10) { b.lan.prompt != nil })
+        guard case .check(let code)? = a.lan.sendState[row] else { Issue.record("sender shows no code"); return }
+        #expect(b.lan.prompt?.code == code)
+        a.lan.confirmSend(); b.lan.accept()
+        #expect(await until(45) { a.lan.sendState[row] == .paired })
+        #expect(a.engine.peerLinks().first?.confirmed == true && b.engine.peerLinks().first?.confirmed == true)
     }
 }

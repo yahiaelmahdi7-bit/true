@@ -95,6 +95,7 @@ struct PeerLanHandshake {
     }
 
     var otherName: String { theirName }
+    var theirMailbox: String? { theirKeys?.mailboxId }
     var isFinished: Bool { if case .finished = phase { return true }; return false }
     var hasLiveInvite: Bool { inviteSecret != nil }
     /// S: the person already pressed Pair and we are waiting for R.
@@ -122,7 +123,7 @@ struct PeerLanHandshake {
         case .begin: return begin()
         case .frame(let d): return frame(d)
         case .userConfirm: return userConfirm()
-        case .userCancel: return abort(.cancelled, bye: "cancel")
+        case .userCancel: return abort(.cancelled, bye: role == .receiver ? "declined" : "cancel")
         case .windowClosed: return abort(.cancelled, bye: "closed")
         case .timeout: return timeout()
         case .connectionLost:
@@ -191,7 +192,7 @@ struct PeerLanHandshake {
     private mutating func frame(_ d: Data) -> [Action] {
         guard let m = try? JSONDecoder().decode(PeerLanMsg.self, from: d) else { return fail() }
         if m.t == "bye" {
-            let o: PeerLanOutcome = m.reason == "busy" ? .busy : (m.reason == "timeout" || m.reason == "cancel" || m.reason == "closed") ? .cancelled : .declined
+            let o: PeerLanOutcome = m.reason == "busy" ? .busy : m.reason == "timeout" ? .timedOut : m.reason == "closed" ? .cancelled : .declined
             return finish(role == .sender ? o : .cancelled, close: true, cancelInvite: true)
         }
         switch (role, phase, m.t) {

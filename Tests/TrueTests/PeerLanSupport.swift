@@ -17,7 +17,7 @@ final class FakeLanConnection: PeerLanConnection {
     var onReady: (() -> Void)?
     var onFrame: ((Data) -> Void)?
     var onClose: (() -> Void)?
-    weak var peer: FakeLanConnection?
+    var peer: FakeLanConnection?
     let net: FakeLanNet
     private(set) var closed = false
     private(set) var started = false
@@ -41,6 +41,8 @@ final class FakeLanConnection: PeerLanConnection {
         net.post { p?.remoteClosed() }
     }
     func remoteClosed() { close() }
+    /// Types of the frames this end RECEIVED (the peer's sent list), for tests that hold the far end.
+    func deliveredTypes() -> [String] { peer?.types() ?? [] }
     func types() -> [String] { sent.compactMap { $0["t"] as? String } }
     static func pair(net: FakeLanNet, remote: String) -> (FakeLanConnection, FakeLanConnection) {
         let a = FakeLanConnection(net: net, remote: remote), b = FakeLanConnection(net: net, remote: remote)
