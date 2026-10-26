@@ -54,6 +54,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSAppleEventsUsageDescription</key><string>Nova uses Apple Events to open, quit and control apps when you ask.</string>
   <!-- Bluetooth advertising (CBPeripheralManager) only notices an unpaired iPhone nearby so the pairing card can appear. -->
   <key>NSBluetoothAlwaysUsageDescription</key><string>True uses Bluetooth only to notice your iPhone nearby so the pairing code can appear.</string>
+  <!-- Run 39: "On this network" finds other Macs running True over Bonjour while the Peers window is open. -->
+  <key>NSLocalNetworkUsageDescription</key><string>True finds other Macs running True on this network so you can pair with a click.</string>
+  <key>NSBonjourServices</key><array><string>_true-peer._tcp</string></array>
 </dict>
 </plist>
 PLIST

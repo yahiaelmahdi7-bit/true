@@ -243,6 +243,9 @@ struct InboundJobSheet: View {
 final class PeersWindow {
     static let shared = PeersWindow()
     private var window: NSWindow?
+    private var closeObserver: NSObjectProtocol?
+    /// Run 39: advertises and browses only while the window is open.
+    let lan = PeerLanCoordinator(transport: PeerLanNetwork(), engine: PeerService.engine)
 
     func show() {
         if window == nil {
@@ -250,16 +253,21 @@ final class PeersWindow {
                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
             w.title = "Peers"
             w.isReleasedWhenClosed = false
-            w.contentView = NSHostingView(rootView: PeersView())
+            w.contentView = NSHostingView(rootView: PeersView(lan: lan))
             w.center()
             window = w
+            closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.lan.close() }
+            }
         }
+        lan.open()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 }
 
 struct PeersView: View {
+    @ObservedObject var lan: PeerLanCoordinator
     @State private var mode = PeerInboundMode.current
     @State private var inviteText: String?
     @State private var copied = false
@@ -303,6 +311,7 @@ struct PeersView: View {
                 Text(connected ? "Connected" : "Offline — retrying").font(.callout).foregroundStyle(.secondary)
             }
             if let paired { Text("Paired with \(paired)").font(.callout.weight(.semibold)) }
+            PeerLanSection(lan: lan)
             Text("Jobs from peers").font(.headline)
             Picker("", selection: Binding(get: { mode }, set: { mode = $0; PeerInboundMode.current = $0 })) {
                 Text("Run at once, no prompts").tag(PeerInboundMode.bypass)
@@ -418,6 +427,40 @@ struct PeersView: View {
 }
 
 /// Run 33: which brain projects one peer may ask about (`peer.ask.projects`). Comma-separated slugs; empty = they can't ask.
+/// Run 39: "On this network" — other Macs running True on the same Wi-Fi.
+struct PeerLanSection: View {
+    @ObservedObject var lan: PeerLanCoordinator
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("On this network").font(.headline)
+            switch lan.lanState {
+            case .denied:
+                Text("True can't see this network. Allow it in System Settings → Privacy & Security → Local Network")
+                    .font(.callout).foregroundStyle(.secondary)
+                Button("Open Local Network settings") {
+                    if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork") { NSWorkspace.shared.open(u) }
+                }
+            case .cantSearch:
+                Text("Can't search this network right now. Use an invite code below.").font(.callout).foregroundStyle(.secondary)
+            case .ok:
+                if lan.rows.isEmpty {
+                    Text("No Macs with True here. Open Peers on the other Mac, on the same Wi-Fi. Or use an invite code below.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            ForEach(lan.rows) { r in
+                HStack {
+                    Text(r.name)
+                    Spacer()
+                    if r.paired { Text("Paired").font(.callout).foregroundStyle(.secondary) }
+                }
+            }
+            Divider()
+        }
+    }
+}
+
 struct AskProjectsField: View {
     let mailboxId: String
     @State private var text: String

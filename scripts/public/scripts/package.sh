@@ -61,6 +61,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <!-- macOS charges a child process's mic use to the app that launched it; without this key a
        program run inside True that wants the microphone is refused silently, with no prompt. -->
   <key>NSMicrophoneUsageDescription</key><string>Programs you run in True may use the microphone.</string>
+  <!-- Run 39: "On this network" finds other Macs running True over Bonjour while the Peers window is open. -->
+  <key>NSLocalNetworkUsageDescription</key><string>True finds other Macs running True on this network so you can pair with a click.</string>
+  <key>NSBonjourServices</key><array><string>_true-peer._tcp</string></array>
 </dict>
 </plist>
 PLIST
