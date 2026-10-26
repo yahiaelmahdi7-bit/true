@@ -147,10 +147,23 @@ protocol PeerLauncher: AnyObject, Sendable {
     func paneAlive(_ pane: UUID) -> Bool
     /// Missions M1: remote URLs of the clones under allowed roots (hashed into the Card) and which tools are installed.
     func cloneRemotes() -> [String]
+    /// Missions M1: relaunch under an existing Claude session (`--resume <id>`).
+    func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String, resumeSession: String?) -> UUID?
+    func launchBackground(agentName: String, parent: String, cwd: String, prompt: String, resumeSession: String?) -> String?
+    /// The Claude session id of a pane (from its resume record), nil when unknown.
+    func sessionId(forPane pane: UUID) -> String?
+    /// Whether a finished background job can be relaunched under its session.
+    var canResumeBackground: Bool { get }
     func installedTools() -> [String: Bool]
 }
 
 extension PeerLauncher {
+    func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String, resumeSession: String?) -> UUID? {
+        launchPane(agentName: agentName, label: label, cwd: cwd, flags: flags, rolePath: rolePath, firstPrompt: firstPrompt)
+    }
+    func launchBackground(agentName: String, parent: String, cwd: String, prompt: String, resumeSession: String?) -> String? { "Can't pick a background job back up here" }
+    func sessionId(forPane pane: UUID) -> String? { nil }
+    var canResumeBackground: Bool { false }
     func atPermissionPrompt(pane: UUID) -> Bool { false }
     func cloneRemotes() -> [String] { [] }
     func installedTools() -> [String: Bool] { [:] }

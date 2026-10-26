@@ -119,6 +119,7 @@ final class PeerEngine: @unchecked Sendable {
         for i in invites { scheduleWantedCheck(at: i.expires) }
         updateWanted()
         if !outbox.isEmpty { net.async { [self] in pump() } }
+        work.async { [weak self] in self?.recoverInterrupted() }
     }
 
     static var standardRoot: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".true/peers", isDirectory: true) }
@@ -701,6 +702,7 @@ final class PeerEngine: @unchecked Sendable {
             case "unpair": handleUnpair(from: o.envelope.from)
             case "say": handleSay(obj, from: o.envelope.from)
             case "stop": handleStop(obj, from: o.envelope.from)
+            case "resume": handleResume(obj, from: o.envelope.from)
             case "chat": if obj["nack"] is String { handleChatNack(obj, from: o.envelope.from) } else { handleChat(obj, from: o.envelope.from) }
             case "offer": handleOffer(obj, from: o.envelope.from)
             case "caps": handleCaps(obj, from: o.envelope.from)
@@ -929,7 +931,7 @@ final class PeerEngine: @unchecked Sendable {
     private func runDesk(_ j: InboundJob, key: String, flags: [String]) {
         let jobId = j.id, label = j.peerLabel, dir = jobDir(jobId), resultP = resultPath(jobId)
         lock.lock()
-        let others = inbound.filter { $0.desk == key && !$0.status.isFinal && $0.id != jobId }
+        let others = inbound.filter { $0.desk == key && !$0.status.isFinal && $0.status != .paused && $0.id != jobId }
         let last = inbound.last { $0.desk == key && $0.pane != nil && $0.id != jobId }
         let hadDesk = inbound.contains { $0.desk == key && $0.worktree != nil && $0.id != jobId }
         lock.unlock()
@@ -989,7 +991,7 @@ final class PeerEngine: @unchecked Sendable {
 
     /// The desk's oldest job in line starts now (its running job just ended).
     private func startNextInLine(_ key: String) {
-        lock.lock(); let next = inbound.first { $0.desk == key && !$0.status.isFinal && $0.pane == nil }; lock.unlock()
+        lock.lock(); let next = inbound.first { $0.desk == key && !$0.status.isFinal && $0.status != .paused && $0.pane == nil }; lock.unlock()
         guard let next else { return }
         run(next.id, flags: next.inboundMode.claudeFlags)
     }
@@ -1019,6 +1021,8 @@ final class PeerEngine: @unchecked Sendable {
 
     /// A pane hook fired. Report only when the status actually changes; final states are sticky.
     func paneEvent(pane: UUID, kind: PeerEventMap.Kind, message: String = "", tool: String? = nil, detail: String? = nil) {
+        lock.lock(); let cj = inbound.first { $0.pane == pane && !$0.status.isFinal }; lock.unlock()
+        if let cj { captureSession(cj) }
         lock.lock(); let j = inbound.first { $0.pane == pane && !$0.status.isFinal }; lock.unlock()
         guard let j else { return }
         if kind == .error { noteError(j.id, message) }
@@ -1084,8 +1088,125 @@ final class PeerEngine: @unchecked Sendable {
         } else if FileManager.default.fileExists(atPath: resultPath(j.id)) {
             end(j.id, .done, "Finished", reportAs: .done)
         } else {
-            end(j.id, .failed, Self.withReason("Ended without a result", dir.flatMap { Self.builderFailureReason(dir: $0) }), reportAs: .failed)
+            let reason = dir.flatMap { Self.builderFailureReason(dir: $0) }
+            if launcher.canResumeBackground, j.sessionId != nil {
+                if let r = reason, PeerResume.isUsageLimit(r) {
+                    let at = PeerResume.resumeTime(from: r, now: now())
+                    pause(j.id, reason: "Usage limit", at: at ?? now().addingTimeInterval(PeerResume.unknownWait), known: at != nil); return
+                }
+                if (j.resumes ?? 0) < PeerResume.maxResumes { performResume(j.id); return }
+            }
+            end(j.id, .failed, Self.withReason("Ended without a result", reason), reportAs: .failed)
         }
+    }
+
+    // MARK: Missions M1 — pause and resume
+
+    /// Park a job: paused, with why and when (the receiver's clock); arm a timer to resume it then.
+    private func pause(_ jobId: String, reason: String, at: Date, known: Bool) {
+        let note = known ? "Paused: \(reason)" : "Paused: \(reason), reset time unknown"
+        guard let u = update(jobId, { $0.status = .paused; $0.pausedReason = reason; $0.resumeAt = at; $0.note = note }) else { return }
+        lock.lock(); let tl = tailers.removeValue(forKey: jobId); lock.unlock()
+        tl?.sync(); tl?.stop()
+        report(u, .paused, note)
+        changed()
+        scheduler(max(1, at.timeIntervalSince(now()))) { [weak self] in
+            guard let self else { return }
+            self.work.async {
+                self.lock.lock(); let cur = self.inbound.first { $0.id == jobId }; self.lock.unlock()
+                if cur?.status == .paused, let r = cur?.resumeAt, r <= self.now().addingTimeInterval(1) { self.performResume(jobId) }
+            }
+        }
+    }
+
+    /// The Claude session a job continues: its own, else (desk) the lane's newest.
+    private func sessionFor(_ j: InboundJob) -> String? {
+        if let s = j.sessionId { return s }
+        if let p = j.pane, let s = launcher.sessionId(forPane: p) { return s }
+        guard let key = j.desk else { return nil }
+        lock.lock(); defer { lock.unlock() }
+        return inbound.last { $0.desk == key && $0.sessionId != nil }?.sessionId
+    }
+
+    private func captureSession(_ j: InboundJob) {
+        guard j.sessionId == nil, let p = j.pane, let s = launcher.sessionId(forPane: p) else { return }
+        _ = update(j.id) { $0.sessionId = s }
+    }
+
+    /// Relaunch a paused / interrupted job under its own Claude session. Past the cap, or with no session, it fails.
+    func performResume(_ jobId: String) {
+        lock.lock(); let cur = inbound.first { $0.id == jobId }; lock.unlock()
+        guard let j = cur, !j.status.isFinal else { return }
+        guard let sid = sessionFor(j), let wt = j.worktree else { end(jobId, .failed, "Couldn't pick the job back up", reportAs: .failed); return }
+        let n = (j.resumes ?? 0) + 1
+        guard n <= PeerResume.maxResumes else { end(jobId, .failed, Self.withReason("Stopped after \(PeerResume.maxResumes) restarts", j.pausedReason), reportAs: .failed); return }
+        let dir = jobDir(jobId)
+        var pane: UUID?, builder: String?
+        if j.desk != nil {
+            let prompt = "Continue job \(j.req.title) (\(jobId)) from where it stopped. The jobs before it are finished; don't touch them."
+            pane = launcher.launchPane(agentName: PeerNaming.deskAgentName(label: j.peerLabel, project: PeerNaming.deskProject(j.desk ?? "")), label: j.peerLabel, cwd: wt, flags: j.inboundMode.claudeFlags,
+                                       rolePath: dir.appendingPathComponent("role.md").path, firstPrompt: prompt, resumeSession: sid)
+            if pane == nil { end(jobId, .failed, "Couldn't open a tab for the job", reportAs: .failed); return }
+        } else if j.builder != nil {
+            let name = PeerNaming.agentName(label: j.peerLabel, jobId: jobId) + "-r\(n)"
+            if let err = launcher.launchBackground(agentName: name, parent: PeerNaming.parentName(label: j.peerLabel), cwd: wt, prompt: "Continue from where you stopped.", resumeSession: sid) {
+                end(jobId, .failed, err, reportAs: .failed); return
+            }
+            builder = name
+        } else {
+            pane = launcher.launchPane(agentName: PeerNaming.agentName(label: j.peerLabel, jobId: jobId), label: j.peerLabel, cwd: wt, flags: j.inboundMode.claudeFlags,
+                                       rolePath: dir.appendingPathComponent("role.md").path, firstPrompt: "Continue from where you stopped.", resumeSession: sid)
+            if pane == nil { end(jobId, .failed, "Couldn't open a tab for the job", reportAs: .failed); return }
+        }
+        if let u = update(jobId, { $0.status = .working; $0.note = "Resumed"; $0.sessionId = sid; $0.resumes = n; $0.pausedReason = nil; $0.resumeAt = nil; $0.pane = pane; $0.builder = builder ?? $0.builder }) {
+            report(u, .working, "Resumed")
+        }
+        changed()
+    }
+
+    /// Launch: a job whose tab is gone (True quit or crashed) pauses, then resumes at once.
+    func recoverInterrupted() {
+        lock.lock()
+        let hit = inbound.filter { !$0.status.isFinal && $0.status != .paused && $0.status != .queued && $0.pane.map { !launcher.paneAlive($0) } ?? false }
+        lock.unlock()
+        for j in hit {
+            if sessionFor(j) == nil { continue }
+            pause(j.id, reason: "True restarted", at: now(), known: true)
+            performResume(j.id)
+        }
+    }
+
+    private func handleResume(_ obj: [String: Any], from mailbox: String) {
+        guard let id = obj["jobId"] as? String else { drop("resume payload"); return }
+        guard let j = inboundJob(id, from: mailbox) else {
+            if let l = link(mailbox) {
+                sealAndQueue(["t": "event", "jobId": id, "status": PeerStatus.failed.rawValue, "note": "\(ownName) has no record of this job"], to: l, owner: l.mailboxId)
+            }
+            return
+        }
+        work.async { [self] in
+            switch j.status {
+            case .paused: performResume(id)
+            case .needsYou where j.acceptFailed == true:
+                _ = update(id) { $0.status = .accepted; $0.acceptFailed = false; $0.note = "Starting" }
+                run(id, flags: j.inboundMode.claudeFlags)
+            case .idle:
+                if let p = j.pane { _ = launcher.deliverToPane(p, line: "Finish the job and write result.md") }
+                else if let b = j.builder { launcher.deliverLine(agent: b, line: "Finish the job and write result.md") }
+                report(j, j.status, j.note)
+            default: report(j, j.status, j.note)
+            }
+        }
+    }
+
+    /// Sender side: ask the peer to pick a stuck job back up.
+    func resumeJob(jobId: String) -> Result<Void, PeerError> {
+        lock.lock(); let job = sent.first { $0.jobId == jobId }; lock.unlock()
+        guard let job else { return .failure(.invalid("No job \(jobId)")) }
+        guard !job.status.isFinal || job.status == .failed else { return .failure(.invalid("That job has already ended")) }
+        guard let l = link(job.peerMailbox) else { return .failure(.invalid("That peer was removed")) }
+        sealAndQueue(["t": "resume", "jobId": jobId], to: l, jobId: jobId, owner: l.mailboxId)
+        return .success(())
     }
 
     // MARK: Run 36a — background-job steps
@@ -1099,6 +1220,7 @@ final class PeerEngine: @unchecked Sendable {
             guard let self else { return }
             self.lock.lock(); let job = self.inbound.first { $0.id == jobId && !$0.status.isFinal }; self.lock.unlock()
             guard let job else { return }
+            if job.sessionId == nil, let sid = lines.lazy.compactMap({ PeerResume.initSession(line: $0) }).first { _ = self.update(jobId) { $0.sessionId = sid } }
             let level = self.share(), at = self.now()
             let items = lines.flatMap { PeerStream.items(line: $0, at: at, level: level) }
             if !items.isEmpty { self.queueActivity(job, items) }
@@ -1555,5 +1677,39 @@ final class PeerEngine: @unchecked Sendable {
         lock.lock(); retired.formUnion(live.compactMap(\.pane)); lock.unlock()
         launcher.stop(panes: live.compactMap(\.pane), builders: live.compactMap(\.builder))
         for j in live { end(j.id, j.status == .queued ? .declined : .failed, "Stopped on this Mac", reportAs: .failed, startNext: false) }
+    }
+}
+
+
+/// Missions M1: usage-limit detection, reset-time parsing and the resume cap (plain rules, no model).
+enum PeerResume {
+    static let maxResumes = 3
+    static let unknownWait: TimeInterval = 30 * 60
+
+    static func isUsageLimit(_ text: String) -> Bool {
+        text.range(of: #"(?i)(usage|rate|session) limit|limit reached|out of (usage|credits)"#, options: .regularExpression) != nil
+    }
+
+    /// "resets 3pm" / "resets at 10:30 pm": the next such wall-clock time on the receiver's clock; nil when unparseable.
+    static func resumeTime(from text: String, now: Date, calendar: Calendar = .current) -> Date? {
+        guard let re = try? NSRegularExpression(pattern: #"(?i)resets?\s+(?:at\s+)?(\d{1,2})(?::(\d\d))?\s?(am|pm)?"#),
+              let m = re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let hr = Range(m.range(at: 1), in: text).flatMap({ Int(text[$0]) }) else { return nil }
+        let min = Range(m.range(at: 2), in: text).flatMap { Int(text[$0]) } ?? 0
+        var h = hr
+        if let r = Range(m.range(at: 3), in: text) {
+            let ap = text[r].lowercased()
+            guard (1...12).contains(h) else { return nil }
+            h = h % 12 + (ap == "pm" ? 12 : 0)
+        }
+        guard h < 24, min < 60 else { return nil }
+        return calendar.nextDate(after: now, matching: DateComponents(hour: h, minute: min, second: 0), matchingPolicy: .nextTime)
+    }
+
+    /// `session_id` from the stream's first `{"type":"system","subtype":"init"}` line.
+    static func initSession(line: String) -> String? {
+        guard line.contains("\"init\""), let o = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+              o["type"] as? String == "system", o["subtype"] as? String == "init" else { return nil }
+        return o["session_id"] as? String
     }
 }

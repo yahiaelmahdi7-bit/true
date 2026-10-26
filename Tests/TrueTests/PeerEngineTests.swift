@@ -39,6 +39,19 @@ final class FakeLauncher: PeerLauncher, @unchecked Sendable {
     func launchBackground(agentName: String, parent: String, cwd: String, prompt: String) -> String? {
         lock.lock(); builders.append(agentName); lock.unlock(); return nil
     }
+    var resumeSessions: [String] = []
+    var resumePrompts: [String] = []
+    var sessions: [UUID: String] = [:]
+    var canResumeBackground: Bool { true }
+    func sessionId(forPane pane: UUID) -> String? { lock.lock(); defer { lock.unlock() }; return sessions[pane] }
+    func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String, resumeSession: String?) -> UUID? {
+        if let r = resumeSession { lock.lock(); resumeSessions.append(r); resumePrompts.append(firstPrompt); lock.unlock() }
+        return launchPane(agentName: agentName, label: label, cwd: cwd, flags: flags, rolePath: rolePath, firstPrompt: firstPrompt)
+    }
+    func launchBackground(agentName: String, parent: String, cwd: String, prompt: String, resumeSession: String?) -> String? {
+        lock.lock(); if let r = resumeSession { resumeSessions.append(r); resumePrompts.append(prompt) }; lock.unlock()
+        return launchBackground(agentName: agentName, parent: parent, cwd: cwd, prompt: prompt)
+    }
     func headSHA(worktree: String) -> String? { "abc1234" }
     func remoteURL(ofRepoAt path: String) -> String? { "git@github.com:acme/app.git" }
     func deliverLine(agent: String, line: String) { lock.lock(); lines.append((agent, line)); lock.unlock() }
