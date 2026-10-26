@@ -54,8 +54,8 @@ final class PeerLanCoordinator: ObservableObject {
         opened = true
         let ad = PeerLanTXT.makeAd(mailboxId: engine.identity.mailboxId)
         transport.sync(open: true, name: PeerLanTXT.serviceName(engine.ownName), txt: PeerLanTXT.encode(ad))
-        peersObserver = NotificationCenter.default.addObserver(forName: .peersChanged, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.rebuild() }
+        peersObserver = NotificationCenter.default.addObserver(forName: .peersChanged, object: nil, queue: nil) { [weak self] _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.rebuild() } }
         }
     }
 
