@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build a universal (arm64 + x86_64) True.app, ad-hoc signed, and zip it for a GitHub Release.
+# Build a universal (arm64 + x86_64) True.app and zip it for a GitHub Release. Signed with TRUE_SIGN_IDENTITY
+# when set (privacy grants then survive updates; see package.sh), else ad-hoc.
 # Output: dist/True-macOS.zip and dist/True-macOS.zip.sha256. Never launches or installs anything.
 # The version comes from TRUE_VERSION, else from GITHUB_REF_NAME (a tag like v1.2.3), else 1.2.2.
 # Usage: TRUE_VERSION=1.2.3 scripts/make-release.sh
