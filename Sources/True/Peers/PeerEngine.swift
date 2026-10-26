@@ -20,6 +20,8 @@ final class PeerEngine: @unchecked Sendable {
     private let chatOn: @Sendable () -> Bool
     // Run 35 — one desk per peer project
     private let deskOn: @Sendable () -> Bool
+    private let laneCount: @Sendable () -> Int
+    func lanes() -> Int { min(4, max(1, laneCount())) }
     /// Desk panes the owner/sender stopped on purpose: never fed another job even while their tab lingers.
     private var retired: Set<UUID> = []
     // Run 34 — Shared projects
@@ -89,11 +91,12 @@ final class PeerEngine: @unchecked Sendable {
          sharedRepos: @escaping @Sendable () -> [String: [SharedRepo]] = { PeerSettings.sharedRepos },
          setSharedRepos: @escaping @Sendable ([String: [SharedRepo]]) -> Void = { PeerSettings.sharedRepos = $0 },
          desk: @escaping @Sendable () -> Bool = { PeerSettings.desk },
+         lanes: @escaping @Sendable () -> Int = { PeerSettings.lanes },
          projectsRoot: String = NSHomeDirectory() + "/Projects",
          now: @escaping @Sendable () -> Date = { Date() },
          scheduler: (@Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void)? = nil) {
         self.root = root; self.identity = identity; self.launcher = launcher; self.transport = transport
-        self.inboundMode = inboundMode; self.steering = steering; self.share = share; self.allowedDirs = allowedDirs; self.chatOn = chatOn; self.sharedRepos = sharedRepos; self.setSharedRepos = setSharedRepos; self.deskOn = desk; self.projectsRoot = projectsRoot; self.now = now; self.ownName = String(ownName.prefix(PeerValidate.maxLabel))
+        self.inboundMode = inboundMode; self.steering = steering; self.share = share; self.allowedDirs = allowedDirs; self.chatOn = chatOn; self.sharedRepos = sharedRepos; self.setSharedRepos = setSharedRepos; self.deskOn = desk; self.laneCount = lanes; self.projectsRoot = projectsRoot; self.now = now; self.ownName = String(ownName.prefix(PeerValidate.maxLabel))
         let q = DispatchQueue(label: "true.peers.timer")
         self.scheduler = scheduler ?? { d, f in q.asyncAfter(deadline: .now() + d, execute: f) }
         links = PeerEngine.load(root.appendingPathComponent("peers.json")) ?? []
@@ -454,7 +457,15 @@ final class PeerEngine: @unchecked Sendable {
     // MARK: caps (Run 36a)
 
     /// What this True announces: `watch` = activity only while a lease is held.
-    func ownCaps() -> [String: Any] { ["t": "caps", "version": PeerCaps.currentVersion, "features": PeerCaps.ownFeatures, "home": home] }
+    /// Missions M1 adds the Card: job kinds, hashed repos, lane counts, tools present (yes/no only).
+    func ownCaps() -> [String: Any] {
+        let hashes = Array(Set(launcher.cloneRemotes().compactMap { PeerRepo.hash($0) })).sorted()
+        let total = lanes()
+        lock.lock(); let busy = Set(inbound.filter { !$0.status.isFinal && $0.desk != nil }.compactMap { $0.desk }).count; lock.unlock()
+        return ["t": "caps", "version": PeerCaps.currentVersion, "features": PeerCaps.ownFeatures, "home": home,
+                "kinds": ["repo", "dir"], "repos": hashes, "lanes": ["total": total, "free": max(0, total - busy)],
+                "tools": launcher.installedTools()]
+    }
 
     func sendCapsToAll() {
         lock.lock(); let ls = links.filter { $0.confirmed }; lock.unlock()
@@ -463,7 +474,8 @@ final class PeerEngine: @unchecked Sendable {
     private func sendCaps(to link: PeerLink) { sealAndQueue(ownCaps(), to: link, owner: link.mailboxId) }
 
     private func handleCaps(_ obj: [String: Any], from mailbox: String) {
-        guard let c = PeerCaps.parse(obj) else { drop("caps payload"); return }
+        guard var c = PeerCaps.parse(obj) else { drop("caps payload"); return }
+        c.updated = now()
         lock.lock(); caps[mailbox] = c; saveCaps(); lock.unlock()
         changed()
     }
@@ -548,6 +560,8 @@ final class PeerEngine: @unchecked Sendable {
             if let b = ev.branch { sent[i].branch = b }
             if let s = ev.sha { sent[i].sha = s }
             if let r = ev.result { sent[i].result = r }
+            if ev.status == .paused { sent[i].pausedReason = ev.note; sent[i].resumeAt = ev.resumeAt.map { Date(timeIntervalSince1970: TimeInterval($0)) } }
+            else { sent[i].pausedReason = nil; sent[i].resumeAt = nil }
             saveSent()
         }
         let j = sent[i]
@@ -1117,7 +1131,9 @@ final class PeerEngine: @unchecked Sendable {
 
 
     private func report(_ j: InboundJob, _ s: PeerStatus, _ note: String) {
-        var o: [String: Any] = ["t": "event", "jobId": j.req.jobId, "status": s.rawValue, "note": String(note.prefix(PeerValidate.maxNote))]
+        let m1 = peerCaps(j.peerMailbox)?.supportsM1 == true
+        var o: [String: Any] = ["t": "event", "jobId": j.req.jobId, "status": s.forPeer(m1: m1).rawValue, "note": String(note.prefix(PeerValidate.maxNote))]
+        if s == .paused, m1, let at = j.resumeAt { o["resumeAt"] = Int(at.timeIntervalSince1970) }
         if (s == .done || s == .failed) && j.req.hasRepo { o["branch"] = j.branch }
         if s == .done {
             if let sha = j.sha { o["sha"] = sha }
@@ -1138,7 +1154,7 @@ final class PeerEngine: @unchecked Sendable {
                 }
             }
         }
-        queueActivity(j, [PeerActivityItem(t: Int(now().timeIntervalSince1970), kind: .status, text: PeerMask.text("\(s.rawValue): \(note)"))], final: s == .done || s == .failed)
+        queueActivity(j, [PeerActivityItem(t: Int(now().timeIntervalSince1970), kind: .status, text: PeerMask.text("\(s.rawValue): \(note)"))], final: s == .done || s == .failed || s == .canceled)
         lock.lock(); let link = links.first { $0.mailboxId == j.peerMailbox }; lock.unlock()
         guard let link else { return }       // revoked: nobody to tell
         sealAndQueue(o, to: link, owner: link.mailboxId)
@@ -1324,7 +1340,7 @@ final class PeerEngine: @unchecked Sendable {
         guard steering() else { nack(j, "steering off"); return }
         if let p = j.pane { lock.lock(); retired.insert(p); lock.unlock() }
         launcher.stop(panes: j.pane.map { [$0] } ?? [], builders: j.builder.map { [$0] } ?? [])
-        end(id, j.status == .queued ? .declined : .failed, "Stopped by sender", reportAs: .failed)
+        end(id, j.status == .queued ? .declined : .canceled, "Stopped by sender", reportAs: .canceled)
     }
 
     /// Add items to the job's outgoing batch; send when the batcher says so, else arm one timer.

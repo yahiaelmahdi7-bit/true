@@ -7,9 +7,16 @@ import CryptoKit
 
 enum PeerStatus: String, Codable, Sendable, Equatable {
     case queued, accepted, working, needsYou, idle, done, failed, declined
-    var isFinal: Bool { self == .done || self == .failed || self == .declined }
+    /// Missions M1: `paused` = waiting on a usage limit or a True restart; `canceled` = the sender stopped it (not a failure).
+    case paused, canceled
+    var isFinal: Bool { self == .done || self == .failed || self == .declined || self == .canceled }
     /// What a peer may report over the wire.
-    static let wire: Set<PeerStatus> = [.accepted, .working, .needsYou, .idle, .done, .failed]
+    static let wire: Set<PeerStatus> = [.accepted, .working, .needsYou, .idle, .done, .failed, .paused, .canceled]
+    /// The decoder table for a True that predates M1 (no `m1` feature): paused reads as working, canceled as failed.
+    func forPeer(m1: Bool) -> PeerStatus {
+        if m1 { return self }
+        switch self { case .paused: return .working; case .canceled: return .failed; default: return self }
+    }
 }
 
 enum PeerMode: String, Codable, Sendable, Equatable {
@@ -76,13 +83,16 @@ struct PeerEvent: Codable, Equatable, Sendable {
     var branch: String?
     var sha: String?
     var result: String?
+    /// Missions M1: when a `paused` job resumes, in the receiver's own clock (epoch seconds); the sender only displays it.
+    var resumeAt: Int? = nil
 
     static func parse(_ o: [String: Any]) -> PeerEvent? {
         guard let id = o["jobId"] as? String, UUID(uuidString: id) != nil,
               let st = (o["status"] as? String).flatMap(PeerStatus.init), PeerStatus.wire.contains(st) else { return nil }
         func clip(_ k: String, _ n: Int) -> String? { (o[k] as? String).map { String($0.prefix(n)) } }
         return PeerEvent(jobId: id.lowercased(), status: st, note: clip("note", PeerValidate.maxNote) ?? "",
-                         branch: clip("branch", 200), sha: clip("sha", 64), result: (o["result"] as? String).map { PeerValidate.clipBytes($0, PeerValidate.maxResult + PeerValidate.cutNote.utf8.count) })
+                         branch: clip("branch", 200), sha: clip("sha", 64), result: (o["result"] as? String).map { PeerValidate.clipBytes($0, PeerValidate.maxResult + PeerValidate.cutNote.utf8.count) },
+                         resumeAt: (o["resumeAt"] as? Int).flatMap { $0 > 0 ? $0 : nil })
     }
 }
 
@@ -220,6 +230,11 @@ enum PeerRepo {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         guard !host.isEmpty, parts.count >= 2, parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { return nil }
         return "\(host)/\(path)"
+    }
+
+    /// Missions M1: SHA-256 (hex) of the normalized remote, so a Card never lists repo names. nil = not a repo URL.
+    static func hash(_ raw: String) -> String? {
+        normalize(raw).map { SHA256.hash(data: Data($0.lowercased().utf8)).map { String(format: "%02x", $0) }.joined() }
     }
 
     static func same(_ a: String, _ b: String) -> Bool {
@@ -493,6 +508,12 @@ enum PeerSettings {
     static var desk: Bool {
         get { UserDefaults.standard.object(forKey: deskKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: deskKey) }
+    }
+    /// Missions M1.4: desk lanes per project (default 2, 1-4).
+    static let lanesKey = "peer.lanes"
+    static var lanes: Int {
+        get { min(4, max(1, UserDefaults.standard.object(forKey: lanesKey) as? Int ?? 2)) }
+        set { UserDefaults.standard.set(min(4, max(1, newValue)), forKey: lanesKey) }
     }
     static var steering: Bool {
         get { UserDefaults.standard.object(forKey: steeringKey) as? Bool ?? true }

@@ -26,7 +26,7 @@ import Foundation
         let (a, b, _) = rig(); defer { a.close(); b.close() }
         let bea = try #require(a.engine.peerLinks().first)
         let reloaded = PeerEngine(root: a.root, identity: a.identity, launcher: FakeLauncher(), transport: a.transport, ownName: "Al")
-        #expect(reloaded.peerCaps(bea.mailboxId)?.features == ["watch"])
+        #expect(reloaded.peerCaps(bea.mailboxId)?.features == ["watch", "m1"])
         #expect(FileManager.default.fileExists(atPath: a.root.appendingPathComponent("caps.json").path))
     }
 

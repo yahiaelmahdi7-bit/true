@@ -44,6 +44,12 @@ struct InboundJob: Codable, Equatable, Sendable, Identifiable {
     var steering: Bool? = nil
     /// Run 35: the desk key `<mailbox>|<project>` once the job is delivered to, or waiting in line for, a desk session.
     var desk: String? = nil
+    /// Missions M1 (all optional so older inbound.json loads): the Claude session, desk lane, resume count, pause reason / time.
+    var sessionId: String? = nil
+    var lane: Int? = nil
+    var resumes: Int? = nil
+    var pausedReason: String? = nil
+    var resumeAt: Date? = nil
     var target: PeerTarget { req.target }
     var id: String { req.jobId }
 }
@@ -69,6 +75,10 @@ struct SentJob: Codable, Equatable, Sendable, Identifiable {
     var target: PeerTarget? = nil
     var seq: Int? = nil
     var lastActivity: Date? = nil
+    /// Missions M1: the job this one retries; why/when the receiver paused it (the receiver's clock, display only).
+    var retryOf: String? = nil
+    var pausedReason: String? = nil
+    var resumeAt: Date? = nil
     var id: String { jobId }
 }
 
@@ -133,10 +143,15 @@ protocol PeerLauncher: AnyObject, Sendable {
     func cloneRepo(url: String, into path: String) -> String?
     /// Run 35: the pane's tab is still open (a desk only feeds a pane that is alive).
     func paneAlive(_ pane: UUID) -> Bool
+    /// Missions M1: remote URLs of the clones under allowed roots (hashed into the Card) and which tools are installed.
+    func cloneRemotes() -> [String]
+    func installedTools() -> [String: Bool]
 }
 
 extension PeerLauncher {
     func atPermissionPrompt(pane: UUID) -> Bool { false }
+    func cloneRemotes() -> [String] { [] }
+    func installedTools() -> [String: Bool] { [:] }
     func paneAlive(_ pane: UUID) -> Bool { true }
     func cloneRepo(url: String, into path: String) -> String? { "Cloning isn't available here" }
     func deliverToPane(_ pane: UUID, line: String) -> Bool { false }
@@ -175,9 +190,30 @@ struct PeerCaps: Codable, Equatable {
     var version: String
     var features: [String]
     var home: String
+    /// Missions M1 Card fields (all optional on the wire; a 36a-era Card has none).
+    var kinds: [String] = []
+    var repos: [String] = []
+    var lanesTotal: Int? = nil
+    var lanesFree: Int? = nil
+    var tools: [String: Bool] = [:]
+    /// When this Card arrived (local clock); a Card older than `staleAfter` is stale.
+    var updated: Date? = nil
 
-    static let currentVersion = "1.3"
-    static let ownFeatures = ["watch"]
+    init(version: String, features: [String], home: String) { self.version = version; self.features = features; self.home = home }
+    /// A caps.json written before M1 has none of the Card keys.
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        version = try c.decode(String.self, forKey: .version); features = try c.decode([String].self, forKey: .features); home = try c.decode(String.self, forKey: .home)
+        kinds = try c.decodeIfPresent([String].self, forKey: .kinds) ?? []; repos = try c.decodeIfPresent([String].self, forKey: .repos) ?? []
+        lanesTotal = try c.decodeIfPresent(Int.self, forKey: .lanesTotal); lanesFree = try c.decodeIfPresent(Int.self, forKey: .lanesFree)
+        tools = try c.decodeIfPresent([String: Bool].self, forKey: .tools) ?? [:]; updated = try c.decodeIfPresent(Date.self, forKey: .updated)
+    }
+
+    static let currentVersion = "1.4"
+    static let ownFeatures = ["watch", "m1"]
+    static let staleAfter: TimeInterval = 600
+    func isStale(at now: Date) -> Bool { updated.map { now.timeIntervalSince($0) > Self.staleAfter } ?? true }
+    var supportsM1: Bool { features.contains("m1") }
     /// How long a peer that never announced caps is given before we say it needs the update.
     static let unknownGrace: TimeInterval = 60
 
@@ -186,6 +222,11 @@ struct PeerCaps: Codable, Equatable {
         let f = ((o["features"] as? [String]) ?? []).prefix(32).filter { $0.count <= 32 }
         let h = (o["home"] as? String) ?? ""
         guard h.count <= 1024 else { return nil }
-        return PeerCaps(version: v, features: Array(f), home: h)
+        var c = PeerCaps(version: v, features: Array(f), home: h)
+        c.kinds = ((o["kinds"] as? [String]) ?? []).prefix(8).filter { $0.count <= 16 }
+        c.repos = ((o["repos"] as? [String]) ?? []).prefix(500).filter { $0.count == 64 }
+        if let l = o["lanes"] as? [String: Any] { c.lanesTotal = l["total"] as? Int; c.lanesFree = l["free"] as? Int }
+        if let t = o["tools"] as? [String: Any] { for (k, v) in t where k.count <= 16 { if let b = v as? Bool { c.tools[k] = b } } }
+        return c
     }
 }

@@ -115,7 +115,7 @@ final class PeerSide: @unchecked Sendable {
     final class Delays: @unchecked Sendable { var v: [TimeInterval] = [] }
     let root: URL, identity: PeerIdentity, launcher = FakeLauncher(), transport: RelayTestTransport, engine: PeerEngine
     let delays = Delays(); let name: String
-    final class Knobs: @unchecked Sendable { var desk = false; var steering = true; var share = PeerShare.activity; var dirs: [String] = []; var chat = true
+    final class Knobs: @unchecked Sendable { var desk = false; var lanes = 2; var steering = true; var share = PeerShare.activity; var dirs: [String] = []; var chat = true
         let lock = NSLock(); private var _shares: [String: [SharedRepo]] = [:]
         var shares: [String: [SharedRepo]] { get { lock.lock(); defer { lock.unlock() }; return _shares } set { lock.lock(); _shares = newValue; lock.unlock() } }
     }
@@ -128,7 +128,7 @@ final class PeerSide: @unchecked Sendable {
         let d = delays, k = knobs
         engine = PeerEngine(root: root, identity: identity, launcher: launcher, transport: transport, inboundMode: { mode },
                             ownName: name, steering: { k.steering }, share: { k.share }, allowedDirs: { k.dirs }, chatOn: { k.chat },
-                            sharedRepos: { k.shares }, setSharedRepos: { k.shares = $0 }, desk: { k.desk }, projectsRoot: root.path + "/Projects",
+                            sharedRepos: { k.shares }, setSharedRepos: { k.shares = $0 }, desk: { k.desk }, lanes: { k.lanes }, projectsRoot: root.path + "/Projects",
                             now: { clock.now() }, scheduler: { s, _ in d.v.append(s) })
     }
     /// Run 32: a local chat bus per side; `sink` records what would be typed into panes.
@@ -407,7 +407,7 @@ func craftedJob(from: PeerIdentity, to: PeerSide, id: String = UUID().uuidString
         #expect(r.a.engine.stopJob(jobId: id).isSuccess); settle(r.a, r.b)
         #expect(r.b.launcher.stopped.0 == [r.b.launcher.pane])
         let done = try #require(r.a.engine.result(jobId: id))
-        #expect(done.status == .failed && done.note.contains("Stopped by sender"))
+        #expect(done.status == .canceled && done.note.contains("Stopped by sender"))
     }
 
     @Test func stopWithSteeringOffIsRefused() throws {

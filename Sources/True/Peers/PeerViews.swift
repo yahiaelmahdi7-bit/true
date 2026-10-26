@@ -13,6 +13,8 @@ extension PeerStatus {
         case .done: return "Done"
         case .failed: return "Failed"
         case .declined: return "Declined"
+        case .paused: return "Paused"
+        case .canceled: return "Canceled"
         }
     }
     var isLoud: Bool { self == .working || self == .failed || self == .needsYou }

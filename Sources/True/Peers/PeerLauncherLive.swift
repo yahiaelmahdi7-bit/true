@@ -46,6 +46,15 @@ final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
         return out
     }
 
+    func cloneRemotes() -> [String] { Self.candidates().compactMap { remoteURL(ofRepoAt: $0) } }
+
+    func installedTools() -> [String: Bool] {
+        let dirs = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init) + ["/opt/homebrew/bin", "/usr/local/bin"]
+        return Dictionary(uniqueKeysWithValues: ["gh", "vercel", "wrangler", "docker"].map { t in
+            (t, dirs.contains { FileManager.default.isExecutableFile(atPath: $0 + "/" + t) })
+        })
+    }
+
     /// Run 34: `git clone` with the owner's own git credentials (never prompts). Only runs after the owner clicked Accept.
     func cloneRepo(url: String, into path: String) -> String? {
         guard PeerRepo.normalize(url) != nil else { return "That isn't a git repo URL" }
