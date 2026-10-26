@@ -139,6 +139,8 @@ struct SentJobSheet: View {
         let items = PeerService.engine.activity(jobId: job.jobId, last: 200)
         VStack(alignment: .leading, spacing: 12) {
             Text(live.title).font(.title3.weight(.semibold))
+                .onAppear { PeerService.engine.watchJob(jobId: job.jobId) }
+                .onDisappear { PeerService.engine.unwatchJob(jobId: job.jobId) }
             Text("\(live.peerLabel) · \(live.status.pillLabel)\(live.note.isEmpty ? "" : " · \(live.note)")")
                 .font(.callout).foregroundStyle(.secondary)
             if let branch = live.branch {
@@ -339,8 +341,13 @@ struct PeersView: View {
             Picker("Share with the sender", selection: Binding(get: { share }, set: { share = $0; PeerSettings.share = $0 })) {
                 Text("Status only").tag(PeerShare.status)
                 Text("Activity").tag(PeerShare.activity)
+                Text("Everything").tag(PeerShare.everything)
             }
             .pickerStyle(.segmented)
+            if share == .everything {
+                Text("Shows commands and the agent's words. Secrets are masked, not guaranteed.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Divider()
             Text("Invite a peer").font(.headline)
             if let inviteText {
