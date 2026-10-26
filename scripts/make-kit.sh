@@ -45,8 +45,8 @@ cat > "$KIT/READ ME.txt" <<'README'
 TRUE for macOS 14 (Sonoma) or newer
 ====================================
 
-True is a terminal workspace for running Claude Code agents side by side, with a voice assistant
-(Nova), a command bar, a screenshot tray and more. This kit runs on Apple Silicon and Intel Macs.
+True is a terminal workspace for running Claude Code agents side by side, with a command bar,
+a screenshot tray and more. This kit runs on Apple Silicon and Intel Macs.
 
 INSTALL
   1. Unzip True-macOS14-kit.zip (double-click it).
@@ -63,20 +63,16 @@ ABOUT THE SECURITY WARNING
   or right-click True.app > Open the first time.
 
 PERMISSIONS IT WILL ASK FOR (all optional; say No and the related feature just stays off)
-  - Microphone .............. Nova (voice) and voice mode in programs you run inside True.
-  - Speech Recognition ...... Nova listens for its wake word on-device (nothing is sent to Apple).
-  - Automation / Apple Events  Nova opens, quits and controls other apps when you ask.
-  - Input Monitoring / Accessibility: the global push-to-talk key (fn) that wakes Nova.
-  - Screen Recording ........ Nova's screenshots of what is on screen.
+  - Microphone .............. voice mode in programs you run inside True, such as Claude Code.
+  - Automation / Apple Events  programs you run inside True that control other apps (osascript).
+  - Accessibility ........... the capture tools' global keys and picking a window to capture.
+  - Screen Recording ........ the capture tools' screenshots of what is on screen.
   - Files and Folders ....... Desktop, Documents, Downloads: the screenshot tray, projects, file tools.
   Because True is signed ad-hoc, macOS may ask again after you install an update.
 
 WHAT TO SET UP ON THIS MAC
   - Claude Code: install it (https://claude.com/claude-code) and sign in. True's agent panes run the
     "claude" command. Without it, True still works as a plain terminal workspace.
-  - API keys for Nova (voice assistant): open True > Settings and paste your own keys
-    (Anthropic for the brain, ElevenLabs for the voice if you want it). Keys are stored in this
-    Mac's Keychain. No keys are included in this kit. Without keys, Nova stays quiet.
   - Optional: Tailscale (for Remote Access to True from a phone), git, ripgrep (brew install ripgrep).
   - True keeps its own files in ~/.true and reads Claude Code's folder ~/.claude (created by Claude Code).
 

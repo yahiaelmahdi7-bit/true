@@ -67,7 +67,7 @@ enum PaneDelivery {
     /// Collapse a prompt to a single line.
     ///
     /// A newline inside a PTY write is a submit: the first one ends the prompt and everything after
-    /// it lands as a second, truncated instruction. Callers upstream (`NovaBrain`) already flatten
+    /// it lands as a second, truncated instruction. Callers upstream already flatten
     /// their jobs, but this is the seam that must guarantee it — a hand-typed multi-line paste or a
     /// future caller would otherwise reintroduce the bug one prompt at a time.
     /// The one door for typed text, every origin: C0 (except tab/newline), DEL and C1 never reach the pane, so a
@@ -216,7 +216,7 @@ enum PaneDelivery {
     /// Acceptance is any ONE of three positives, in confidence order:
     /// 1. ``PaneTail/looksBusy(_:)`` — a spinner frame or an "esc to interrupt" hint. A TUI only
     ///    draws these once it has a turn to work on.
-    /// 2. An agent event newer than the keystroke — the seat reported in through Nova Protocol,
+    /// 2. An agent event newer than the keystroke — the seat reported in through the agent hooks,
     ///    which is proof from the process itself rather than from its pixels.
     /// 3. The composer region no longer holds the probe while the tail has grown — the text moved
     ///    out of the input box and something else was printed.

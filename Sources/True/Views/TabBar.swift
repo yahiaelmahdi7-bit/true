@@ -18,7 +18,6 @@ struct TabBar: View {
                 }
             }
             Spacer(minLength: 0)
-            NovaMicPill()
             RestartPill(watcher: .shared)
             NeedsYouTray()
         }
