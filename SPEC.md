@@ -715,6 +715,7 @@ Every Run 22–24 rule still holds (identity header, exact Host/Origin, bearer, 
 
 
 ## Run 26 — Nova (2026-10-10)
+> **Removed 2026-10-27 (Yahia's call: "kill nova voice in true").** Sources/True/Nova, its tests, the mic pill, the Settings section, the speech-recognition prompt and the restart blocker are gone; the sections below (Run 26–26f) are history. The v1 line "No Nova, voice, mic/TCC" applies again, except that the mic and Apple Events usage strings stay for programs run inside True. Bring it back = revert the removal commit.
 Yahia's call: **Nova lives inside True.app** (overrides the v1 "No Nova, voice, mic/TCC" line). Brain = Jev reflex + Claude Haiku 5.5; reach = apps/system, True's agents and panes, shell and files; autonomy = Nova's gate.
 - **Names:** Ears (mic, wake word "Nova", push-to-talk, Apple on-device STT) → Reflex (Jev ≈0.35 s) ∥ Brain (`claude-haiku-5-5` tool loop, raw SSE) → Hands → HUD + voice. The Gate sits in front of every hand.
 - **Speculative race:** reflex and brain start together; the brain request is held ≤0.9 s for the reflex verdict so it can carry it as a prior. A confident direct verb acts at once and cancels the brain task.

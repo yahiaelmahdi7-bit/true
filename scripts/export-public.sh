@@ -2,7 +2,7 @@
 # Sync the tracked source of this (private) repo into the public tree, minus anything personal or
 # tied to private infrastructure. Re-runnable: it wipes and rebuilds the target's contents (keeping .git).
 #   1. copy git-tracked files (working-tree versions) -> staging
-#   2. delete excluded paths (Nova voice, private docs, live-model tests, real-prompt fixtures, agent config)
+#   2. delete excluded paths (private docs, live-model tests, real-prompt fixtures, agent config)
 #   3. scrub personal strings (sed)
 #   4. apply scripts/public.patch (source edits that detach the app from private services)
 #   5. overlay scripts/public/ (LICENSE, README, workflows, release scripts)
@@ -19,9 +19,6 @@ echo "==> copying tracked files from $SRC"
 echo "==> deleting excluded paths"
 cd "$STAGE"
 rm -rf ios .claude .builder .playwright-mcp docs SPEC.md CLAUDE.md True.app True.app.old dist .build \
-       Sources/True/Nova \
-       Tests/TrueTests/Nova*.swift \
-       Tests/TrueTests/BrainErrorTests.swift \
        Tests/TrueTests/CommandBarLiveTests.swift Tests/TrueTests/OverseerLiveTests.swift \
        Tests/TrueTests/WatcherLiveTests.swift \
        Tests/TrueTests/Fixtures/commandbar-labelled.json Tests/TrueTests/Fixtures/watcher-labelled.json \
