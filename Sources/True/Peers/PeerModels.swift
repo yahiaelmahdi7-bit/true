@@ -50,6 +50,8 @@ struct InboundJob: Codable, Equatable, Sendable, Identifiable {
     var resumes: Int? = nil
     var pausedReason: String? = nil
     var resumeAt: Date? = nil
+    /// The accept check failed; the sender's resume request re-runs it.
+    var acceptFailed: Bool? = nil
     var target: PeerTarget { req.target }
     var id: String { req.jobId }
 }

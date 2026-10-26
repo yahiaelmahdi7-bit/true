@@ -22,6 +22,8 @@ final class FakeLauncher: PeerLauncher, @unchecked Sendable {
         try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
         return nil
     }
+    var remotes = ["git@github.com:acme/app.git", "git@github.com:acme/other.git"]
+    func cloneRemotes() -> [String] { remotes }
     func resolveClone(repo: String) -> String? { clone }
     func prepareWorktree(clone: String, base: String, branch: String, worktree: String) -> String? { worktreeError }
     func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String) -> UUID? {
@@ -269,9 +271,9 @@ func craftedJob(from: PeerIdentity, to: PeerSide, id: String = UUID().uuidString
         let r = rig(); defer { r.close() }
         r.b.launcher.clone = nil
         let id = try #require(delegate(r))
-        #expect(r.b.engine.inboundJobs().first?.status == .failed)
+        #expect(r.b.engine.inboundJobs().first?.status == .needsYou)
         #expect((r.b.engine.inboundJobs().first?.note ?? "").hasPrefix("No local clone of"))
-        #expect(sentStatus(r, id) == .failed)
+        #expect(sentStatus(r, id) == .needsYou)
     }
 
     @Test func paneClosedBeforeResultFails() throws {
@@ -471,7 +473,7 @@ func craftedJob(from: PeerIdentity, to: PeerSide, id: String = UUID().uuidString
         guard case .success(let id2) = r.a.engine.delegate(peer: "Bea", title: "Peek", brief: "peek", mode: .pane, fromAgent: "lead-1", dir: "/etc") else { Issue.record("delegate"); return }
         settle(r.a, r.b)
         #expect(r.b.launcher.panes.count == 1)
-        #expect(r.a.engine.status(jobId: id2).first?.status == .failed)
+        #expect(r.a.engine.status(jobId: id2).first?.status == .needsYou)
         #expect(r.a.engine.status(jobId: id).first?.status == .accepted)
     }
 }

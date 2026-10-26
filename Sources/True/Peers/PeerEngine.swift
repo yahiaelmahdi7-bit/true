@@ -483,6 +483,9 @@ final class PeerEngine: @unchecked Sendable {
     /// Treat the peer as never having announced (an older True) — for tests of the old-peer path.
     func forgetCaps(_ mailbox: String) { lock.lock(); caps[mailbox] = nil; saveCaps(); lock.unlock() }
 
+    /// Tests: pretend a peer announced this Card.
+    func setPeerCaps(_ mailbox: String, _ c: PeerCaps) { lock.lock(); caps[mailbox] = c; saveCaps(); lock.unlock() }
+
     func peerCaps(_ mailbox: String) -> PeerCaps? { lock.lock(); defer { lock.unlock() }; return caps[mailbox] }
 
     /// Whether the peer's True supports `feature`: yes, no (it announced and lacks it), or wait (never announced; 60 s grace from the first ask).
@@ -506,6 +509,32 @@ final class PeerEngine: @unchecked Sendable {
         return "That is a path on your Mac. Use --with to send it, or name a path on \(link.label)'s Mac."
     }
 
+    /// Missions M1.2: what can never work is refused here with a plain reason + fix, before anything is sealed or queued.
+    /// Peer offline, no Card yet or a stale Card → nil (the job queues, as before). Only a fresh Card can say "no clone".
+    func preflight(link: PeerLink, remote: String, dir: String, brief: String) -> String? {
+        if let msg = briefPathProblem(brief, peer: link) { return msg }
+        guard let card = peerCaps(link.mailboxId), card.supportsM1, !card.isStale(at: now()) else { return nil }
+        let kind = dir.isEmpty ? "repo" : "dir"
+        if !card.kinds.isEmpty, !card.kinds.contains(kind) { return needsUpdateMessage(peer: link.label) }
+        guard dir.isEmpty, !remote.isEmpty, let h = PeerRepo.hash(remote), !card.repos.contains(h) else { return nil }
+        lock.lock()
+        let shared = offers.contains { !$0.incoming && $0.peerMailbox == link.mailboxId && PeerRepo.same($0.url, remote) && $0.status != .declined && $0.status != .failed }
+        lock.unlock()
+        return shared ? nil : "\(link.label) has no clone of this repo. Share it with them first: true-peer offer \(remote) \(link.label)"
+    }
+
+    /// A path in the brief that exists on this Mac but is under a home the peer doesn't share.
+    private func briefPathProblem(_ brief: String, peer link: PeerLink) -> String? {
+        guard let theirs = peerCaps(link.mailboxId)?.home, !theirs.isEmpty, theirs != home else { return nil }
+        for tok in brief.split(whereSeparator: { $0.isWhitespace || "\"'`(),;".contains($0) }) {
+            let t = String(tok)
+            if t.hasPrefix(home + "/"), FileManager.default.fileExists(atPath: t) {
+                return "The brief points at a path on your Mac (\(t)). Put the content in the brief, or send it with --with."
+            }
+        }
+        return nil
+    }
+
     // MARK: sender
 
     /// Hand a job to a paired peer. `repo` is a local path or a git remote URL; empty = a job with no project. Returns the jobId.
@@ -524,6 +553,7 @@ final class PeerEngine: @unchecked Sendable {
             guard let r = launcher.remoteURL(ofRepoAt: path) else { return .failure(.invalid("That folder has no git origin")) }
             remote = r
         }
+        if let why = preflight(link: link, remote: remote, dir: dir, brief: brief) { return .failure(.invalid(why)) }
         let id = UUID().uuidString.lowercased()
         var req: [String: Any] = ["t": "job", "jobId": id, "title": title, "brief": brief, "base": base,
                                   "mode": mode.rawValue, "fromAgent": fromAgent]
@@ -805,6 +835,13 @@ final class PeerEngine: @unchecked Sendable {
         return shared ?? launcher.resolveClone(repo: j.req.repo)
     }
 
+    /// Missions M1.2: the accept check failed (no clone, fetch, folder not allowed): the job waits for the sender's fix as `needsYou`.
+    private func acceptFailed(_ jobId: String, _ reason: String) {
+        guard let u = update(jobId, { $0.status = .needsYou; $0.note = reason; $0.acceptFailed = true }) else { return }
+        log(u); report(u, .needsYou, reason); changed()
+        if let key = u.desk { work.async { [self] in startNextInLine(key) } }
+    }
+
     private func run(_ jobId: String, flags: [String]) {
         guard let j = inboundJobs().first(where: { $0.id == jobId }), !j.status.isFinal else { return }
         if PeerMode.effective(requested: j.req.mode, inboundFlags: flags, builderInstalled: launcher.canRunBackground) == .pane,
@@ -817,20 +854,18 @@ final class PeerEngine: @unchecked Sendable {
         let clone: String?, wt: String, envelope: String, role: String
         switch PeerRun.choose(for: j.req) {
         case .repo:
-            guard let c = repoClone(j) else {
-                end(jobId, .failed, "No local clone of \(j.req.repo)", reportAs: .failed); return
-            }
+            guard let c = repoClone(j) else { acceptFailed(jobId, "No local clone of \(j.req.repo)"); return }
             clone = c
             wt = PeerNaming.worktree(clone: c, jobId: jobId)
             if let err = launcher.prepareWorktree(clone: c, base: j.req.base, branch: j.branch, worktree: wt) {
-                end(jobId, .failed, err, reportAs: .failed); return
+                acceptFailed(jobId, err); return
             }
             envelope = PeerText.envelope(label: label, job: j.req, branch: j.branch, worktree: wt, resultPath: resultP)
             role = PeerText.roleCard(label: label, branch: j.branch, worktree: wt, resultPath: resultP)
         case .dir:
             switch PeerDirs.resolve(path: j.req.dir ?? "", allowed: allowedDirs() + (sharedRepos()[j.peerMailbox] ?? []).map(\.path).filter { !$0.isEmpty }) {
             case .failure(let e):
-                if case .invalid(let m) = e { end(jobId, .failed, m, reportAs: .failed) } else { end(jobId, .failed, "Directory not allowed", reportAs: .failed) }
+                if case .invalid(let m) = e { acceptFailed(jobId, m) } else { acceptFailed(jobId, "Directory not allowed") }
                 return
             case .success(let real):
                 clone = nil
@@ -905,11 +940,11 @@ final class PeerEngine: @unchecked Sendable {
         let clone: String?, wt: String, envelope: String
         switch PeerRun.choose(for: j.req) {
         case .repo:
-            guard let c = repoClone(j) else { end(jobId, .failed, "No local clone of \(j.req.repo)", reportAs: .failed); return }
+            guard let c = repoClone(j) else { acceptFailed(jobId, "No local clone of \(j.req.repo)"); return }
             clone = c
             wt = PeerNaming.deskWorktree(clone: c, label: label)
             if let err = launcher.prepareWorktree(clone: c, base: j.req.base, branch: j.branch, worktree: wt) {
-                end(jobId, .failed, err, reportAs: .failed); return
+                acceptFailed(jobId, err); return
             }
             envelope = PeerText.envelope(label: label, job: j.req, branch: j.branch, worktree: wt, resultPath: resultP, checkoutFirst: hadDesk)
         case .dir:

@@ -82,3 +82,94 @@ import Foundation
         #expect(back.status == .paused && back.sessionId == nil && back.resumes == nil && back.lane == nil)
     }
 }
+
+/// Missions M1.2 — preflight (sender) and accept check (receiver).
+@Suite(.serialized) struct PeerMissionsM1PreflightTests {
+    func sides(bHome: String? = nil, aHome: String? = nil) -> (a: PeerSide, b: PeerSide, relay: FakeRelay, clock: Clock) {
+        let relay = FakeRelay(), clock = Clock()
+        let a = PeerSide("Al", relay: relay, clock: clock), b = PeerSide("Bo", relay: relay, clock: clock)
+        if let h = bHome { b.engine.home = h }
+        if let h = aHome { a.engine.home = h }
+        pairUp(a, b)
+        return (a, b, relay, clock)
+    }
+    func send(_ a: PeerSide, repo: String = testRepo, dir: String = "", brief: String = "x") -> Result<String, PeerError> {
+        a.engine.delegate(peer: "Bea", repo: dir.isEmpty ? repo : "", title: "Fix it", brief: brief, mode: .pane, dir: dir)
+    }
+    func reason(_ r: Result<String, PeerError>) -> String? { if case .failure(.invalid(let m)) = r { return m }; return nil }
+
+    @Test func noCloneOnTheReceiverIsNeedsYouNotFailed() throws {
+        let s = sides(); defer { s.a.close(); s.b.close() }
+        s.b.launcher.clone = nil
+        guard case .success(let id) = send(s.a) else { Issue.record("sent"); return }
+        settle(s.a, s.b)
+        #expect(s.b.engine.inboundJobs().first?.status == .needsYou && s.b.engine.inboundJobs().first?.acceptFailed == true)
+        let sent = try #require(s.a.engine.result(jobId: id))
+        #expect(sent.status == .needsYou && sent.note.hasPrefix("No local clone"))
+    }
+
+    @Test func fetchFailureIsNeedsYouNotFailed() throws {
+        let s = sides(); defer { s.a.close(); s.b.close() }
+        s.b.launcher.worktreeError = "Couldn't fetch the repo"
+        guard case .success(let id) = send(s.a) else { Issue.record("sent"); return }
+        settle(s.a, s.b)
+        #expect(s.a.engine.result(jobId: id)?.status == .needsYou && s.a.engine.result(jobId: id)?.note == "Couldn't fetch the repo")
+    }
+
+    @Test func directoryNotAllowedIsNeedsYouNotFailed() throws {
+        let s = sides(bHome: "/Users/bo"); defer { s.a.close(); s.b.close() }
+        guard case .success(let id) = send(s.a, dir: "/Users/bo/secret") else { Issue.record("sent"); return }
+        settle(s.a, s.b)
+        #expect(s.a.engine.result(jobId: id)?.status == .needsYou)
+    }
+
+    @Test func senderPathInTheBriefIsRefusedAndNothingIsSent() throws {
+        let s = sides(bHome: "/Users/bo"); defer { s.a.close(); s.b.close() }
+        let file = s.a.root.appendingPathComponent("notes.txt"); try Data("x".utf8).write(to: file)
+        s.a.engine.home = s.a.root.path
+        let before = s.relay.delivered
+        let r = send(s.a, brief: "Read \(file.path) first")
+        #expect(reason(r)?.contains("path on your Mac") == true)
+        settle(s.a, s.b)
+        #expect(s.a.engine.status(jobId: nil).isEmpty && s.relay.delivered == before && s.b.engine.inboundJobs().isEmpty)
+    }
+
+    @Test func ownDirOnSenderMacIsRefused() throws {
+        let s = sides(bHome: "/Users/bo"); defer { s.a.close(); s.b.close() }
+        s.a.engine.home = s.a.root.path
+        let before = s.relay.delivered
+        #expect(reason(send(s.a, dir: s.a.root.path))?.contains("path on your Mac") == true)
+        #expect(s.relay.delivered == before && s.a.engine.status(jobId: nil).isEmpty)
+    }
+
+    @Test func repoMissingFromFreshCardIsRefusedUnlessShared() throws {
+        let s = sides(); defer { s.a.close(); s.b.close() }
+        let before = s.relay.delivered
+        let r = send(s.a, repo: "https://github.com/acme/fresh.git")
+        #expect(reason(r)?.contains("true-peer offer") == true)
+        settle(s.a, s.b)
+        #expect(s.a.engine.status(jobId: nil).isEmpty && s.relay.delivered == before)
+        #expect(s.a.engine.offer(peer: "Bea", url: "https://github.com/acme/fresh.git").isSuccess)       // the share step
+        #expect(reason(send(s.a, repo: "https://github.com/acme/fresh.git")) == nil)
+    }
+
+    @Test func peerTooOldForTheJobKindNeedsUpdate() throws {
+        let s = sides(); defer { s.a.close(); s.b.close() }
+        var card = try #require(s.a.engine.peerCaps(s.b.identity.mailboxId)); card.kinds = ["repo"]; card.updated = s.clock.now()
+        s.a.engine.setPeerCaps(s.b.identity.mailboxId, card)
+        #expect(reason(send(s.a, dir: "/Users/bo/x"))?.contains("needs the update") == true)
+        #expect(reason(send(s.a)) == nil)
+    }
+
+    @Test func offlinePeerAndStaleCardQueueInsteadOfRefusing() throws {
+        let s = sides(); defer { s.a.close(); s.b.close() }
+        s.b.transport.setOnline(false)
+        guard case .success(let id) = send(s.a) else { Issue.record("offline must queue"); return }
+        settle(s.a, s.b)
+        #expect(s.a.engine.result(jobId: id)?.status == .queued && s.b.engine.inboundJobs().isEmpty)
+        s.clock.t = s.clock.t.addingTimeInterval(601)            // the Card is now stale: even an unknown repo queues
+        #expect(reason(send(s.a, repo: "https://github.com/acme/third.git")) == nil)
+        s.b.transport.setOnline(true); settle(s.a, s.b)
+        #expect(s.b.engine.inboundJobs().count == 2)
+    }
+}
