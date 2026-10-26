@@ -284,10 +284,11 @@ enum PeerNaming {
             .appendingPathComponent(shortId(jobId), isDirectory: true).path
     }
     /// Run 35: `<clone>.peers/<peer-slug>/desk` — the one worktree a desk reuses for every job.
-    static func deskWorktree(clone: String, label: String) -> String {
+    /// Lane 1 is the pre-M1 `desk` folder; lane n >= 2 is `desk-n`.
+    static func deskWorktree(clone: String, label: String, lane: Int = 1) -> String {
         let u = URL(fileURLWithPath: clone)
         return u.deletingLastPathComponent().appendingPathComponent(u.lastPathComponent + ".peers", isDirectory: true)
-            .appendingPathComponent(slug(label), isDirectory: true).appendingPathComponent("desk", isDirectory: true).path
+            .appendingPathComponent(slug(label), isDirectory: true).appendingPathComponent(lane <= 1 ? "desk" : "desk-\(lane)", isDirectory: true).path
     }
     /// Run 35: `peer-<peer-slug>-<project-slug>` — the name of the desk's session.
     static func deskAgentName(label: String, project: String) -> String { "peer-\(slug(label))-\(slug(project))" }

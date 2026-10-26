@@ -69,6 +69,15 @@ enum PeerCLI {
             case .success: return ["ok": true]
             case .failure(let e): return fail("\(e)")
             }
+        case "resume":
+            guard let id = req["jobId"] as? String else { return fail("a job id is required") }
+            switch engine.resumeJob(jobId: id) {
+            case .success: return ["ok": true]
+            case .failure(let e): return fail("\(e)")
+            }
+        case "lanes":
+            if let n = req["n"] as? Int { PeerSettings.lanes = max(1, min(4, n)) }
+            return ["ok": true, "lanes": PeerSettings.lanes]
         case "offer":
             guard let peer = req["peer"] as? String, let url = req["url"] as? String else { return fail("a peer and a repo URL are required") }
             switch engine.offer(peer: peer, url: url, name: (req["name"] as? String) ?? "", note: (req["note"] as? String) ?? "") {
@@ -109,7 +118,7 @@ enum PeerCLI {
         import json, os, select, socket, sys, time
 
         DEFAULT_SOCK = __SOCKET__
-        USAGE = ("usage: true-peer list | true-peer delegate <peer> [--repo R] --title T --brief-file F [--base B] [--background] | "
+        USAGE = ("usage: true-peer lanes [1-4] | true-peer resume <jobId> | true-peer list | true-peer delegate <peer> [--repo R] --title T --brief-file F [--base B] [--background] | "
                  "true-peer delegate <peer> --dir D --title T --brief-file F | true-peer say <jobId> <text|-> | "
                  "true-peer offer <url> [--name N] [--note T] <peer> | true-peer shares | true-peer tail <jobId> [-f] [-n N] | true-peer stop <jobId> | true-peer status [jobId] | true-peer result <jobId>")
 
@@ -235,6 +244,14 @@ enum PeerCLI {
                 if len(args) != 1:
                     die(USAGE)
                 call({"op": "stop", "jobId": args[0]})
+            elif cmd == "resume":
+                if len(args) != 1:
+                    die(USAGE)
+                call({"op": "resume", "jobId": args[0]})
+            elif cmd == "lanes":
+                if len(args) > 1 or (args and not args[0].isdigit()):
+                    die(USAGE)
+                print(call({"op": "lanes", **({"n": int(args[0])} if args else {})}).get("lanes"))
             elif cmd == "tail":
                 o, rest = opts(args, {"-f"})
                 if len(rest) != 1:

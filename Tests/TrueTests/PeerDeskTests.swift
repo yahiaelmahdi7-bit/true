@@ -12,6 +12,7 @@ import Foundation
         let relay = FakeRelay(), clock = Clock()
         let a = PeerSide("Al", relay: relay, clock: clock), b = PeerSide("Bo", relay: relay, clock: clock, mode: mode)
         b.knobs.desk = desk
+        b.knobs.lanes = 1                  // Run 35 behaviour: one session per project (lanes are Missions M1.4)
         pairUp(a, b)
         return Rig(a: a, b: b)
     }

@@ -291,7 +291,7 @@ import Foundation
 
     @Test func deskLaneResumeNamesTheSecondJobAndNotTheFirst() throws {
         let s = sides(); defer { s.a.close(); s.b.close() }
-        s.b.knobs.desk = true
+        s.b.knobs.desk = true; s.b.knobs.lanes = 1
         let id1 = try #require(send(s.a, mode: .pane, title: "First job")); settle(s.a, s.b)
         let id2 = try #require(send(s.a, mode: .pane, title: "Second job")); settle(s.a, s.b)
         let pane = s.b.launcher.pane
@@ -305,5 +305,79 @@ import Foundation
         #expect(s.b.launcher.resumeSessions == ["lane-sess"])
         let prompt = try #require(s.b.launcher.resumePrompts.first)
         #expect(prompt.contains("Second job") && prompt.contains(id2) && !prompt.contains("First job"))
+    }
+}
+
+/// Missions M1.4 — desk lanes.
+@Suite(.serialized) struct PeerMissionsM1LaneTests {
+    func rig(lanes: Int = 2) -> (a: PeerSide, b: PeerSide) {
+        let relay = FakeRelay(), clock = Clock()
+        let a = PeerSide("Al", relay: relay, clock: clock), b = PeerSide("Bo", relay: relay, clock: clock)
+        b.knobs.desk = true; b.knobs.lanes = lanes
+        pairUp(a, b)
+        return (a, b)
+    }
+    @discardableResult
+    func send(_ r: (a: PeerSide, b: PeerSide), _ title: String) -> String {
+        guard case .success(let id) = r.a.engine.delegate(peer: "Bea", repo: testRepo, title: title, brief: "do \(title)", mode: .pane) else { Issue.record("sent"); return "" }
+        settle(r.a, r.b)
+        return id
+    }
+    func job(_ r: (a: PeerSide, b: PeerSide), _ id: String) -> InboundJob? { r.b.engine.inboundJobs().first { $0.id == id } }
+
+    @Test func twoIndependentJobsStartInSeparateWorktrees() throws {
+        let r = rig(); defer { r.a.close(); r.b.close() }
+        let j1 = send(r, "First"), j2 = send(r, "Second")
+        let a = try #require(job(r, j1)), b = try #require(job(r, j2))
+        #expect(a.pane != nil && b.pane != nil && a.pane != b.pane && r.b.launcher.panes.count == 2)
+        #expect(a.lane == 1 && b.lane == 2 && a.desk == b.desk)
+        #expect(a.worktree?.hasSuffix("/desk") == true && b.worktree?.hasSuffix("/desk-2") == true)
+        let d = r.b.engine.desks()
+        #expect(d.count == 2 && d.map(\.lane) == [1, 2])
+    }
+
+    @Test func aThirdJobWaitsWhenEveryLaneIsBusy() throws {
+        let r = rig(); defer { r.a.close(); r.b.close() }
+        send(r, "First"); send(r, "Second")
+        let j3 = send(r, "Third")
+        #expect(job(r, j3)?.pane == nil && job(r, j3)?.note.hasPrefix("In line behind") == true && r.b.launcher.panes.count == 2)
+    }
+
+    @Test func sameBranchSharesALaneEvenWhenItIsBusy() throws {
+        let r = rig(); defer { r.a.close(); r.b.close() }
+        let j1 = send(r, "First"), j2 = send(r, "Second")
+        let first = try #require(job(r, j1)), second = try #require(job(r, j2))
+        // A job naming the first job's branch (the mission file will, in M2) goes to lane 1 although both lanes are busy.
+        var named = second; named.req.jobId = "named"; named.lane = nil; named.pane = nil; named.branch = first.branch
+        #expect(r.b.engine.laneForTest(named) == 1)
+        var other = named; other.branch = "elsewhere"; other.received = second.received.addingTimeInterval(1)
+        #expect(r.b.engine.laneForTest(other) == 1 || r.b.engine.laneForTest(other) == 2)     // no free lane: waits on the least busy
+        #expect(r.b.engine.laneForTest(second) == 2)                                          // an already-placed job keeps its lane
+    }
+
+    @Test func preUpgradeDeskJobKeepsItsKeyAndCountsAsLaneOne() throws {
+        let r = rig(); defer { r.a.close(); r.b.close() }
+        let j1 = send(r, "First")
+        let key = try #require(job(r, j1)?.desk)
+        #expect(key == PeerNaming.deskKey(mailbox: r.a.identity.mailboxId, project: "repo:" + (PeerRepo.normalize(testRepo) ?? testRepo)))
+        r.b.engine.mutateForTest(j1) { $0.lane = nil }                // a record written before M1
+        let j2 = send(r, "Second")
+        #expect(job(r, j2)?.lane == 2 && job(r, j1)?.lane == nil && r.b.engine.desks().first?.lane == 1)
+    }
+
+    @Test func twoLanesFetchingOneCloneRunOneAfterTheOther() throws {
+        let r = rig(); defer { r.a.close(); r.b.close() }
+        let clone = try #require(r.b.launcher.clone)
+        #expect(r.b.engine.cloneLockForTest(clone) === r.b.engine.cloneLockForTest(clone))
+        let l = r.b.engine.cloneLockForTest(clone)
+        l.lock()
+        let a = r.a
+        let t = Thread { _ = a.engine.delegate(peer: "Bea", repo: testRepo, title: "Held", brief: "x", mode: .pane) }
+        t.start(); usleep(250_000)
+        #expect(r.b.launcher.panes.isEmpty)                               // blocked behind the other lane's fetch
+        l.unlock()
+        let t0 = Date()
+        while r.b.launcher.panes.isEmpty, Date().timeIntervalSince(t0) < 3 { usleep(20_000); settle(r.a, r.b) }
+        #expect(r.b.launcher.panes.count == 1)
     }
 }

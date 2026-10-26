@@ -12,6 +12,7 @@ final class PeerEngine: @unchecked Sendable {
     private let transport: PeerTransport
     private let inboundMode: @Sendable () -> PeerInboundMode
     private let now: @Sendable () -> Date
+    private var cloneLocks: [String: NSLock] = [:]
     private let scheduler: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
     let ownName: String
     private let steering: @Sendable () -> Bool
@@ -928,26 +929,53 @@ final class PeerEngine: @unchecked Sendable {
         changed()
     }
 
+    /// Missions M1.4: the lane a desk job runs on. Same branch as a live job → that job's lane; else the first free lane; else it waits on the least busy one.
+    private func chooseLane(_ j: InboundJob, key: String) -> Int {
+        if let l = j.lane { return l }
+        let n = max(1, min(4, laneCount()))
+        lock.lock()
+        let live = inbound.filter { $0.desk == key && !$0.status.isFinal && $0.status != .paused && $0.id != j.id }
+        lock.unlock()
+        if j.req.hasRepo, let same = live.first(where: { $0.branch == j.branch && $0.req.hasRepo }) { return same.lane ?? 1 }
+        func busy(_ lane: Int) -> Bool { live.contains { ($0.lane ?? 1) == lane && ($0.pane.map { launcher.paneAlive($0) } ?? ($0.received < j.received)) } }
+        if let free = (1...n).first(where: { !busy($0) }) { return free }
+        return (1...n).min { a, b in live.filter { ($0.lane ?? 1) == a }.count < live.filter { ($0.lane ?? 1) == b }.count } ?? 1
+    }
+
+    /// Test hooks: the per-clone git lock, and a way to age a record (pre-upgrade lane, shared branch).
+    func cloneLockForTest(_ clone: String) -> NSLock { cloneLock(clone) }
+    func laneForTest(_ j: InboundJob) -> Int { chooseLane(j, key: j.desk ?? "") }
+    func mutateForTest(_ jobId: String, _ f: (inout InboundJob) -> Void) { _ = update(jobId, f) }
+
+    private func cloneLock(_ clone: String) -> NSLock {
+        lock.lock(); defer { lock.unlock() }
+        if let l = cloneLocks[clone] { return l }
+        let l = NSLock(); cloneLocks[clone] = l; return l
+    }
+
     private func runDesk(_ j: InboundJob, key: String, flags: [String]) {
         let jobId = j.id, label = j.peerLabel, dir = jobDir(jobId), resultP = resultPath(jobId)
+        let lane = chooseLane(j, key: key)
+        if j.lane != lane { _ = update(jobId) { $0.lane = lane } }
         lock.lock()
-        let others = inbound.filter { $0.desk == key && !$0.status.isFinal && $0.status != .paused && $0.id != jobId }
-        let last = inbound.last { $0.desk == key && $0.pane != nil && $0.id != jobId }
-        let hadDesk = inbound.contains { $0.desk == key && $0.worktree != nil && $0.id != jobId }
+        let others = inbound.filter { $0.desk == key && ($0.lane ?? 1) == lane && !$0.status.isFinal && $0.status != .paused && $0.id != jobId }
+        let last = inbound.last { $0.desk == key && ($0.lane ?? 1) == lane && $0.pane != nil && $0.id != jobId }
+        let hadDesk = inbound.contains { $0.desk == key && ($0.lane ?? 1) == lane && $0.worktree != nil && $0.id != jobId }
         lock.unlock()
         // Busy: a running job on a live pane, or an older job still waiting its turn.
         if let blocker = others.first(where: { o in o.pane.map { launcher.paneAlive($0) } ?? (o.received < j.received) }) {
-            holdInLine(j, key: key, note: "In line behind \(blocker.req.title)"); return
+            holdInLine(j, key: key, note: "In line behind \(blocker.req.title)" + (blocker.branch == j.branch && j.req.hasRepo ? " (same branch)" : "")); return
         }
         let clone: String?, wt: String, envelope: String
         switch PeerRun.choose(for: j.req) {
         case .repo:
             guard let c = repoClone(j) else { acceptFailed(jobId, "No local clone of \(j.req.repo)"); return }
             clone = c
-            wt = PeerNaming.deskWorktree(clone: c, label: label)
-            if let err = launcher.prepareWorktree(clone: c, base: j.req.base, branch: j.branch, worktree: wt) {
-                acceptFailed(jobId, err); return
-            }
+            wt = PeerNaming.deskWorktree(clone: c, label: label, lane: lane)
+            let gl = cloneLock(c); gl.lock()
+            let prepErr = launcher.prepareWorktree(clone: c, base: j.req.base, branch: j.branch, worktree: wt)
+            gl.unlock()
+            if let err = prepErr { acceptFailed(jobId, err); return }
             envelope = PeerText.envelope(label: label, job: j.req, branch: j.branch, worktree: wt, resultPath: resultP, checkoutFirst: hadDesk)
         case .dir:
             clone = nil
@@ -991,22 +1019,25 @@ final class PeerEngine: @unchecked Sendable {
 
     /// The desk's oldest job in line starts now (its running job just ended).
     private func startNextInLine(_ key: String) {
-        lock.lock(); let next = inbound.first { $0.desk == key && !$0.status.isFinal && $0.status != .paused && $0.pane == nil }; lock.unlock()
-        guard let next else { return }
-        run(next.id, flags: next.inboundMode.claudeFlags)
+        lock.lock()
+        var heads: [InboundJob] = []
+        for j in inbound where j.desk == key && !j.status.isFinal && j.status != .paused && j.pane == nil && !heads.contains(where: { ($0.lane ?? 1) == (j.lane ?? 1) }) { heads.append(j) }
+        lock.unlock()
+        for next in heads { run(next.id, flags: next.inboundMode.claudeFlags) }
     }
 
     /// Live desks for the Peers sheet: the running job (if any) and how many wait.
-    struct DeskInfo: Equatable, Sendable { var key: String; var peer: String; var project: String; var running: String?; var inLine: Int }
+    struct DeskInfo: Equatable, Sendable { var key: String; var peer: String; var project: String; var running: String?; var inLine: Int; var lane: Int = 1 }
     func desks() -> [DeskInfo] {
         lock.lock(); defer { lock.unlock() }
         var out: [DeskInfo] = []
         for key in Array(Set(inbound.compactMap(\.desk))).sorted() {
-            let live = inbound.filter { $0.desk == key && !$0.status.isFinal }
-            guard !live.isEmpty else { continue }
-            let first = live[0]
-            out.append(DeskInfo(key: key, peer: first.peerLabel, project: PeerNaming.deskProject(key), running: live.first { $0.pane != nil }?.req.title,
-                                inLine: live.filter { $0.pane == nil }.count))
+            let all = inbound.filter { $0.desk == key && !$0.status.isFinal }
+            for lane in Set(all.map { $0.lane ?? 1 }).sorted() {
+                let live = all.filter { ($0.lane ?? 1) == lane }
+                out.append(DeskInfo(key: key, peer: live[0].peerLabel, project: PeerNaming.deskProject(key), running: live.first { $0.pane != nil }?.req.title,
+                                    inLine: live.filter { $0.pane == nil }.count, lane: lane))
+            }
         }
         return out
     }
