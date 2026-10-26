@@ -1077,3 +1077,12 @@ Mahmoud delegates two jobs on finance-director-os back to back; Yahia's True ope
 **Risks.** Ad-hoc public builds may re-prompt for Local Network after each update; the app firewall may ask about incoming connections; guest Wi-Fi with client isolation hides Macs; both Macs need this version; people may skip comparing the code (same model as Bluetooth pairing).
 
 ### Deviations (builder)
+
+- The TXT tag hashes the raw 16 mailbox bytes (hex-decoded), not the hex string.
+- `ownName` is already truncated to 40 in the engine, so no off-main compute is needed.
+- After Accept the receiver waits up to 120 s for the invite; after the sender sends it there is a 10 s silence timer (my elaboration of the design's timeouts).
+- A relay-confirm timeout leaves the invite alive and the link as-is; the row shows a plain "couldn't reach the relay" note.
+- Sender Cancel resets the row to Invite (no state); a receiver Decline shows the sender "<name> declined".
+- The notification fires only when running as a bundled .app (same guard as CloudNotifier).
+- The coordinator observes `peersChanged` off-main and hops to main (avoids a test deadlock).
+- Live tests (Bonjour, two Macs, dns-sd check, Local Network prompt) are written but NOT run by the builder. UI stills were not taken.
