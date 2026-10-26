@@ -1026,3 +1026,9 @@ Mahmoud delegates two jobs on finance-director-os back to back; Yahia's True ope
 36b (files + workspace) — next run, see docs/designs/peer-workspace.md
 
 ### Deviations (builder)
+- **Activity assistant text** keeps up to 1 KB of multi-line text (`PeerActivityItem.maxLong` 8 KB for the Stop-hook message), not just its first line; at Everything it goes out as a `.stop` message.
+- **Watch `since`** is honored by design rather than by replay: only never-sent items are held (trimmed to the newest 200), so a lease always receives the unsent backlog and nothing twice; the sender's `since` is sent but not needed.
+- **A5.** The `lane` on an outbox item (`activity`) is what lets a `rate`/`full` relay nack back off a progress batch without holding chat behind it; `tail` (CLI) takes a 10-minute lease and renews it every 60 s — a `tail -f` past 10 minutes needs re-running.
+- **A6.** "Cold" is "the first status call fails" (not "≥ 5 min since the last one"); scopes stay cached 10 min so a warm brain never wakes. The `launchctl kickstart` branch (no pid in `launchctl print`) is untested here — no launchctl in the detached run.
+- **Not run (detached run: no network, no launchctl):** the live harness `PeerLiveRelayTests` (`TRUE_LIVE_RELAY=1`; it checks lease gating, not a real builder run) and the stop-the-brain CLI check.
+- UI stills of the share-level picker were not produced.
