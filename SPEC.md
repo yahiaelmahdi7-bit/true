@@ -1056,3 +1056,26 @@ Mahmoud delegates two jobs on finance-director-os back to back; Yahia's True ope
 - Desk panes (PeerOrigin label) never get an interrupted mark at capture, so they resume quietly.
 - If Claude was missed at close, capture follows `SessionRecorder.decide` and logs "undo-close: no claude found".
 - `WorkspaceModel`'s default `closed` stack is a throwaway temp one; `.shared` uses `ClosedStack.standard` + `load()`. `ClosedReopen.waitForExit` is `@MainActor` (Sendable error otherwise).
+
+## Builder autonomy A1 — every builder status
+
+**Why.** `builder` gained a `queued` status on 2026-10-20, and True decoded any status it did not know as `failed`. Queued builders therefore showed as failed in the Hub and the Watcher raised "Builder … failed" for them. The builder will also gain `waiting`, `held`, `landed` and `unlanded` (Phases A2/B). True now knows all of them, and an unknown status is never `failed` again. Design: `docs/designs/builder-autonomy.md` (approved 2026-10-27), Phase A1 only; nothing under `~/.claude/bin`.
+
+| State | Hub label | Counts as | Watcher signal |
+|---|---|---|---|
+| `queued` | In line | in progress | none |
+| `waiting` | Waiting for limit reset · <local time of `resume_at`> (no `resume_at`: "Waiting") | in progress | none; more than 30 min past `resume_at` → "stuck" |
+| `held` | Needs your OK | needs you, visible until acked | "<name> needs you: <land.reason>", evidence = stills folder |
+| `landed` | Merged | done | none |
+| `unlanded` | Undone | done | none |
+| unknown | the raw status text, neutral grey | done (never failed) | none |
+
+New optional meta fields read: `wait_reason`, `resume_at` (epoch seconds), `land.reason`, `land.stills`. Old meta without them still parses.
+
+### Deviations (builder)
+- **`held` visibility:** stays in the Hub until acked, however old; an acked `held` ages out after nothing (it is hidden at once), since the design says "visible until resolved" and acking is how it is resolved.
+- **`done` with `landable`:** `landable` is not read in A1, so every `done` keeps "check its gates" (Phase B decides the landable case).
+- **Hub group counts:** `queued`/`waiting` count as "working", `held` as "needs you" in the project summary; Hub subtitle for a held row reads "needs your OK".
+- **Watcher signal for a stuck `waiting`** reuses kind `stuck`; with no `resume_at` there is nothing to be late for, so no signal.
+- **Light still:** the Hub renders with the dark palette in both modes (colours are fixed in `Theme`), so the "light" PNG differs from the dark one only in window chrome.
+- **Not mine:** `FDLeakTests.siteHTTPRunGivesBackItsPipe` failed once in the full parallel run (`leaked … → 26 < 5`) and passed when run alone. Not fixed.
