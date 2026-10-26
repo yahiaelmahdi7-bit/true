@@ -339,8 +339,13 @@ struct PeersView: View {
             Picker("Share with the sender", selection: Binding(get: { share }, set: { share = $0; PeerSettings.share = $0 })) {
                 Text("Status only").tag(PeerShare.status)
                 Text("Activity").tag(PeerShare.activity)
+                Text("Everything").tag(PeerShare.everything)
             }
             .pickerStyle(.segmented)
+            if share == .everything {
+                Text("Shows commands and the agent's words. Secrets are masked, not guaranteed.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Divider()
             Text("Invite a peer").font(.headline)
             if let inviteText {

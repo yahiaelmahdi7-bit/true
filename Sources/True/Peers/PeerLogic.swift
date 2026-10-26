@@ -508,7 +508,9 @@ enum PeerSettings {
     }
 }
 
-enum PeerShare: String, Sendable { case status, activity }
+/// What the receiver lets the sender see: `status` only, `activity` (tool names + safe details), or `everything`
+/// (commands and the agent's own words, secrets masked).
+enum PeerShare: String, Sendable { case status, activity, everything }
 
 /// The receiver's directory allow-list (`peer.allowedDirs`). Everything is real-pathed on both sides before the prefix
 /// check, so `..` and symlinks can't leave the list. `~`, `/`, `$HOME` and any ancestor of `~/.true` are refused outright.
@@ -571,6 +573,8 @@ struct PeerActivityItem: Codable, Equatable, Sendable {
     var kind: Kind
     var text: String
     static let maxText = 1024
+    /// Assistant items at the Everything level may run to 8 KB.
+    static let maxLong = 8 * 1024
     var wire: [String: Any] { ["t": t, "kind": kind.rawValue, "text": text] }
 }
 
@@ -583,7 +587,7 @@ struct PeerActivity: Equatable, Sendable {
               let raw = o["items"] as? [[String: Any]], raw.count <= maxItems else { return nil }
         let items = raw.compactMap { r -> PeerActivityItem? in
             guard let t = r["t"] as? Int, let k = (r["kind"] as? String).flatMap(PeerActivityItem.Kind.init), let x = r["text"] as? String else { return nil }
-            return PeerActivityItem(t: t, kind: k, text: String(x.prefix(PeerActivityItem.maxText)))
+            return PeerActivityItem(t: t, kind: k, text: String(x.prefix(k == .assistant ? PeerActivityItem.maxLong : PeerActivityItem.maxText)))
         }
         return PeerActivity(jobId: id.lowercased(), seq: seq, items: items)
     }
@@ -593,6 +597,11 @@ struct PeerActivity: Equatable, Sendable {
 enum PeerMask {
     private static let patterns: [NSRegularExpression] = [
         #"sk-[A-Za-z0-9_\-]{8,}"#, #"ghp_[A-Za-z0-9]{8,}"#, #"(?i)bearer\s+[A-Za-z0-9._~+/=\-]{6,}"#, #"\b[0-9a-fA-F]{32,}\b"#,
+        #"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)"#,
+        #"(?i)(token|secret|api_key|apikey|password|passwd)\s*[=:]\s*\S+"#,
+        #"\bre_[A-Za-z0-9_]{16,}"#, #"\bAKIA[0-9A-Z]{16}\b"#,
+        #"\beyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}\b"#, #"\bxox[abposr]-[A-Za-z0-9-]{10,}"#,
+        #"github_pat_\w{20,}"#, #"sk_live_\w{10,}"#, #"://[^/\s:@]+:[^/\s@]+@"#,
     ].compactMap { try? NSRegularExpression(pattern: $0) }
 
     static func mask(_ s: String) -> String {

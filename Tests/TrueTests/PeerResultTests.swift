@@ -65,6 +65,15 @@ import Foundation
         #expect(job.note.hasPrefix("Hit an error: API Error: 529 overloaded"))
     }
 
+    @Test func failureReasonMasksSecrets() throws {
+        let r = rig(); defer { r.close() }
+        let id = try #require(send(r))
+        r.b.engine.paneEvent(pane: r.b.launcher.pane, kind: .error, message: "401 bad token=abc123secretvalue"); settle(r.a, r.b)
+        let job = try #require(r.a.engine.status(jobId: id).first)
+        #expect(!job.note.contains("abc123secretvalue"))
+        #expect(job.note.contains("‹masked›"))
+    }
+
     @Test func failedBuilderReportsReasonFromStreamThenStderr() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("bld-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

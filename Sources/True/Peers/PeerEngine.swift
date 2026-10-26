@@ -962,7 +962,7 @@ final class PeerEngine: @unchecked Sendable {
         guard let j else { return }
         if kind == .error { noteError(j.id, message) }
         trackPermissionPrompt(j, kind: kind, tool: tool)
-        queueActivity(j, Self.items(kind: kind, message: message, tool: tool, detail: detail, at: now()))
+        queueActivity(j, Self.items(kind: kind, message: message, tool: tool, detail: detail, at: now(), level: share()))
         let exists = FileManager.default.fileExists(atPath: resultPath(j.id))
         guard let s = PeerEventMap.status(kind, resultExists: exists), s != j.status else { return }
         if s == .done || s == .failed { end(j.id, s, s == .done ? "Finished" : Self.withReason("Hit an error", takeError(j.id)), reportAs: s); return }
@@ -973,22 +973,34 @@ final class PeerEngine: @unchecked Sendable {
     }
 
     /// The condensed activity a hook event stands for: a tool name (+ first input line), the last assistant text, or a question.
-    static func items(kind: PeerEventMap.Kind, message: String, tool: String?, detail: String?, at: Date) -> [PeerActivityItem] {
+    static func items(kind: PeerEventMap.Kind, message: String, tool: String?, detail: String?, at: Date, level: PeerShare = .activity) -> [PeerActivityItem] {
         let t = Int(at.timeIntervalSince1970)
         switch kind {
         case .progress:
             let name = message.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty, name != "prompt" else { return [] }
-            let d = detail.map { PeerMask.firstLine($0) } ?? ""
+            let d = safeDetail(tool: name, detail: detail, level: level)
             return [PeerActivityItem(t: t, kind: .tool, text: PeerMask.firstLine(d.isEmpty ? name : "\(name) · \(d)"))]
         case .stop:
-            let text = PeerMask.text(message)
+            let text = PeerMask.text(message, limit: level == .everything ? PeerActivityItem.maxLong : PeerActivityItem.maxText)
             return text.isEmpty ? [] : [PeerActivityItem(t: t, kind: .assistant, text: text)]
         case .need:
             let d = detail.map { PeerMask.firstLine($0) } ?? ""
             let text = PeerMask.text(d.isEmpty ? message : "\(message) — \(tool ?? ""): \(d)")
             return text.isEmpty ? [] : [PeerActivityItem(t: t, kind: .question, text: text)]
         case .error, .other: return []
+        }
+    }
+
+    /// What of a tool's input may leave the Mac: Activity = file paths, search patterns, a URL's host — never commands or
+    /// prompts; Everything = the first line of whatever the tool was given. Status never gets here.
+    static func safeDetail(tool: String, detail: String?, level: PeerShare) -> String {
+        guard let d = detail?.trimmingCharacters(in: .whitespacesAndNewlines), !d.isEmpty else { return "" }
+        if level == .everything { return d }
+        switch tool {
+        case "Read", "Edit", "Write", "MultiEdit", "NotebookEdit", "Grep", "Glob": return d
+        case "WebFetch": return URL(string: d)?.host ?? ""
+        default: return tool.hasPrefix("mcp__") ? d : ""
         }
     }
 
@@ -1284,7 +1296,7 @@ final class PeerEngine: @unchecked Sendable {
 
     /// Add items to the job's outgoing batch; send when the batcher says so, else arm one timer.
     private func queueActivity(_ j: InboundJob, _ items: [PeerActivityItem], final: Bool = false) {
-        if share() == .activity, !items.isEmpty {
+        if share() != .status, !items.isEmpty {
             lock.lock()
             var b = batchers[j.id] ?? PeerBatcher()
             for it in items { b.add(it, at: now()) }
