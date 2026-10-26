@@ -1019,3 +1019,9 @@ Mahmoud delegates two jobs on finance-director-os back to back; Yahia's True ope
 **Keys.** ⌘⇧T "Reopen Closed Pane": newest entry of any age; nothing → beep. ⌘Z: `CommandGroup(replacing: .undoRedo)` with Undo and Redo. Undo forwards `undo:` down the responder chain when the key window is not True's main window or the first responder is an `NSText`; otherwise reopens the newest entry only if it is from this launch and under 5 min old, else beeps (pure decision `UndoCloseRoute.decide`). Redo always forwards `redo:`. Title "Undo Close Pane" / "Undo Close Tab" when ⌘Z would reopen, else "Undo". File → "Reopen Closed" lists the last 10 as "<title> · <relative time>", disabled when empty.
 
 ### Deviations (builder)
+- Gone cwd: a Claude pane whose folder is gone reopens as a plain shell in `~` with a dim "folder gone" line (resuming from `~` would not find the transcript).
+- Live-duplicate guard: a single-pane entry whose session already runs elsewhere focuses that pane and spawns nothing; inside a whole-tab entry that pane becomes a plain shell.
+- The old Claude pid is only waited on / killed if the pane closed under 30 s ago (pid reuse); past that it is ignored.
+- Desk panes (PeerOrigin label) never get an interrupted mark at capture, so they resume quietly.
+- If Claude was missed at close, capture follows `SessionRecorder.decide` and logs "undo-close: no claude found".
+- `WorkspaceModel`'s default `closed` stack is a throwaway temp one; `.shared` uses `ClosedStack.standard` + `load()`. `ClosedReopen.waitForExit` is `@MainActor` (Sendable error otherwise).
