@@ -46,6 +46,7 @@ final class PeerEngine: @unchecked Sendable {
     private var flushScheduled: Set<String> = []
     private var heldSays: [String: [String]] = [:]
     private var lastErrors: [String: String] = [:]
+    private var tailers: [String: PeerStreamTailer] = [:]
     // Run 36a — caps (what each peer's True can do) + own-path guard
     private var caps: [String: PeerCaps]
     private var capsFirstAsked: [String: Date] = [:]
@@ -1016,6 +1017,7 @@ final class PeerEngine: @unchecked Sendable {
         lock.lock(); let j = inbound.first { $0.builder == name && !$0.status.isFinal }; lock.unlock()
         guard let j else { return }
         if running {
+            if let dir { startTailer(j, dir: dir) }
             guard j.status != .working else { return }
             if let u = update(j.id, { $0.status = .working; $0.note = "Working" }) { report(u, .working, "Working") }
             changed()
@@ -1024,6 +1026,25 @@ final class PeerEngine: @unchecked Sendable {
         } else {
             end(j.id, .failed, Self.withReason("Ended without a result", dir.flatMap { Self.builderFailureReason(dir: $0) }), reportAs: .failed)
         }
+    }
+
+    // MARK: Run 36a — background-job steps
+
+    /// Follow the builder's `stream.jsonl` and queue its steps as activity (same share-level rules as a pane).
+    private func startTailer(_ j: InboundJob, dir: String) {
+        lock.lock()
+        guard tailers[j.id] == nil else { lock.unlock(); return }
+        let jobId = j.id
+        let t = PeerStreamTailer(path: dir + "/stream.jsonl") { [weak self] lines in
+            guard let self else { return }
+            self.lock.lock(); let job = self.inbound.first { $0.id == jobId && !$0.status.isFinal }; self.lock.unlock()
+            guard let job else { return }
+            let level = self.share(), at = self.now()
+            let items = lines.flatMap { PeerStream.items(line: $0, at: at, level: level) }
+            if !items.isEmpty { self.queueActivity(job, items) }
+        }
+        tailers[j.id] = t
+        lock.unlock()
     }
 
     // MARK: Run 36 — failure reasons
@@ -1071,7 +1092,8 @@ final class PeerEngine: @unchecked Sendable {
     private func end(_ jobId: String, _ status: PeerStatus, _ note: String, reportAs: PeerStatus, startNext: Bool = true) {
         guard let u = update(jobId, { $0.status = status; $0.note = note; $0.finished = now() }) else { return }
         var final = u
-        lock.lock(); lastErrors[jobId] = nil; lock.unlock()
+        lock.lock(); lastErrors[jobId] = nil; let tl = tailers.removeValue(forKey: jobId); lock.unlock()
+        tl?.sync(); tl?.stop()
         if status == .done, u.req.hasRepo, let wt = u.worktree, let sha = launcher.headSHA(worktree: wt) {
             final = update(jobId) { $0.sha = sha } ?? u
         }
