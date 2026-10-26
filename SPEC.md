@@ -1076,3 +1076,11 @@ Mahmoud delegates two jobs on finance-director-os back to back; Yahia's True ope
 
 ### Deviations (builder)
 - **M1.0 spike.** Background jobs: the first `{"type":"system","subtype":"init"}` line of `claude -p --output-format stream-json --verbose` output carries `session_id` (confirmed with the real CLI in a temp dir). `claude -p … --resume <id>` printed an `init` line with the same `session_id` (resume continues the same session): works for background jobs. Pane/desk jobs: the pane's session id is stored by `PaneResume` (`.claude(sessionID:cwd:mode:)`) and `ClaudeSessions.read` (`<claudeConfigDir>/sessions/<pid>.json`, field `sessionId`); read from code, not re-run live (3-run budget).
+- Live background resume is NOT wired: `SpawnRequest` has no resume field, so `LiveLauncher.canResumeBackground` is false and a background job that hits a limit keeps failing as today. The fake launcher supports it and the engine path is tested.
+- Pane session id comes from `SessionSnapshot.probe(pane).found.sessionID`, captured on pane hook events. True-restart recovery (`recoverInterrupted()` at engine init) covers panes only; detached builders survive a restart anyway.
+- "Same branch → same lane" uses `InboundJob.branch`, but job requests do not name branches yet, so that rule is exercised through `laneForTest` only. The `work` queue is serial, so the per-clone git lock is defensive.
+- Preflight sender-path check: brief tokens under the sender's home that exist on disk. Offer-as-share check included. `ownCaps` lanes.free = lanes minus desks with a live job.
+- Old tests changed: stop now ends as canceled; accept-check failures end as needsYou; the `PeerDeskTests` rig sets `knobs.lanes = 1`.
+- `SentJob.retryOf` exists but there is no Retry UI or inherit-session wiring. Resume of an unknown job answers with a failed event "<name> has no record of this job".
+- The paused label shows the instant in the viewer's zone with "(<peer>'s time)" wording. Stills cover the changed components (`PeerStatusText` labels, `PeerDeskRow`), not the full sheet. `.out/` stills are rendered by `PeerStillsM1Tests`.
+- Added `true-peer lanes [n]` and `true-peer resume <id>` to the CLI.
