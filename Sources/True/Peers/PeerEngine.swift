@@ -46,6 +46,11 @@ final class PeerEngine: @unchecked Sendable {
     private var flushScheduled: Set<String> = []
     private var heldSays: [String: [String]] = [:]
     private var lastErrors: [String: String] = [:]
+    // Run 36a — caps (what each peer's True can do) + own-path guard
+    private var caps: [String: PeerCaps]
+    private var capsFirstAsked: [String: Date] = [:]
+    /// Our home directory, announced to peers in caps; tests set another one.
+    var home = NSHomeDirectory()
     private var prompting: Set<UUID> = []
     private var activityCache: [String: [PeerActivityItem]] = [:]
     static let activityKeep = 200
@@ -92,13 +97,14 @@ final class PeerEngine: @unchecked Sendable {
         seen = PeerEngine.load(root.appendingPathComponent("seen.json")) ?? [:]
         outbox = PeerEngine.loadOutbox(root)
         offers = PeerEngine.load(root.appendingPathComponent("offers.json")) ?? []
+        caps = PeerEngine.load(root.appendingPathComponent("caps.json")) ?? [:]
         let t = now()
         invites.removeAll { $0.used || $0.expires <= t }
         seen = seen.filter { $0.value > Int(t.timeIntervalSince1970) }
         transport.onMessage = { [weak self] _, _, blob in self?.receive(blob) }
         transport.onStatus = { [weak self] up in
             guard let self else { return }
-            if up { self.flush() }
+            if up { self.sendCapsToAll(); self.flush() }
             self.changed()
         }
         for i in invites { scheduleWantedCheck(at: i.expires) }
@@ -149,6 +155,7 @@ final class PeerEngine: @unchecked Sendable {
     private func saveSent() { Self.write((try? Self.enc().encode(sent)) ?? Data(), to: root.appendingPathComponent("sent.json")) }
     private func saveInvites() { Self.write((try? Self.enc().encode(invites)) ?? Data(), to: root.appendingPathComponent("invites.json")) }
     private func saveOffers() { Self.write((try? Self.enc().encode(offers)) ?? Data(), to: root.appendingPathComponent("offers.json")) }
+    private func saveCaps() { Self.write((try? Self.enc().encode(caps)) ?? Data(), to: root.appendingPathComponent("caps.json")) }
     private func saveSeen() { Self.write((try? Self.enc().encode(seen)) ?? Data(), to: root.appendingPathComponent("seen.json")) }
     private func outboxURL(_ id: String) -> URL { root.appendingPathComponent("outbox/\(id).json") }
     private func saveOutbox(_ i: OutboxItem) { Self.write((try? Self.enc().encode(i)) ?? Data(), to: outboxURL(i.id)) }
@@ -438,6 +445,46 @@ final class PeerEngine: @unchecked Sendable {
         changed()
     }
 
+    // MARK: caps (Run 36a)
+
+    /// What this True announces: `watch` = activity only while a lease is held.
+    func ownCaps() -> [String: Any] { ["t": "caps", "version": PeerCaps.currentVersion, "features": PeerCaps.ownFeatures, "home": home] }
+
+    func sendCapsToAll() {
+        lock.lock(); let ls = links.filter { $0.confirmed }; lock.unlock()
+        for l in ls { sendCaps(to: l) }
+    }
+    private func sendCaps(to link: PeerLink) { sealAndQueue(ownCaps(), to: link, owner: link.mailboxId) }
+
+    private func handleCaps(_ obj: [String: Any], from mailbox: String) {
+        guard let c = PeerCaps.parse(obj) else { drop("caps payload"); return }
+        lock.lock(); caps[mailbox] = c; saveCaps(); lock.unlock()
+        changed()
+    }
+
+    func peerCaps(_ mailbox: String) -> PeerCaps? { lock.lock(); defer { lock.unlock() }; return caps[mailbox] }
+
+    /// Whether the peer's True supports `feature`: yes, no (it announced and lacks it), or wait (never announced; 60 s grace from the first ask).
+    func capsState(mailbox: String, feature: String) -> PeerCapsState {
+        lock.lock(); defer { lock.unlock() }
+        if let c = caps[mailbox] { return c.features.contains(feature) ? .yes : .no }
+        let t = now()
+        let first = capsFirstAsked[mailbox] ?? t
+        capsFirstAsked[mailbox] = first
+        return t.timeIntervalSince(first) >= PeerCaps.unknownGrace ? .no : .wait
+    }
+
+    /// The words for a feature the peer can't do yet.
+    func needsUpdateMessage(peer: String) -> String { "\(peer)'s True needs the update (v1.3+)" }
+
+    /// Own-path guard: a `--dir` under our own home that exists here, while the peer's home differs, is almost surely a slip.
+    private func ownPathProblem(_ dir: String, peer link: PeerLink) -> String? {
+        guard !dir.hasPrefix("~"), dir == home || dir.hasPrefix(home + "/"),
+              FileManager.default.fileExists(atPath: dir),
+              let theirs = peerCaps(link.mailboxId)?.home, !theirs.isEmpty, theirs != home else { return nil }
+        return "That is a path on your Mac. Use --with to send it, or name a path on \(link.label)'s Mac."
+    }
+
     // MARK: sender
 
     /// Hand a job to a paired peer. `repo` is a local path or a git remote URL; empty = a job with no project. Returns the jobId.
@@ -449,6 +496,7 @@ final class PeerEngine: @unchecked Sendable {
         let dir = rawDir.trimmingCharacters(in: .whitespacesAndNewlines)
         if !dir.isEmpty && !repo.isEmpty { return .failure(.invalid("Use either a repo or a directory, not both")) }
         if !dir.isEmpty && !PeerDirs.validRaw(dir) { return .failure(.invalid("A directory must be an absolute path (or start with ~/)")) }
+        if !dir.isEmpty, let msg = ownPathProblem(dir, peer: link) { return .failure(.invalid(msg)) }
         var remote = repo
         if repo.hasPrefix("/") || repo.hasPrefix("~") || repo.hasPrefix(".") {
             let path = (repo as NSString).expandingTildeInPath
@@ -600,6 +648,7 @@ final class PeerEngine: @unchecked Sendable {
             case "stop": handleStop(obj, from: o.envelope.from)
             case "chat": if obj["nack"] is String { handleChatNack(obj, from: o.envelope.from) } else { handleChat(obj, from: o.envelope.from) }
             case "offer": handleOffer(obj, from: o.envelope.from)
+            case "caps": handleCaps(obj, from: o.envelope.from)
             case "activity": if let a = PeerActivity.parse(obj) { receiveActivity(a, from: o.envelope.from) } else { drop("activity payload") }
             default: drop("unknown kind")
             }
@@ -631,6 +680,7 @@ final class PeerEngine: @unchecked Sendable {
         lastPaired = label
         lock.unlock()
         sealAndQueue(["t": "pair-accept", "name": ownName], to: link, owner: link.mailboxId)
+        sendCaps(to: link)
         updateWanted()
         changed()
     }
@@ -640,13 +690,16 @@ final class PeerEngine: @unchecked Sendable {
         guard let i = links.firstIndex(where: { $0.mailboxId == mailbox }) else { lock.unlock(); return }
         links[i].confirmed = true; saveLinks()
         lastPaired = links[i].label
+        let l = links[i]
         lock.unlock()
+        sendCaps(to: l)
         changed()
     }
 
     private func handleUnpair(from mailbox: String) {
         lock.lock()
         links.removeAll { $0.mailboxId == mailbox }; saveLinks()
+        caps[mailbox] = nil; saveCaps(); capsFirstAsked[mailbox] = nil
         let dropped = outbox.filter { $0.owner == mailbox }
         outbox.removeAll { $0.owner == mailbox }
         for d in dropped { try? FileManager.default.removeItem(at: outboxURL(d.id)) }

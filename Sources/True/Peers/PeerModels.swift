@@ -160,3 +160,28 @@ protocol PeerTransport: AnyObject, Sendable {
     func setWanted(_ on: Bool)
     var isConnected: Bool { get }
 }
+
+
+// MARK: Run 36a — caps
+
+enum PeerCapsState: Equatable { case yes, no, wait }
+
+/// What a peer's True announced about itself (sealed `caps` payload, persisted per peer in caps.json).
+struct PeerCaps: Codable, Equatable {
+    var version: String
+    var features: [String]
+    var home: String
+
+    static let currentVersion = "1.3"
+    static let ownFeatures = ["watch"]
+    /// How long a peer that never announced caps is given before we say it needs the update.
+    static let unknownGrace: TimeInterval = 60
+
+    static func parse(_ o: [String: Any]) -> PeerCaps? {
+        guard let v = o["version"] as? String, v.count <= 32 else { return nil }
+        let f = ((o["features"] as? [String]) ?? []).prefix(32).filter { $0.count <= 32 }
+        let h = (o["home"] as? String) ?? ""
+        guard h.count <= 1024 else { return nil }
+        return PeerCaps(version: v, features: Array(f), home: h)
+    }
+}
