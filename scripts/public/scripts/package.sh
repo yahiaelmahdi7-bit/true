@@ -61,10 +61,25 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <!-- macOS charges a child process's mic use to the app that launched it; without this key a
        program run inside True that wants the microphone is refused silently, with no prompt. -->
   <key>NSMicrophoneUsageDescription</key><string>Programs you run in True may use the microphone.</string>
+  <!-- Same for Apple Events: osascript run inside True is refused (-1743) with no prompt without this key. -->
+  <key>NSAppleEventsUsageDescription</key><string>Programs you run in True, such as osascript, may control other apps.</string>
 </dict>
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$APP" >/dev/null 2>&1
+# macOS keys every privacy grant (mic, Automation, ...) to the app's designated requirement. Ad-hoc pins it to
+# the binary's hash, so each update reads as a new app and the grants are lost; a certificate keeps them.
+# TRUE_SIGN_IDENTITY (+ optional TRUE_SIGN_KEYCHAIN, TRUE_SIGN_KEYCHAIN_PASSWORD) signs with one; unset = ad-hoc.
+if [ -n "${TRUE_SIGN_IDENTITY:-}" ]; then
+  KC=(); [ -n "${TRUE_SIGN_KEYCHAIN:-}" ] && KC=(--keychain "$TRUE_SIGN_KEYCHAIN")
+  security find-certificate -c "$TRUE_SIGN_IDENTITY" ${TRUE_SIGN_KEYCHAIN:+"$TRUE_SIGN_KEYCHAIN"} >/dev/null 2>&1 \
+    || { echo "ERROR: signing identity '$TRUE_SIGN_IDENTITY' not found; refusing to fall back to ad-hoc." >&2; exit 1; }
+  [ -n "${TRUE_SIGN_KEYCHAIN:-}" ] && { security unlock-keychain -p "${TRUE_SIGN_KEYCHAIN_PASSWORD:-}" "$TRUE_SIGN_KEYCHAIN" >/dev/null 2>&1 || true; }
+  codesign --force --sign "$TRUE_SIGN_IDENTITY" "${KC[@]}" "$APP"
+  SIGNED="signed with '$TRUE_SIGN_IDENTITY'"
+else
+  codesign --force --deep --sign - "$APP" >/dev/null 2>&1
+  SIGNED="ad-hoc signed"
+fi
 codesign --verify --strict "$APP"
-echo "OK: built $APP (ad-hoc signed, version $VERSION, not launched)"
+echo "OK: built $APP ($SIGNED, version $VERSION, not launched)"
