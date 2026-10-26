@@ -159,7 +159,7 @@ final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
 @MainActor enum PeerBuilders {
     static func report(_ records: [BuilderRecord]) {
         for r in records where r.name.hasPrefix("peer-") {
-            PeerService.engine.builderUpdate(name: r.name, running: r.state == .running)
+            PeerService.engine.builderUpdate(name: r.name, running: r.state == .running, dir: r.dir)
         }
     }
 }

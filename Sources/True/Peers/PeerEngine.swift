@@ -45,6 +45,7 @@ final class PeerEngine: @unchecked Sendable {
     private var activitySeq: [String: Int] = [:]
     private var flushScheduled: Set<String> = []
     private var heldSays: [String: [String]] = [:]
+    private var lastErrors: [String: String] = [:]
     private var prompting: Set<UUID> = []
     private var activityCache: [String: [PeerActivityItem]] = [:]
     static let activityKeep = 200
@@ -290,6 +291,12 @@ final class PeerEngine: @unchecked Sendable {
 
     /// Seal a payload to a pinned peer and put it in the outbox.
     @discardableResult
+    /// Whether `payload` seals under the blob cap to this peer (the status is sealed once for real afterwards).
+    private func sealFits(_ payload: [String: Any], to link: PeerLink) -> Bool {
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return false }
+        return PeerSeal.seal(payload: body, now: now(), from: identity, to: link.keys) != nil
+    }
+
     private func sealAndQueue(_ payload: [String: Any], to link: PeerLink, jobId: String? = nil, owner: String?, at: Date? = nil) -> Bool {
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return false }
         let id = UUID().uuidString.lowercased()
@@ -900,11 +907,12 @@ final class PeerEngine: @unchecked Sendable {
     func paneEvent(pane: UUID, kind: PeerEventMap.Kind, message: String = "", tool: String? = nil, detail: String? = nil) {
         lock.lock(); let j = inbound.first { $0.pane == pane && !$0.status.isFinal }; lock.unlock()
         guard let j else { return }
+        if kind == .error { noteError(j.id, message) }
         trackPermissionPrompt(j, kind: kind, tool: tool)
         queueActivity(j, Self.items(kind: kind, message: message, tool: tool, detail: detail, at: now()))
         let exists = FileManager.default.fileExists(atPath: resultPath(j.id))
         guard let s = PeerEventMap.status(kind, resultExists: exists), s != j.status else { return }
-        if s == .done || s == .failed { end(j.id, s, s == .done ? "Finished" : "Hit an error", reportAs: s); return }
+        if s == .done || s == .failed { end(j.id, s, s == .done ? "Finished" : Self.withReason("Hit an error", takeError(j.id)), reportAs: s); return }
         if let u = update(j.id, { $0.status = s; $0.note = s == .working ? "Working" : s == .needsYou ? "Needs you" : "Waiting" }) {
             report(u, s, u.note)
         }
@@ -939,7 +947,7 @@ final class PeerEngine: @unchecked Sendable {
     }
 
     /// Builder state changed (the Hub's builder list). `running == false` means it ended.
-    func builderUpdate(name: String, running: Bool) {
+    func builderUpdate(name: String, running: Bool, dir: String? = nil) {
         lock.lock(); let j = inbound.first { $0.builder == name && !$0.status.isFinal }; lock.unlock()
         guard let j else { return }
         if running {
@@ -949,8 +957,48 @@ final class PeerEngine: @unchecked Sendable {
         } else if FileManager.default.fileExists(atPath: resultPath(j.id)) {
             end(j.id, .done, "Finished", reportAs: .done)
         } else {
-            end(j.id, .failed, "Ended without a result", reportAs: .failed)
+            end(j.id, .failed, Self.withReason("Ended without a result", dir.flatMap { Self.builderFailureReason(dir: $0) }), reportAs: .failed)
         }
+    }
+
+    // MARK: Run 36 — failure reasons
+
+    private func noteError(_ jobId: String, _ message: String) {
+        let m = PeerMask.text(message, limit: 400).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !m.isEmpty else { return }
+        lock.lock(); lastErrors[jobId] = m; lock.unlock()
+    }
+    private func takeError(_ jobId: String) -> String? { lock.lock(); defer { lock.unlock() }; return lastErrors.removeValue(forKey: jobId) }
+
+    /// "Hit an error: <reason>" — the reason masked and ≤ 400 chars, the whole note within `maxNote`.
+    static func withReason(_ base: String, _ reason: String?) -> String {
+        guard let r = reason?.trimmingCharacters(in: .whitespacesAndNewlines), !r.isEmpty else { return base }
+        return String("\(base): \(PeerMask.text(r, limit: 400))".prefix(PeerValidate.maxNote))
+    }
+
+    /// Why a builder failed: its last `is_error` result in stream.jsonl, else the last 3 lines of stderr.log.
+    static func builderFailureReason(dir: String) -> String? {
+        let d = URL(fileURLWithPath: dir)
+        func tailText(_ name: String, _ bytes: UInt64) -> String? {
+            guard let h = try? FileHandle(forReadingFrom: d.appendingPathComponent(name)) else { return nil }
+            defer { try? h.close() }
+            let size = (try? h.seekToEnd()) ?? 0
+            try? h.seek(toOffset: size > bytes ? size - bytes : 0)
+            return String(decoding: (try? h.readToEnd()) ?? Data(), as: UTF8.self)
+        }
+        if let text = tailText("stream.jsonl", 65_536) {
+            for raw in text.split(separator: "\n").reversed() {
+                guard let o = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any],
+                      o["type"] as? String == "result", o["is_error"] as? Bool == true else { continue }
+                if let r = o["result"] as? String, !r.isEmpty { return r }
+                if let sub = o["subtype"] as? String { return sub }
+            }
+        }
+        if let err = tailText("stderr.log", 8_192) {
+            let lines = err.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            if !lines.isEmpty { return lines.suffix(3).joined(separator: " ") }
+        }
+        return nil
     }
 
     // MARK: receiver — finishing
@@ -958,6 +1006,7 @@ final class PeerEngine: @unchecked Sendable {
     private func end(_ jobId: String, _ status: PeerStatus, _ note: String, reportAs: PeerStatus, startNext: Bool = true) {
         guard let u = update(jobId, { $0.status = status; $0.note = note; $0.finished = now() }) else { return }
         var final = u
+        lock.lock(); lastErrors[jobId] = nil; lock.unlock()
         if status == .done, u.req.hasRepo, let wt = u.worktree, let sha = launcher.headSHA(worktree: wt) {
             final = update(jobId) { $0.sha = sha } ?? u
         }
@@ -975,7 +1024,20 @@ final class PeerEngine: @unchecked Sendable {
         if s == .done {
             if let sha = j.sha { o["sha"] = sha }
             if let d = try? Data(contentsOf: URL(fileURLWithPath: resultPath(j.id))) {
-                o["result"] = String(String(decoding: d.prefix(PeerValidate.maxResult * 2), as: UTF8.self).prefix(PeerValidate.maxResult))
+                // Run 36: read a little over the cap so a cut mid-character still lands on a whole one, then clip by UTF-8 bytes.
+                let text = String(decoding: d.prefix(PeerValidate.maxResult + 4), as: UTF8.self)
+                let full = d.count > PeerValidate.maxResult || text.utf8.count > PeerValidate.maxResult
+                var r = PeerValidate.clipBytes(text, PeerValidate.maxResult)
+                o["result"] = full ? r + PeerValidate.cutNote : r
+                // The sealed status must fit PeerSeal.maxBlob (JSON escaping can double the size): cut further until it does.
+                if let link = link(j.peerMailbox) {
+                    var tries = 0
+                    while tries < 12, !sealFits(o, to: link) {
+                        r = PeerValidate.clipBytes(r, r.utf8.count * 3 / 4)
+                        o["result"] = r + PeerValidate.cutNote
+                        tries += 1
+                    }
+                }
             }
         }
         queueActivity(j, [PeerActivityItem(t: Int(now().timeIntervalSince1970), kind: .status, text: PeerMask.text("\(s.rawValue): \(note)"))], final: s == .done || s == .failed)
