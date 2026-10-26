@@ -1055,3 +1055,24 @@ Mahmoud delegates two jobs on finance-director-os back to back; Yahia's True ope
 - Desk panes (PeerOrigin label) never get an interrupted mark at capture, so they resume quietly.
 - If Claude was missed at close, capture follows `SessionRecorder.decide` and logs "undo-close: no claude found".
 - `WorkspaceModel`'s default `closed` stack is a throwaway temp one; `.shared` uses `ClosedStack.standard` + `load()`. `ClosedReopen.waitForExit` is `@MainActor` (Sendable error otherwise).
+
+## Missions M1 — Bulletproof jobs
+
+**Why.** Peer jobs die quietly. On the real Macs (sent.json / inbound.json, 2026-10-27) jobs failed on "No local clone", on a repo that would not fetch, on a path that only exists on the sender's Mac, and when True quit or Claude hit its usage limit mid-job; each ended `failed` with nothing to resume. M1 makes a job survive: it pauses instead of failing, resumes the same Claude session, and refuses early (before sending) what can never work.
+
+**States.** Two new `PeerStatus` values: `paused` (usage limit, or True quit/crashed; carries a reason and a `resumeAt` in the receiver's clock) and `canceled` (sender stopped it; not a failure). On the wire a True without the new states reads `paused` as `working` and `canceled` as `failed`; one decoder table, and a sender never sends `paused` to a peer whose Card version predates M1. `idle` stays `idle` on the wire.
+
+**Stop causes.** Usage limit → `paused` until the reset time (30 min and "reset time unknown" if unparseable). True quit/crash → `paused`, resumes on launch. Claude error → resume; after 3 resumes → `failed` with the last error. Sender stop → `canceled`. Receiver offline → stays `working`, sender shows it.
+
+**Duplicates.** A job message whose id the receiver already holds is dropped, as before. To nudge or restart a job the sender sends a sealed resume request `{jobId}` (only the job's own sender). Per state: `paused` → resume now; `needsYou` from a failed accept check → re-run the check then start; waiting on an answer or `idle` → re-send status; unknown id → reply "unknown job", sender marks it failed with Retry. A deliberate retry is a new job with `retryOf`, inheriting the session id.
+
+**Card.** Existing caps gain optional `kinds`, `repos` (SHA-256 of the normalized remote URL), `lanes {total, free}`, `tools {gh, vercel, wrangler, docker}` (yes/no only). A Card older than 10 min is stale.
+
+**Preflight vs queue.** Sender refuses with a plain reason and fix, sending nothing: repo not in a fresh Card and not shared; a sender-Mac path in the job; peer too old for the job kind. Peer offline or Card stale → queue (outbox) as today.
+
+**Accept check.** Receiver, before starting: repo fetch and allowed directory. Failure → `needsYou` with the reason, not `failed`; the sender fixes it and sends a resume request.
+
+**Lanes.** Desk key `(peer, project)` becomes `(peer, project, lane)`. Lane 1 is today's desk (same key, same worktree), lane n ≥ 2 uses key `…|n` and worktree `desk-n`. A job for a branch a lane already holds goes to that lane; otherwise first free lane; otherwise waits. Git ops on one clone run under one lock. `peer.lanes` (default 2, 1–4), set with `true-peer lanes <n>`.
+
+### Deviations (builder)
+- **M1.0 spike.** Background jobs: the first `{"type":"system","subtype":"init"}` line of `claude -p --output-format stream-json --verbose` output carries `session_id` (confirmed with the real CLI in a temp dir). `claude -p … --resume <id>` printed an `init` line with the same `session_id` (resume continues the same session): works for background jobs. Pane/desk jobs: the pane's session id is stored by `PaneResume` (`.claude(sessionID:cwd:mode:)`) and `ClaudeSessions.read` (`<claudeConfigDir>/sessions/<pid>.json`, field `sessionId`); read from code, not re-run live (3-run budget).
