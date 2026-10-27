@@ -139,6 +139,29 @@ struct MissionJobProgress: Codable, Equatable {
     var launchKey: String?
     var mergeBlocked = false
     var fixRounds = 0
+    /// The job branch head the last status saw, and the head whose merge check failed (short SHA).
+    var head: String?
+    var failedHead: String?
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case state, reason, destination, attempt, launchKey, mergeBlocked, fixRounds, head, failedHead
+    }
+
+    /// A state file written before a field existed must still load with today's default.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        state = try c.decodeIfPresent(MissionJobState.self, forKey: .state) ?? .waiting
+        reason = try c.decodeIfPresent(String.self, forKey: .reason) ?? ""
+        destination = try c.decodeIfPresent(MissionDestination.self, forKey: .destination)
+        attempt = try c.decodeIfPresent(Int.self, forKey: .attempt) ?? 0
+        launchKey = try c.decodeIfPresent(String.self, forKey: .launchKey)
+        mergeBlocked = try c.decodeIfPresent(Bool.self, forKey: .mergeBlocked) ?? false
+        fixRounds = try c.decodeIfPresent(Int.self, forKey: .fixRounds) ?? 0
+        head = try c.decodeIfPresent(String.self, forKey: .head)
+        failedHead = try c.decodeIfPresent(String.self, forKey: .failedHead)
+    }
 }
 
 struct MissionLaunch {
@@ -153,6 +176,15 @@ struct MissionLaunch {
 struct MissionJobStatus {
     var state: MissionJobState
     var reason: String = ""
+    /// The branch head the launcher last saw for this job (short SHA); nil when it has none.
+    var head: String? = nil
+}
+
+/// The fix-round prompt for a worker whose merge check failed. `note` is the check output tail or rebase reason.
+enum MissionFixPrompt {
+    static func resume(note: String, branch: String) -> String {
+        "The merge check failed:\n\(note)\nFix it and push to \(branch) again."
+    }
 }
 
 /// The key is persisted before calling start. Implementations must recover an existing launch by key.
@@ -297,7 +329,13 @@ final class MissionRunner {
             var p = jobs[job.title]!
             guard ([.starting, .running].contains(p.state) || (p.state == .needsYou && !p.mergeBlocked)), let key = p.launchKey, let destination = p.destination else { continue }
             if let status = launcher.status(key: key, at: destination) {
-                p.state = status.state; p.reason = status.reason
+                p.head = status.head
+                if status.state == .completed, let failed = p.failedHead, status.head == failed {
+                    // The old red head is still there: the fix round hasn't produced a new head yet. No gate call, no round.
+                    p.state = .running
+                } else {
+                    p.state = status.state; p.reason = status.reason
+                }
             } else {
                 p.state = .needsYou; p.reason = "Couldn't confirm whether the job started"
             }
@@ -314,7 +352,7 @@ final class MissionRunner {
                     answer = .inputRequired("Couldn't merge the job")
                 }
                 switch answer {
-                case .merged: p.state = .merged; p.reason = ""; p.mergeBlocked = false
+                case .merged: p.state = .merged; p.reason = ""; p.mergeBlocked = false; p.failedHead = nil
                 case .inputRequired(let reason): p.state = .needsYou; p.reason = reason; p.mergeBlocked = true
                 case .fix(let note):
                     if p.fixRounds >= 2 {
@@ -322,6 +360,7 @@ final class MissionRunner {
                         p.state = .needsYou; p.reason = note; p.mergeBlocked = true
                     } else {
                         p.fixRounds += 1
+                        p.failedHead = p.head
                         p.reason = ""; p.mergeBlocked = false
                         p.state = .running
                         try update(job.title, p) // durable intent BEFORE the resume side effect, so a replay never resumes twice
@@ -419,6 +458,7 @@ final class MissionRunner {
                 guard [.failed, .declined, .canceled].contains(status.state) else { return }
             }
             p.attempt += 1; p.launchKey = nil; p.destination = nil; p.state = .waiting; p.reason = ""
+            p.head = nil; p.failedHead = nil
         }
         try update(title, p); try reconcile()
     }
@@ -468,7 +508,7 @@ final class MissionPeerLauncher: MissionJobLauncher {
     }
     func resume(_ launch: MissionLaunch, at destination: MissionDestination) throws {
         guard let job = existing(launch.key) else { throw MissionLaunchError.refused("Couldn't find the job") }
-        if case .failure(let error) = engine.resumeJob(jobId: job.jobId) { throw error }
+        if case .failure(let error) = engine.resumeJob(jobId: job.jobId, note: launch.note) { throw error }
     }
     func status(key: String, at destination: MissionDestination) -> MissionJobStatus? {
         guard let job = existing(key) else { return nil }
@@ -481,7 +521,7 @@ final class MissionPeerLauncher: MissionJobLauncher {
         case .needsYou, .idle: state = .needsYou
         default: state = .running
         }
-        return MissionJobStatus(state: state, reason: job.note)
+        return MissionJobStatus(state: state, reason: job.note, head: job.sha)
     }
     func stop(key: String, at destination: MissionDestination) throws {
         guard let job = existing(key), !job.status.isFinal else { return }
@@ -509,15 +549,16 @@ final class MissionLocalLauncher: MissionJobLauncher {
         guard let record = records().first(where: { $0.name == launch.key }), !record.sessionID.isEmpty else {
             throw MissionLaunchError.refused("Couldn't find the session")
         }
+        let prompt = launch.note.map { MissionFixPrompt.resume(note: $0, branch: launch.branch) } ?? "Continue from where you stopped."
         if let reason = platform.launchBackground(agentName: launch.key, parent: "mission", cwd: record.cwd,
-                                                   prompt: "Continue from where you stopped.", resumeSession: record.sessionID) {
+                                                   prompt: prompt, resumeSession: record.sessionID) {
             throw MissionLaunchError.refused(reason)
         }
     }
     func status(key: String, at destination: MissionDestination) -> MissionJobStatus? {
         guard let record = records().first(where: { $0.name == key }) else { return nil }
         switch record.state {
-        case .done, .landed: return MissionJobStatus(state: .completed)
+        case .done, .landed: return MissionJobStatus(state: .completed, head: platform.headSHA(worktree: record.worktree ?? record.cwd))
         case .failed, .died, .unlanded: return MissionJobStatus(state: .failed, reason: "Background job failed")
         case .killed: return MissionJobStatus(state: .canceled, reason: "Stopped by sender")
         case .held, .paused: return MissionJobStatus(state: .needsYou, reason: record.landReason ?? record.waitReason ?? "Job needs your help")
