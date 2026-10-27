@@ -1,0 +1,58 @@
+id = "peers-u0"
+repo = "/Users/y/Projects/true"
+lane = "codex"
+budget_usd = 10
+max_attempts = 3
+autonomy = "low"
+goal = '''
+Peers M1 follow-up (unit U0): peer jobs pause and resume instead of failing, and a peer's Card stays fresh.
+Spec: docs/designs/peer-missions.md "Approach — M1 Bulletproof jobs"; docs/designs/peers-foundry-run.md (U0 row and the paragraph after "Lanes").
+
+A. Builder state passes through (background jobs).
+Today PeerBuilders.updates (Sources/True/Peers/PeerLauncherLive.swift:176-184) collapses builder state to running:Bool via
+BuilderState.isLive (Sources/True/Hub/HubModel.swift:75-81; BuilderRecord has waitReason/resumeAt ~:115,144), and
+PeerEngine.builderUpdate (Sources/True/Peers/PeerEngine.swift:1126) only pauses when a FINISHED builder's reason is a usage
+limit, then arms its own resume timer (pause() :1152). Build:
+1. Pass the real builder state through. A `waiting` builder makes the InboundJob `paused`, pausedReason in plain words,
+   resumeAt from the builder record ("reset time unknown" when nil).
+2. A builder-owned pause is resumed by builder keep, never by the engine (no engine timer; on True launch leave it alone).
+   Back to `working` once when the builder runs again (one report, not one per poll).
+3. Engine-owned pauses (pane jobs; a background builder that finished on a limit) keep working as today: the engine
+   resumes once at resumeAt.
+4. Resume is idempotent: two triggers at once start one session; True restarted while paused resumes once; builder keep
+   and the engine never both resume the same job.
+5. After a background job is resumed, progress from the resumed builder's stream still reaches the sender (today the
+   old stream tailer may be kept; add a test, fix if it fails).
+
+B. Pane jobs pause instead of failing.
+Today a pane error event ends the job as failed (Sources/True/Peers/PeerEngine.swift:1079); only the background path pauses.
+6. A pane job whose Claude hits a usage limit goes `paused` with resumeAt from the limit text (PeerResume.resumeTime), and is
+   resumed once on the SAME session via launchPane(resumeSession:) when resumeAt comes. The job message is never re-sent.
+7. Any other pane error resumes on the same session, up to PeerResume.maxResumes; after that the job is `failed` with the
+   last error line in plain words.
+
+C. The Card stays fresh.
+Today a Card goes out only when the transport comes up (PeerEngine.swift:117) and counts as stale after
+PeerCaps.staleAfter = 600 s (Sources/True/Peers/PeerModels.swift:229). Ten minutes after connecting, the sender's preflight
+(PeerEngine.swift:530-540) can no longer refuse "no clone": the job goes out and sticks in needsYou on the receiver.
+8. While connected, each engine re-sends its own Card before the peer's copy can go stale (at most every staleAfter/2), and
+   as soon as its clone list or other Card fields change. Use the engine's injected `scheduler` and `now` (never a real
+   Timer or Date()), so tests with fake clocks see it. A Card message must not reset or disturb job state.
+
+Rules: tests go in existing Peer* test files (PeerEngineTests, PeerMissionsM1Tests, PeerBuildersTests, PeerCapsTests), not new suites. Don't edit any file
+named in the checks. Keep all user-facing reasons plain, short, no ids or file:line. No UI restyling.
+'''
+
+[[check]]
+id = "peer"
+kind = "cmd"
+cmd = "swift test --filter Peer"
+expect_exit = 0
+timeout_s = 2400
+
+[[check]]
+id = "drill-m1"
+kind = "cmd"
+cmd = "sh .claude/foundry/peers/drill-m1.sh Tests/TrueTests/PeersDrillM1Tests.swift"
+expect_exit = 0
+timeout_s = 2400
