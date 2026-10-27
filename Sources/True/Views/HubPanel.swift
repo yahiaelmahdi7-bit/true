@@ -245,6 +245,7 @@ struct HubPanelContent: View {
     var onRetry: ((HubTile) -> Void)?
     @State private var jump: String?
     @State private var showBacklog = false
+    @State private var workFilter: HubFilter = .all
     @State private var openTile: HubTile?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -258,6 +259,7 @@ struct HubPanelContent: View {
         let buckets = filter == .all ? self.buckets : []
         VStack(spacing: 0) {
             header(buckets)
+                .onChange(of: filter) { _, new in if new != .chat { workFilter = new } }
             if filter == .chat {
                 ChatView(roster: allSeats.map(\.name))
             } else if filter == .crew {
@@ -339,21 +341,38 @@ struct HubPanelContent: View {
             }
             .layoutPriority(1)
             Spacer(minLength: 8)
-            Picker("Show", selection: $filter) {
-                Text("All").tag(HubFilter.all)
-                Text("Agents").tag(HubFilter.seats)
-                Text("Crew").tag(HubFilter.crew)
-                Text("Chat").tag(HubFilter.chat)
+            Picker("View", selection: Binding(
+                get: { HubView(filter: filter) },
+                set: { filter = $0.filter(workFilter: workFilter) })) {
+                Text("Work").tag(HubView.work)
+                Text("Chat").tag(HubView.chat)
             }
-            .pickerStyle(.segmented).labelsHidden().frame(width: 250)
-            .accessibilityLabel("Show")
-            .accessibilityHint("All: everything running and your agents. Agents: only your agents. Crew: specialists Claude can call in.")
+            .pickerStyle(.segmented).labelsHidden().frame(width: 150)
+            .accessibilityLabel("View")
+            .accessibilityHint("Work: what needs you and what is running. Chat: talk to Claude.")
+            if filter != .chat { filterMenu }
             if filter == .all { backlogButton(buckets) }
-            if filter == .all { headerButton("icloud.and.arrow.up", help: "Run in cloud", hint: "Sends a repo and a prompt to the cloud factory", action: onRunCloud) }
-            headerButton("plus", help: "New Agent", hint: "Opens the agent builder", action: onNew)
+            headerButton("plus", help: "New", hint: "Starts a new job in the cloud", action: onNew)
             headerButton("xmark", help: "Close (Esc)", hint: "Closes the Hub", action: onClose)
         }
         .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 14)
+    }
+
+    /// All / Agents / Crew live here, inside Work.
+    private var filterMenu: some View {
+        Menu {
+            Picker("Filter", selection: $filter) {
+                Text("All").tag(HubFilter.all)
+                Text("Agents").tag(HubFilter.seats)
+                Text("Crew").tag(HubFilter.crew)
+            }
+        } label: {
+            Label(filter == .seats ? "Agents" : filter == .crew ? "Crew" : "All", systemImage: "line.3.horizontal.decrease")
+                .font(.callout).foregroundStyle(Theme.dimText)
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+        .accessibilityLabel("Filter")
+        .accessibilityHint("Show everything, only your agents, or the crew.")
     }
 
     /// "Backlog 144": a count, never rows on the board. Opens the backlog's own view; tapping again goes back.
