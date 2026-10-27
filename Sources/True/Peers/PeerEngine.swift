@@ -1420,7 +1420,7 @@ final class PeerEngine: @unchecked Sendable {
 
     private func handleResume(_ obj: [String: Any], from mailbox: String) {
         guard let id = obj["jobId"] as? String else { drop("resume payload"); return }
-        let note = obj["note"] as? String
+        let note = (obj["note"] as? String).map { PeerMask.text($0, limit: PeerValidate.maxNote) }
         guard let j = inboundJob(id, from: mailbox) else {
             if let l = link(mailbox) {
                 sealAndQueue(["t": "event", "jobId": id, "status": PeerStatus.failed.rawValue, "note": "\(ownName) has no record of this job"], to: l, owner: l.mailboxId)
@@ -1437,8 +1437,9 @@ final class PeerEngine: @unchecked Sendable {
                 if let p = j.pane { _ = launcher.deliverToPane(p, line: "Finish the job and write result.md") }
                 else if let b = j.builder { launcher.deliverLine(agent: b, line: "Finish the job and write result.md") }
                 report(j, j.status, j.note)
-            case .done, .failed where note != nil:
-                performFixResume(id, note: note!)
+            case .done, .failed:
+                // Only a note-carrying resume (a fix round) re-opens a finished job; a plain one just reports as before.
+                if let note { performFixResume(id, note: note) } else { report(j, j.status, j.note) }
             default: report(j, j.status, j.note)
             }
         }
