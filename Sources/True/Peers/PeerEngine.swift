@@ -1365,6 +1365,41 @@ final class PeerEngine: @unchecked Sendable {
         changed()
     }
 
+    /// A fix round: re-open a finished peer job's own session with the sender's note in the prompt, so the worker fixes
+    /// the merge and pushes again. Without a session/worktree there is nothing to resume, so it just reports as before.
+    private func performFixResume(_ jobId: String, note: String) {
+        resumeLock.lock(); defer { resumeLock.unlock() }
+        lock.lock(); let cur = inbound.first { $0.id == jobId }; lock.unlock()
+        guard let j = cur, j.status.isFinal else { return }
+        guard let sid = sessionFor(j), let wt = j.worktree else { report(j, j.status, j.note); return }
+        stopTailer(jobId)
+        if let old = j.pane, launcher.paneAlive(old) { launcher.stop(panes: [old], builders: []) }
+        let dir = jobDir(jobId)
+        let prompt = MissionFixPrompt.resume(note: note, branch: j.branch)
+        let n = (j.resumes ?? 0) + 1
+        var pane: UUID?, builder: String?
+        if j.desk != nil {
+            pane = launcher.launchPane(agentName: PeerNaming.deskAgentName(label: j.peerLabel, project: PeerNaming.deskProject(j.desk ?? "")), label: j.peerLabel, cwd: wt, flags: j.inboundMode.claudeFlags,
+                                       rolePath: dir.appendingPathComponent("role.md").path, firstPrompt: prompt, resumeSession: sid)
+            if pane == nil { report(j, j.status, j.note); return }
+        } else if j.builder != nil {
+            let name = launcher.keepsBuilderOnResume ? (j.builder ?? PeerNaming.agentName(label: j.peerLabel, jobId: jobId)) : PeerNaming.agentName(label: j.peerLabel, jobId: jobId) + "-r\(n)"
+            if let run = j.builderRun { _ = update(jobId) { $0.builderRun = run + 1 } }
+            if let err = launcher.launchBackground(agentName: name, parent: PeerNaming.parentName(label: j.peerLabel), cwd: wt, prompt: prompt, resumeSession: sid) {
+                report(j, j.status, j.note); return
+            }
+            builder = name
+        } else {
+            pane = launcher.launchPane(agentName: PeerNaming.agentName(label: j.peerLabel, jobId: jobId), label: j.peerLabel, cwd: wt, flags: j.inboundMode.claudeFlags,
+                                       rolePath: dir.appendingPathComponent("role.md").path, firstPrompt: prompt, resumeSession: sid)
+            if pane == nil { report(j, j.status, j.note); return }
+        }
+        if let u = update(jobId, { $0.status = .working; $0.note = "Resumed"; $0.sessionId = sid; $0.resumes = n; $0.finished = nil; $0.builderOwnsPause = nil; $0.pausedReason = nil; $0.resumeAt = nil; $0.pane = pane; $0.builder = builder ?? $0.builder }) {
+            report(u, .working, "Resumed")
+        }
+        changed()
+    }
+
     /// Launch: a job whose tab is gone (True quit or crashed) pauses, then resumes at once.
     func recoverInterrupted() {
         resumeLock.lock(); defer { resumeLock.unlock() }
@@ -1385,6 +1420,7 @@ final class PeerEngine: @unchecked Sendable {
 
     private func handleResume(_ obj: [String: Any], from mailbox: String) {
         guard let id = obj["jobId"] as? String else { drop("resume payload"); return }
+        let note = obj["note"] as? String
         guard let j = inboundJob(id, from: mailbox) else {
             if let l = link(mailbox) {
                 sealAndQueue(["t": "event", "jobId": id, "status": PeerStatus.failed.rawValue, "note": "\(ownName) has no record of this job"], to: l, owner: l.mailboxId)
@@ -1401,18 +1437,34 @@ final class PeerEngine: @unchecked Sendable {
                 if let p = j.pane { _ = launcher.deliverToPane(p, line: "Finish the job and write result.md") }
                 else if let b = j.builder { launcher.deliverLine(agent: b, line: "Finish the job and write result.md") }
                 report(j, j.status, j.note)
+            case .done, .failed where note != nil:
+                performFixResume(id, note: note!)
             default: report(j, j.status, j.note)
             }
         }
     }
 
-    /// Sender side: ask the peer to pick a stuck job back up.
-    func resumeJob(jobId: String) -> Result<Void, PeerError> {
+    /// Sender side: ask the peer to pick a stuck job back up. A `note` makes it a fix round: the sealed "resume" carries
+    /// the note and a finished (.done) job is accepted so the receiver can re-run its session with the note in the prompt.
+    func resumeJob(jobId: String, note: String? = nil) -> Result<Void, PeerError> {
         lock.lock(); let job = sent.first { $0.jobId == jobId }; lock.unlock()
         guard let job else { return .failure(.invalid("No job \(jobId)")) }
-        guard !job.status.isFinal || job.status == .failed else { return .failure(.invalid("That job has already ended")) }
+        let fixRound = note != nil
+        guard !job.status.isFinal || job.status == .failed || (fixRound && job.status == .done) else {
+            return .failure(.invalid("That job has already ended"))
+        }
         guard let l = link(job.peerMailbox) else { return .failure(.invalid("That peer was removed")) }
-        sealAndQueue(["t": "resume", "jobId": jobId], to: l, jobId: jobId, owner: l.mailboxId)
+        var payload: [String: Any] = ["t": "resume", "jobId": jobId]
+        if let note { payload["note"] = PeerMask.text(note, limit: PeerValidate.maxNote) }
+        sealAndQueue(payload, to: l, jobId: jobId, owner: l.mailboxId)
+        if fixRound {
+            // The peer is about to re-open a finished job, so the sender must accept its next events again.
+            lock.lock()
+            if let s = sent.firstIndex(where: { $0.jobId == jobId }), sent[s].status == .done {
+                sent[s].status = .working; sent[s].note = "Resuming"; sent[s].updated = now(); saveSent()
+            }
+            lock.unlock()
+        }
         return .success(())
     }
 
