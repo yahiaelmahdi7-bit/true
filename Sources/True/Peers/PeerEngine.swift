@@ -60,11 +60,13 @@ final class PeerEngine: @unchecked Sendable {
     private var caps: [String: PeerCaps]
     private var cardSnapshot: Data?
     private var cardSentAt: Date?
+    private var cardHeartbeatArmed = false
+    private let cardRefreshLock = NSLock()
     private var cardRefreshArmed = false
+    private var cloneHashes: [String] = []
     private var capsFirstAsked: [String: Date] = [:]
     /// Our home directory, announced to peers in caps; tests set another one.
     var home = NSHomeDirectory() { didSet { cardChanged() } }
-    private var cardSettingsObserver: NSObjectProtocol?
     private var prompting: Set<UUID> = []
     private var activityCache: [String: [PeerActivityItem]] = [:]
     static let activityKeep = 200
@@ -119,21 +121,20 @@ final class PeerEngine: @unchecked Sendable {
         transport.onMessage = { [weak self] _, _, blob in self?.receive(blob) }
         transport.onStatus = { [weak self] up in
             guard let self else { return }
-            if up { self.sendCapsToAll(); self.flush() }
+            if up {
+                self.work.async { [weak self] in
+                    self?.refreshCloneCache(); self?.refreshCard(); self?.flush()
+                }
+            }
             self.armCardRefresh()
             self.changed()
         }
         for i in invites { scheduleWantedCheck(at: i.expires) }
+        if transport.isConnected { refreshCloneCache() }
         updateWanted()
-        launcher.observeCardChanges { [weak self] in self?.cardChanged() }
-        cardSettingsObserver = NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: nil) { [weak self] _ in self?.cardChanged() }
         armCardRefresh()
         if !outbox.isEmpty { net.async { [self] in pump() } }
         work.async { [weak self] in self?.recoverInterrupted() }
-    }
-
-    deinit {
-        if let cardSettingsObserver { NotificationCenter.default.removeObserver(cardSettingsObserver) }
     }
 
     static var standardRoot: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".true/peers", isDirectory: true) }
@@ -189,7 +190,18 @@ final class PeerEngine: @unchecked Sendable {
         NotificationCenter.default.post(name: .peersChanged, object: nil)
     }
 
-    private func cardChanged() { work.async { [weak self] in self?.refreshCard() } }
+    private func cardChanged() {
+        // update() can call this while holding the job lock.
+        cardRefreshLock.lock()
+        guard !cardRefreshArmed else { cardRefreshLock.unlock(); return }
+        cardRefreshArmed = true
+        cardRefreshLock.unlock()
+        work.async { [weak self] in
+            guard let self else { return }
+            self.cardRefreshLock.lock(); self.cardRefreshArmed = false; self.cardRefreshLock.unlock()
+            self.refreshCard()
+        }
+    }
 
     /// One line per finished inbound job. Brief TEXT is never here — only its hash.
     private func log(_ j: InboundJob) {
@@ -455,6 +467,8 @@ final class PeerEngine: @unchecked Sendable {
                 changed(); return
             }
             addShare(SharedRepo(url: o.url, path: path, slug: slug), peer: o.peerMailbox)
+            refreshCloneCache()
+            cardChanged()
             _ = setOffer(id) { $0.status = .accepted }
             if let l = link(o.peerMailbox) { sealAndQueue(["t": "offer", "id": id, "ack": true, "slug": slug], to: l, owner: l.mailboxId) }
             changed()
@@ -490,12 +504,18 @@ final class PeerEngine: @unchecked Sendable {
 
     // MARK: caps (Run 36a)
 
-    /// What this True announces: `watch` = activity only while a lease is held.
-    /// Missions M1 adds the Card: job kinds, hashed repos, lane counts, tools present (yes/no only).
+    private func refreshCloneCache() {
+        // Accepted clones live under .peers, outside the launcher's ordinary repo scan.
+        let shared = sharedRepos().values.flatMap { $0 }.filter { !$0.path.isEmpty }.map { $0.url }
+        let hashes = Array(Set((launcher.cloneRemotes() + shared).compactMap { PeerRepo.hash($0) })).sorted()
+        lock.lock(); cloneHashes = hashes; lock.unlock()
+    }
+
+    /// What this True announces: job kinds, cached clone hashes, lanes, tools and home.
     func ownCaps() -> [String: Any] {
-        let hashes = Array(Set(launcher.cloneRemotes().compactMap { PeerRepo.hash($0) })).sorted()
         let total = lanes()
         lock.lock()
+        let hashes = cloneHashes
         let busy = Set(inbound.filter { !$0.status.isFinal && $0.desk != nil && $0.pane != nil }.map { "\($0.desk ?? "")|\($0.lane ?? 1)" }).count
         lock.unlock()
         return ["t": "caps", "version": PeerCaps.currentVersion, "features": PeerCaps.ownFeatures, "home": home,
@@ -503,37 +523,36 @@ final class PeerEngine: @unchecked Sendable {
                 "tools": launcher.installedTools()]
     }
 
-    func sendCapsToAll() {
+    func sendCapsToAll(heartbeatDue: Bool = false) {
         guard transport.isConnected else { return }
         let card = ownCaps()
         lock.lock()
         let ls = links.filter { $0.confirmed }
-        cardSnapshot = try? JSONSerialization.data(withJSONObject: card, options: [.sortedKeys])
+        let snapshot = try? JSONSerialization.data(withJSONObject: card, options: [.sortedKeys])
+        let due = heartbeatDue || snapshot != cardSnapshot || cardSentAt.map { now().timeIntervalSince($0) >= PeerCaps.staleAfter / 2 } ?? true
+        guard due else { lock.unlock(); return }
+        cardSnapshot = snapshot
         cardSentAt = now()
         lock.unlock()
         for l in ls { sealAndQueue(card, to: l, owner: l.mailboxId) }
         armCardRefresh()
     }
 
-    /// File and settings changes publish immediately; the heartbeat keeps an unchanged Card fresh.
-    private func refreshCard() {
-        guard transport.isConnected else { return }
-        let snapshot = try? JSONSerialization.data(withJSONObject: ownCaps(), options: [.sortedKeys])
-        lock.lock()
-        let due = snapshot != cardSnapshot || cardSentAt.map { now().timeIntervalSince($0) >= PeerCaps.staleAfter / 2 } ?? true
-        lock.unlock()
-        if due { sendCapsToAll() }
-    }
+    /// Status changes are cheap; only the heartbeat rescans local clones.
+    private func refreshCard() { sendCapsToAll() }
 
     private func armCardRefresh() {
         lock.lock()
-        guard transport.isConnected, !cardRefreshArmed else { lock.unlock(); return }
-        cardRefreshArmed = true
+        guard transport.isConnected, !cardHeartbeatArmed else { lock.unlock(); return }
+        cardHeartbeatArmed = true
         lock.unlock()
         scheduler(PeerCaps.staleAfter / 2) { [weak self] in
             guard let self else { return }
-            self.lock.lock(); self.cardRefreshArmed = false; self.lock.unlock()
-            self.work.async { [weak self] in self?.sendCapsToAll(); self?.armCardRefresh() }
+            self.lock.lock(); self.cardHeartbeatArmed = false; self.lock.unlock()
+            self.work.async { [weak self] in
+                guard let self, self.transport.isConnected else { return }
+                self.refreshCloneCache(); self.sendCapsToAll(heartbeatDue: true); self.armCardRefresh()
+            }
         }
     }
     private func sendCaps(to link: PeerLink) { sealAndQueue(ownCaps(), to: link, owner: link.mailboxId) }
@@ -1302,6 +1321,9 @@ final class PeerEngine: @unchecked Sendable {
         let n = (j.resumes ?? 0) + 1
         guard n <= PeerResume.maxResumes else { end(jobId, .failed, Self.withReason("Stopped after \(PeerResume.maxResumes) restarts", j.pausedReason), reportAs: .failed); return }
         stopTailer(jobId)
+        // StopFailure leaves Claude alive. Close that tab while the job is still paused,
+        // before a second process can resume the same session.
+        if let old = j.pane, launcher.paneAlive(old) { launcher.stop(panes: [old], builders: []) }
         let dir = jobDir(jobId)
         var pane: UUID?, builder: String?
         if j.desk != nil {

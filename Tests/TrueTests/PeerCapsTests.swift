@@ -43,15 +43,19 @@ import Foundation
         let (a, b, clock) = rig(); defer { a.close(); b.close() }
         b.knobs.lanes = 3
         b.launcher.remotes.append("https://github.com/acme/new.git")
-        settle(a, b)
+        clock.t = clock.t.addingTimeInterval(PeerCaps.staleAfter / 2)
+        b.delays.fireDue(clock); settle(a, b)
         let card = try #require(a.engine.peerCaps(b.identity.mailboxId))
         #expect(card.repos.contains(try #require(PeerRepo.hash("https://github.com/acme/new"))))
         #expect(card.lanesTotal == 3)
+        let scans = b.launcher.cloneRemoteCalls
         b.transport.setOnline(false); settle(a, b)
         let before = a.engine.peerCaps(b.identity.mailboxId)?.updated
         clock.t = clock.t.addingTimeInterval(600); b.delays.fireDue(clock); settle(a, b)
         #expect(a.engine.peerCaps(b.identity.mailboxId)?.updated == before)
+        #expect(b.launcher.cloneRemoteCalls == scans)
         b.transport.setOnline(true); settle(a, b)
+        #expect(b.launcher.cloneRemoteCalls == scans + 1)
         #expect(a.engine.peerCaps(b.identity.mailboxId)?.updated == clock.now())
     }
 
@@ -63,6 +67,62 @@ import Foundation
         clock.t = clock.t.addingTimeInterval(1)
         b.delays.fireDue(clock); settle(a, b)
         #expect(a.engine.peerCaps(b.identity.mailboxId)?.updated == clock.now())
+    }
+
+    final class CardTap: @unchecked Sendable {
+        let lock = NSLock()
+        private var cards: [PeerCaps] = []
+        func add(_ card: PeerCaps) { lock.lock(); cards.append(card); lock.unlock() }
+        var all: [PeerCaps] { lock.lock(); defer { lock.unlock() }; return cards }
+    }
+
+    @Test func statusChangesDoNotScanClonesAndOnlyLaneChangesSendCards() throws {
+        let (a, b, clock) = rig(); defer { a.close(); b.close() }
+        b.knobs.desk = true
+        let tap = CardTap()
+        a.transport.hub.rewrite = { to, blob in
+            if to == a.identity.mailboxId,
+               case .success(let opened) = PeerSeal.open(blob, me: a.identity, now: clock.now(), pinned: { $0 == b.identity.mailboxId ? b.identity.keys : nil }),
+               let obj = try? JSONSerialization.jsonObject(with: opened.payload) as? [String: Any],
+               obj["t"] as? String == "caps", let card = PeerCaps.parse(obj) { tap.add(card) }
+            return (to, blob)
+        }
+        let scans = b.launcher.cloneRemoteCalls
+        let id = try a.engine.delegate(peer: "Bea", repo: testRepo, title: "Work", brief: "x", mode: .pane).get()
+        settle(a, b)
+        let pane = try #require(b.engine.inboundJobs().first?.pane)
+        #expect(tap.all.map { $0.lanesFree } == [1])
+        for n in 0..<50 {
+            b.engine.paneEvent(pane: pane, kind: n % 2 == 0 ? .need : .progress)
+            settle(a, b)
+        }
+        #expect(b.launcher.cloneRemoteCalls == scans)
+        #expect(tap.all.count == 1)
+        _ = a.engine.stopJob(jobId: id); settle(a, b)
+        #expect(tap.all.map { $0.lanesFree } == [1, 2])
+        #expect(b.launcher.cloneRemoteCalls == scans)
+        clock.t = clock.t.addingTimeInterval(PeerCaps.staleAfter / 2)
+        b.delays.fireDue(clock); settle(a, b)
+        #expect(b.launcher.cloneRemoteCalls == scans + 1)
+        #expect(tap.all.count == 3 && tap.all.last?.lanesFree == 2)
+    }
+
+    @Test func acceptedOfferRefreshesCloneCacheBeforeTheHeartbeat() throws {
+        let (a, b, clock) = rig(); defer { a.close(); b.close() }
+        let url = "https://github.com/acme/new.git"
+        let scans = b.launcher.cloneRemoteCalls
+        let id = try a.engine.offer(peer: "Bea", url: url).get(); settle(a, b)
+        b.engine.acceptOffer(id); settle(a, b)
+        #expect(b.launcher.cloned.map { $0.url } == [url])
+        #expect(b.launcher.cloneRemoteCalls == scans + 1)
+        let card = try #require(a.engine.peerCaps(b.identity.mailboxId))
+        #expect(card.repos.contains(try #require(PeerRepo.hash(url))))
+        #expect(card.updated == clock.now())
+        // Cache reads and unchanged Cards never scan or send.
+        let deliveries = a.transport.hub.delivered
+        for _ in 0..<50 { _ = b.engine.ownCaps(); b.engine.sendCapsToAll() }
+        settle(a, b)
+        #expect(b.launcher.cloneRemoteCalls == scans + 1 && a.transport.hub.delivered == deliveries)
     }
 
     @Test func capsSurviveRestart() throws {

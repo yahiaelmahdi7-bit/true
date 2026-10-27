@@ -22,10 +22,9 @@ final class FakeLauncher: PeerLauncher, @unchecked Sendable {
         try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
         return nil
     }
-    private var cardChanged: (@Sendable () -> Void)?
-    func observeCardChanges(_ changed: @escaping @Sendable () -> Void) { cardChanged = changed }
-    var remotes = ["git@github.com:acme/app.git", "git@github.com:acme/other.git"] { didSet { cardChanged?() } }
-    func cloneRemotes() -> [String] { remotes }
+    var remotes = ["git@github.com:acme/app.git", "git@github.com:acme/other.git"]
+    var cloneRemoteCalls = 0
+    func cloneRemotes() -> [String] { lock.lock(); defer { lock.unlock() }; cloneRemoteCalls += 1; return remotes }
     func resolveClone(repo: String) -> String? { clone }
     func prepareWorktree(clone: String, base: String, branch: String, worktree: String) -> String? { worktreeError }
     func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String) -> UUID? {
@@ -62,7 +61,7 @@ final class FakeLauncher: PeerLauncher, @unchecked Sendable {
     var prompting = false
     func deliverToPane(_ pane: UUID, line: String) -> Bool { lock.lock(); paneLines.append(line); delivered.append((pane, line)); lock.unlock(); return true }
     func atPermissionPrompt(pane: UUID) -> Bool { prompting }
-    func stop(panes: [UUID], builders: [String]) { lock.lock(); stopped = (panes, builders); lock.unlock() }
+    func stop(panes: [UUID], builders: [String]) { lock.lock(); stopped = (panes, builders); deadPanes.formUnion(panes); lock.unlock() }
 }
 
 final class Clock: @unchecked Sendable { var t = Date(timeIntervalSince1970: 1_800_000_000); func now() -> Date { t } }

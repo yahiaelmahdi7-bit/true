@@ -150,8 +150,6 @@ protocol PeerLauncher: AnyObject, Sendable {
     func paneAlive(_ pane: UUID) -> Bool
     /// Missions M1: remote URLs of the clones under allowed roots (hashed into the Card) and which tools are installed.
     func cloneRemotes() -> [String]
-    /// Notify when local clones or installed tools change.
-    func observeCardChanges(_ changed: @escaping @Sendable () -> Void)
     /// Missions M1: relaunch under an existing Claude session (`--resume <id>`).
     func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String, resumeSession: String?) -> UUID?
     func launchBackground(agentName: String, parent: String, cwd: String, prompt: String, resumeSession: String?) -> String?
@@ -174,7 +172,6 @@ extension PeerLauncher {
     var keepsBuilderOnResume: Bool { false }
     func atPermissionPrompt(pane: UUID) -> Bool { false }
     func cloneRemotes() -> [String] { [] }
-    func observeCardChanges(_ changed: @escaping @Sendable () -> Void) {}
     func installedTools() -> [String: Bool] { [:] }
     func paneAlive(_ pane: UUID) -> Bool { true }
     func cloneRepo(url: String, into path: String) -> String? { "Cloning isn't available here" }

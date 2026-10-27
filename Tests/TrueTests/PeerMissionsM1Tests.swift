@@ -328,6 +328,25 @@ import Foundation
         #expect(launcher.resumeSessions == ["sess-42"] && again.inboundJobs().first?.resumes == 1)
     }
 
+    @Test func paneErrorStopsOldTabBeforeResumingAndIgnoresItsLateClose() throws {
+        for desk in [false, true] {
+            let s = sides(); defer { s.a.close(); s.b.close() }
+            s.b.knobs.desk = desk
+            _ = try #require(send(s.a, mode: .pane)); settle(s.a, s.b)
+            let old = try #require(s.b.engine.inboundJobs().first?.pane)
+            s.b.launcher.sessions[old] = "pane-session"
+            s.b.engine.paneEvent(pane: old, kind: .error, message: "Service unavailable")
+            settle(s.a, s.b)
+            let job = try #require(s.b.engine.inboundJobs().first)
+            #expect(s.b.launcher.stopped.0 == [old])
+            #expect(s.b.launcher.launched.filter { s.b.launcher.paneAlive($0) } == [try #require(job.pane)])
+            #expect(job.status == .working && job.resumes == 1 && job.sessionId == "pane-session")
+            #expect(s.b.launcher.resumeSessions == ["pane-session"])
+            s.b.engine.paneClosed(pane: old); settle(s.a, s.b)
+            #expect(s.b.engine.inboundJobs().first?.status == .working)
+        }
+    }
+
     @Test func paneLimitUsesTheSameSessionAndNeverResendsTheJob() throws {
         let s = sides(); defer { s.a.close(); s.b.close() }
         let id = try #require(send(s.a, mode: .pane)); settle(s.a, s.b)
@@ -336,10 +355,18 @@ import Foundation
         settle(s.a, s.b)
         let j = try #require(s.b.engine.inboundJobs().first)
         #expect(j.status == .paused && s.a.engine.result(jobId: id)?.status == .paused)
+        #expect(s.b.launcher.paneAlive(pane) && s.b.launcher.stopped.0.isEmpty)
+        s.b.engine.paneClosed(pane: pane)
+        #expect(s.b.engine.inboundJobs().first?.status == .paused)
         s.clock.t = try #require(j.resumeAt)
         s.b.delays.fireDue(s.clock); settle(s.a, s.b)
         #expect(s.b.launcher.resumeSessions == ["pane-session"])
         #expect(s.b.launcher.paneLines.isEmpty && s.b.engine.inboundJobs().count == 1)
+        let resumed = try #require(s.b.engine.inboundJobs().first)
+        #expect(s.b.launcher.stopped.0 == [pane])
+        #expect(s.b.launcher.launched.filter { s.b.launcher.paneAlive($0) } == [try #require(resumed.pane)])
+        #expect(resumed.status == .working && resumed.resumes == 1 && resumed.sessionId == "pane-session")
+        s.b.engine.paneClosed(pane: pane); settle(s.a, s.b)
         #expect(s.b.engine.inboundJobs().first?.status == .working)
     }
 
