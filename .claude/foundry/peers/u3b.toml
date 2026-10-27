@@ -1,0 +1,73 @@
+id = "peers-u3b"
+repo = "/Users/y/Projects/true"
+lane = "deepseek"
+budget_usd = 5
+max_attempts = 3
+autonomy = "low"
+goal = '''
+Peers M2, unit U3b: wire U3's fix round into the LIVE launchers. U3 (merged) added MissionMergeAnswer.fix, fixRounds
+(max 2) and launch.note in MissionRunner (Sources/True/Peers/Missions.swift), and the M2 drill passes, but the drill
+uses a fake launcher. Review found the live path still breaks; fix exactly these four things:
+
+1. Old state must load. MissionJobProgress is Codable with synthesized decoding, so a state file saved before a field
+   existed (fixRounds, mergeBlocked, attempt, launchKey...) throws keyNotFound. Write init(from:) with
+   decodeIfPresent + the current defaults for every field. Same check for any other mission Codable struct that grew
+   fields in U1-U3.
+2. Local fix round gets the note. MissionLocalLauncher.resume always sends "Continue from where you stopped." When
+   launch.note is set, the prompt must say the merge check failed, include the note (the check output tail or the
+   rebase reason), and say to fix it and push to launch.branch again. Without a note, keep today's prompt.
+3. Peer fix round works on a finished job. MissionPeerLauncher.resume calls PeerEngine.resumeJob(jobId:), which
+   refuses a job whose status is final unless it is .failed, so a .done job (the normal case after a red check)
+   comes back "That job has already ended" and the runner goes to needsYou. Add a note-carrying resume: the sealed
+   "resume" message carries the note, resumeJob accepts a .done job when a note is given (fix round), and the
+   receiving side resumes that peer job's session with the note in its prompt. A receiver that doesn't know the
+   note field must still behave as today (old Macs): additive field only, no new message type.
+4. No stale re-merge. After a fix-round resume, the launcher's status can still read completed (the old run) before
+   the worker restarts, and the runner would merge the SAME red sha again and burn a round. Record the job branch
+   head that failed (persisted on the progress) and treat a completed job whose branch head still equals it as
+   running: no gate call, no round used. Only a new head goes to the gate.
+
+Tests: a new suite `MissionLiveFixRoundTests` (Tests/TrueTests/MissionLiveFixRoundTests.swift) covering: old JSON
+without the new keys decodes; local resume prompt contains the note (fake PeerLauncher platform capturing the
+prompt); peer resume of a .done job with a note queues a resume carrying the note and the receiver's resume prompt
+contains it (use the existing PeerEngine test harness / fakes the Peer tests use); a completed status with an
+unchanged branch head does not call the gate and does not change fixRounds; a new head does.
+
+Rules: don't edit any file named in the checks (drill files are frozen by sha256). M1 and U2/U3 behaviour stays
+green. Injected clock and scheduler only. Reasons plain and short. Never push except inside tests' temp remotes.
+'''
+
+[[check]]
+id = "live-fix"
+kind = "cmd"
+cmd = "swift test --filter MissionLiveFixRoundTests 2>&1 | grep -E \"MissionLiveFixRoundTests'? passed\""
+expect_exit = 0
+timeout_s = 2400
+
+[[check]]
+id = "missions"
+kind = "cmd"
+cmd = "swift test --filter MissionsTests 2>&1 | grep -E \"MissionsTests'? passed\""
+expect_exit = 0
+timeout_s = 2400
+
+[[check]]
+id = "peer"
+kind = "cmd"
+cmd = "swift test --filter Peer"
+expect_exit = 0
+timeout_s = 2400
+
+[[check]]
+id = "drill-m1"
+kind = "cmd"
+cmd = "sh .claude/foundry/peers/drill-m1.sh Tests/TrueTests/PeersDrillM1Tests.swift"
+expect_exit = 0
+timeout_s = 2400
+
+[[check]]
+id = "drill-m2"
+kind = "cmd"
+cmd = "sh .claude/foundry/peers/drill-m2.sh Tests/TrueTests/PeersDrillM2Tests.swift"
+expect_exit = 0
+timeout_s = 2400
