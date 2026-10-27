@@ -1,0 +1,72 @@
+id = "peers-u2"
+repo = "/Users/y/Projects/true"
+lane = "codex"
+budget_usd = 6
+max_attempts = 3
+autonomy = "low"
+goal = '''
+Peers M2, unit U2 (Slim M2): the real merge gate (M2.3) behind U1's MissionMergeGate seam, and the CLI
+`true-peer mission start|status|cancel`. No Board (that is U4) and no new UI except the mission name on job rows.
+Spec: docs/designs/peer-missions.md "Branch transport + merge gate", "Mission states", the Board line ("Until then: the
+mission name on each job's existing row and `true-peer mission status <id>`"), Steps line M2.3, and the "Carried to the
+M2 brief" lines; docs/designs/peers-foundry-run.md (U2 row). U1 is merged: Sources/True/Peers/Missions.swift
+(MissionRunner, MissionMergeGate, launchers). Reuse it; don't rebuild it.
+
+A. Merge gate (implements MissionMergeGate; Sources/True/Peers/ — a new MissionMerge.swift is fine).
+1. Branch names: a mission's code job pushes `peer/<mission-id>/<job-slug>` (extend PeerLogic's branch naming; single
+   jobs keep today's `peer/<peer-slug>/<shortId>`). The mission branch is `into:` or default `mission/<id>`.
+2. The owner's Mac fetches the job branch from the repo's own remote, merges it into the mission branch in a fresh
+   worktree, runs `check:` taken ONLY from the owner's copied mission.md (never from the job), and on green pushes the
+   mission branch. One merge at a time per repo (a per-repo lock).
+3. Answers: green -> merged. Conflict -> input-required "rebase on <short sha>". Red check -> input-required with the
+   last lines of the check output. No shared remote or push refused -> input-required "can't merge: no shared remote".
+   No `check:` in the mission -> input-required asking Yahia, never merged.
+4. Idempotent by sha: if the mission branch already contains the job branch's head, answer merged without merging again
+   (covers a crash between push and the event append).
+5. Peer code safety (default; the plan lists it as Yahia's call): the check runs with a stripped environment (PATH, HOME,
+   LANG, TMPDIR only; no tokens or keys) in its own worktree, and the FIRST merge of each peer's branch in a mission
+   returns input-required with the diff stat ("First merge from <peer>: N files, +A -B. Merge?") until Yahia approves;
+   later merges from that peer in the same mission go through on green. The approval is a function the CLI can call.
+6. main is never written. Worktrees are removed after each merge attempt.
+
+B. CLI (extend Sources/True/Peers/PeerCLI.swift, same style as its existing verbs).
+7. `true-peer mission start <file.md>` validates (U1's parser; refusal prints its one line with the file line), copies
+   the file, starts the runner, prints the mission id. `true-peer mission status <id>` prints one line per job:
+   title, Mac, state, reason. `true-peer mission cancel <id>` cancels. `true-peer mission approve <id> <job>` gives the
+   first-merge approval from step 5. Plain words, no internal ids beyond the mission id.
+8. The live runner uses the real launchers and this gate; reconcile runs when True starts and when the CLI opens a
+   mission, guarded so two runners never own one mission (owner lock in the mission folder).
+
+C. Mission name on job rows.
+9. Existing Hub job rows for mission jobs show the mission name as a short prefix. No other UI change, no stills.
+
+Tests (MissionsTests, extend): a temp git repo with a bare remote: green merge pushes the mission branch; conflict and
+red check return input-required with their reasons; no `check:` asks; second gate call after a simulated crash finds the
+sha already merged and does not merge twice; the check's environment has no token variables; first-merge approval is
+required once per peer per mission; CLI start/status/cancel round-trip on a fake launcher.
+
+Rules: injected clock and scheduler only. M1 behaviour must not change: Peer tests and the M1 drill stay green. Don't
+edit any file named in the checks. Reasons plain and short. Never push anything except the mission branch inside tests'
+temp remotes.
+'''
+
+[[check]]
+id = "missions"
+kind = "cmd"
+cmd = "swift test --filter MissionsTests 2>&1 | grep -E \"MissionsTests'? passed\""
+expect_exit = 0
+timeout_s = 2400
+
+[[check]]
+id = "peer"
+kind = "cmd"
+cmd = "swift test --filter Peer"
+expect_exit = 0
+timeout_s = 2400
+
+[[check]]
+id = "drill-m1"
+kind = "cmd"
+cmd = "sh .claude/foundry/peers/drill-m1.sh Tests/TrueTests/PeersDrillM1Tests.swift"
+expect_exit = 0
+timeout_s = 2400
