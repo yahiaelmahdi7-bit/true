@@ -6,8 +6,8 @@ import Foundation
 // injection. It MEASURES (never bends to pass). Gated on TRUE_DRILL=1; fixture from TRUE_DRILL_FIXTURE
 // (default ~/.foundry/heldout/peers/m1.json, outside the repo, never copied or printed beyond job ids).
 // The drill owns its fakes (launcher, timers, side) so a later edit to the shared fakes cannot move its injection points.
-// Assumptions: a null fixture target is a repo job on its project; the receiver re-announces its Card right before each send
-// (the Card is otherwise only sent on connect, so preflight could not refuse "no clone" against a stale one).
+// Assumptions: a null fixture target is a repo job on its project. Cards are sent at pairing (as on connect) and never
+// re-announced by the drill: a Card older than PeerCaps.staleAfter can't refuse "no clone", and the drill counts that.
 
 // MARK: fixture
 
@@ -324,7 +324,6 @@ private final class DrillReplay {
         let now = w.clock.now()
         switch act {
         case .send:
-            w.b.engine.sendCapsToAll(); s.recv.engine.sendCapsToAll(); w.settle()      // fresh Card, so preflight can refuse a missing clone
             if s.plan == .fetchFailed { s.recv.launcher.failNextPrepare = 1 }
             let isDir = s.isDir
             var repo = "", dir = ""
