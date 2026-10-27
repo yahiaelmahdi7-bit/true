@@ -9,7 +9,7 @@ CONFIG="${1:-release}"   # release by default: a debug True drew its terminals ~
 APP="${TRUE_APP_OUT:-True.app}"   # make-kit.sh points this at dist/
 BIN="True"
 BUNDLE_ID="net.prismlens.true"
-VERSION="1.2.2"
+VERSION="1.2.3"
 
 # make-kit.sh passes a prebuilt (universal) binary and asks for ad-hoc signing: TRUE_PREBUILT_BIN, TRUE_SIGN=adhoc.
 if [ -n "${TRUE_PREBUILT_BIN:-}" ]; then
