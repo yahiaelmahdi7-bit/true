@@ -1110,3 +1110,10 @@ New optional meta fields read: `wait_reason`, `resume_at` (epoch seconds), `land
 - The notification fires only when running as a bundled .app (same guard as CloudNotifier).
 - The coordinator observes `peersChanged` off-main and hops to main (avoids a test deadlock).
 - Live tests (Bonjour, two Macs, dns-sd check, Local Network prompt) are written but NOT run by the builder. UI stills were not taken.
+
+### Review fixes (2026-10-27)
+
+- **Graceful close.** `PeerLanNWConnection.close()` sends a final message and cancels once it is processed (2 s fallback). `cancel()` straight after `send` dropped the receiver's last `done`, so the sender saw the line drop, failed, and cancelled its invite; the relay intro was then refused. The same loss hit the `busy` bye.
+- **Live full-flow test runs on one Mac.** macOS does not deliver a process's connection to itself over its LAN address, so the test sets `PeerLanNetwork.dialInterface = .loopback` on the sender. It passes 3/3 against the real relay; the receiver's link confirms a beat after the sender's (waited up to 30 s). Run from a True pane, Sites' HEAD probe also hits the test listeners (pane descendants); harmless noise, not seen in the app.
+- **Stills taken** (`PeerLanSnapshotTests`, dark + light, on the system window background since the Peers window follows the system appearance). They showed a dead Invite button while a request was open (`invite()` is a no-op during any pairing), so Invite now greys out while a pairing is open; the request card spans the full width.
+- Two-Mac check still pending (needs Mahmoud's build).

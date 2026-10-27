@@ -468,7 +468,7 @@ struct PeerLanSection: View {
                         Button("Decline") { lan.cancelSession() }
                     }
                 }
-                .padding(10).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                .padding(10).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
             ForEach(lan.rows) { r in
                 VStack(alignment: .leading, spacing: 4) {
@@ -489,20 +489,26 @@ struct PeerLanSection: View {
 
     private func note(_ s: String) -> some View { Text(s).font(.callout).foregroundStyle(.secondary) }
 
+    /// invite() is a no-op while any pairing is open (a request in, or a check out), so say so instead of a dead button.
+    private var inviteLocked: Bool { lan.prompt != nil || lan.sendState.values.contains { $0.busy } }
+    private func inviteButton(_ r: PeerLanCoordinator.Row, _ title: String = "Invite") -> some View {
+        Button(title) { lan.invite(rowId: r.id) }.disabled(inviteLocked)
+    }
+
     @ViewBuilder private func trailing(_ r: PeerLanCoordinator.Row) -> some View {
         switch lan.sendState[r.id] {
         case nil:
-            if r.paired { note("Paired") } else { Button("Invite") { lan.invite(rowId: r.id) } }
+            if r.paired { note("Paired") } else { inviteButton(r) }
         case .connecting?: note("Connecting…")
-        case .cantReach?: HStack { note("Can't reach this Mac"); Button("Invite again") { lan.invite(rowId: r.id) } }
+        case .cantReach?: HStack { note("Can't reach this Mac"); inviteButton(r, "Invite again") }
         case .check?: HStack { Button("Pair") { lan.confirmSend() }.keyboardShortcut(.defaultAction); Button("Cancel") { lan.cancelSession() } }
         case .waitingAccept?: note("Waiting for \(r.name) to accept…")
         case .pairing?: note("Pairing…")
         case .paired?: note("Paired")
-        case .declined?: HStack { note("\(r.name) declined"); Button("Invite") { lan.invite(rowId: r.id) } }
-        case .busy?: HStack { note("Busy. Try again in a moment"); Button("Invite") { lan.invite(rowId: r.id) } }
-        case .timedOut?: HStack { note("Timed out"); Button("Invite") { lan.invite(rowId: r.id) } }
-        case .failed?: HStack { note("Couldn't pair. Try again."); Button("Invite") { lan.invite(rowId: r.id) } }
+        case .declined?: HStack { note("\(r.name) declined"); inviteButton(r) }
+        case .busy?: HStack { note("Busy. Try again in a moment"); inviteButton(r) }
+        case .timedOut?: HStack { note("Timed out"); inviteButton(r) }
+        case .failed?: HStack { note("Couldn't pair. Try again."); inviteButton(r) }
         case .relayTimeout?: note("Couldn't reach the relay. Check the internet and try again.")
         }
     }
