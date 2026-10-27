@@ -146,6 +146,7 @@ struct MissionLaunch {
     var base: String
     var branch: String
     var missionName: String? = nil
+    var note: String? = nil
 }
 
 struct MissionJobStatus {
