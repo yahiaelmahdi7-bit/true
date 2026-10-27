@@ -29,13 +29,14 @@ import Testing
         var statuses: [String: MissionJobStatus] = [:]
         var stops: [String] = []
         var stopFailure = false
+        var stopFailures = Set<String>()
         func start(_ launch: MissionLaunch, at destination: MissionDestination) throws {
             #expect(statuses[launch.key] == nil)
             starts.append(launch); statuses[launch.key] = MissionJobStatus(state: .running)
         }
         func status(key: String, at destination: MissionDestination) -> MissionJobStatus? { statuses[key] }
         func stop(key: String, at destination: MissionDestination) throws {
-            if stopFailure { throw PeerError.invalid("Stop failed") }
+            if stopFailure || stopFailures.contains(key) { throw PeerError.invalid("Stop failed") }
             stops.append(key); statuses[key] = MissionJobStatus(state: .canceled)
         }
         func finish(_ title: String, as state: MissionJobState = .completed) {
@@ -45,9 +46,11 @@ import Testing
     final class Gate: MissionMergeGate {
         var merges: [String] = []
         var refuse = Set<String>()
+        var failures = Set<String>()
         var checks: [String?] = []
         func merge(_ launch: MissionLaunch, at destination: MissionDestination, check: String?) throws -> MissionMergeAnswer {
             checks.append(check)
+            if failures.contains(launch.job.title) { throw PeerError.invalid("Merge unavailable") }
             if refuse.contains(launch.job.title) { return .inputRequired("Check failed") }
             merges.append(launch.job.title); return .merged
         }
@@ -172,6 +175,47 @@ import Testing
         #expect(w.launcher.starts.count == 3)
         #expect(Set(w.launcher.starts.map(\.key)).count == 3)
         #expect(runner.jobs["Wave 1a: period locks"]?.attempt == 1)
+    }
+
+    @Test func mergeErrorBlocksOnlyDependentsAndCanBeRetriedAfterReopen() throws {
+        let w = World(); defer { w.clean() }
+        let runner = try w.open()
+        try runner.reconcile()
+        let first = "Wave 1a: period locks", second = "Wave 1b: original store"
+        w.gate.failures.insert(first)
+        w.launcher.finish(first); w.launcher.finish(second)
+        try runner.reconcile()
+        #expect(runner.state == .needsYou)
+        #expect(runner.jobs[first]?.state == .needsYou)
+        #expect(runner.jobs[first]?.reason == "Couldn't merge the job")
+        #expect(runner.jobs[second]?.state == .merged)
+        #expect(runner.jobs["CRM U0: craft pass"]?.state == .blocked)
+        runner.close()
+        w.gate.failures.removeAll()
+        let reopened = try w.open(source: nil); defer { reopened.close() }
+        try reopened.retryJob(first)
+        #expect(w.launcher.starts.count == 3)
+        #expect(w.launcher.starts.filter { $0.job.title == first }.count == 1)
+        w.launcher.finish("CRM U0: craft pass"); try reopened.reconcile()
+        #expect(reopened.state == .done)
+    }
+
+    @Test func cancelAttemptsOtherStopsWhenOneJobCannotStop() throws {
+        let w = World(); defer { w.clean() }
+        let runner = try w.open(); try runner.reconcile()
+        let firstKey = w.launcher.starts[0].key
+        w.launcher.stopFailures.insert(firstKey)
+        #expect(throws: (any Error).self) { try runner.cancel() }
+        #expect(runner.state == .canceled)
+        #expect(w.launcher.stops == [w.launcher.starts[1].key])
+        #expect(runner.jobs["CRM U0: craft pass"]?.state == .canceled)
+        runner.close()
+        w.launcher.stopFailures.removeAll()
+        let reopened = try w.open(source: nil); defer { reopened.close() }
+        try reopened.reconcile()
+        #expect(reopened.jobs.values.allSatisfy { $0.state == .canceled })
+        #expect(w.launcher.stops.count == 2)
+        #expect(w.launcher.starts.count == 2)
     }
 
     @Test func crashRelaunchReconcilesWithoutDoubleStarts() throws {

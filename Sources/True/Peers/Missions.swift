@@ -297,7 +297,14 @@ final class MissionRunner {
         for job in mission.jobs {
             var p = jobs[job.title]!
             if p.state == .completed, let destination = p.destination {
-                switch try gate.merge(launch(for: job, progress: p), at: destination, check: mission.check) {
+                let answer: MissionMergeAnswer
+                do {
+                    answer = try gate.merge(launch(for: job, progress: p), at: destination, check: mission.check)
+                } catch {
+                    // A gate outage needs input for this job; independent work can still proceed.
+                    answer = .inputRequired("Couldn't merge the job")
+                }
+                switch answer {
                 case .merged: p.state = .merged; p.reason = ""; p.mergeBlocked = false
                 case .inputRequired(let reason): p.state = .needsYou; p.reason = reason; p.mergeBlocked = true
                 }
@@ -396,12 +403,21 @@ final class MissionRunner {
         lock.lock(); defer { lock.unlock() }
         guard active, state != .done else { return }
         try setState(.canceled) // replay an interrupted cancel until every unfinished job is stopped
+        var stopError: Error?
         for job in mission.jobs {
             var p = jobs[job.title]!
             guard !p.state.satisfied, p.state != .canceled else { continue }
-            if let key = p.launchKey, let destination = p.destination { try launcher.stop(key: key, at: destination) }
+            if let key = p.launchKey, let destination = p.destination {
+                do { try launcher.stop(key: key, at: destination) }
+                catch {
+                    // Keep this job unfinished for reconciliation, but attempt every other stop.
+                    if stopError == nil { stopError = error }
+                    continue
+                }
+            }
             p.state = .canceled; p.reason = "Stopped by sender"; try update(job.title, p)
         }
+        if let stopError { throw stopError }
     }
 }
 
