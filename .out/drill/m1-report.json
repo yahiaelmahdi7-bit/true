@@ -1,0 +1,1381 @@
+{
+  "runs" : [
+    {
+      "criteria" : [
+        {
+          "detail" : "failed=1 of 26; bar <= 1\/26",
+          "name" : "1 failure-rate",
+          "pass" : true
+        },
+        {
+          "detail" : "notResumedOnSameSession=[] jobMessagesNotOne=[]",
+          "name" : "2 resume-same-session-no-resend",
+          "pass" : true
+        },
+        {
+          "detail" : "refused=2 problems=[]",
+          "name" : "3 refused-reasons-plain",
+          "pass" : true
+        },
+        {
+          "detail" : "pairs=16 late=[]",
+          "name" : "4 m1.4-start-within-30s",
+          "pass" : true
+        },
+        {
+          "detail" : "run 1 is the reference",
+          "name" : "5 determinism",
+          "pass" : true
+        }
+      ],
+      "jobs" : [
+        {
+          "cause" : "peer-removed",
+          "class" : "failed",
+          "id" : "j01",
+          "injected" : "removed",
+          "jobMessages" : 1,
+          "reason" : "Peer removed",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "failed"
+        },
+        {
+          "cause" : "no-clone",
+          "class" : "refused",
+          "id" : "j02",
+          "injected" : "noClone",
+          "jobMessages" : 0,
+          "reason" : "Bea has no clone of this repo. Share it with them first: true-peer offer https:\/\/github.com\/acme\/p1-fork-j02.git Bea",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : null,
+          "status" : "refused"
+        },
+        {
+          "cause" : "fetch-failed",
+          "class" : "landed",
+          "id" : "j03",
+          "injected" : "fetchFailed",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 30,
+          "status" : "done"
+        },
+        {
+          "cause" : "no-clone",
+          "class" : "refused",
+          "id" : "j04",
+          "injected" : "noClone",
+          "jobMessages" : 0,
+          "reason" : "Bea has no clone of this repo. Share it with them first: true-peer offer https:\/\/github.com\/acme\/p2-fork-j04.git Bea",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : null,
+          "status" : "refused"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j05",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j06",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j07",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j08",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j10",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j11",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j12",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "path-not-allowed",
+          "class" : "landed",
+          "id" : "j13",
+          "injected" : "pathNotAllowed",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 30,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j14",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j15",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "error",
+          "class" : "landed",
+          "id" : "j16",
+          "injected" : "error",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j17",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j18",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j19",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j20",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j21",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j22",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j23",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j24",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j25",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j26",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j27",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j28",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j29",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j30",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j31",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j32",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j33",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        }
+      ],
+      "notInjectable" : [
+
+      ],
+      "run" : 1,
+      "totals" : {
+        "failed" : 1,
+        "landed" : 23,
+        "rate" : "1\/26",
+        "refused" : 2,
+        "stopped" : 6,
+        "stopsShownAsFailed" : 0
+      },
+      "waitBeforeStop" : [
+        {
+          "id" : "j11",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j12",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j17",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j29",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j30",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j31",
+          "seconds" : 0,
+          "started" : true
+        }
+      ]
+    },
+    {
+      "criteria" : [
+        {
+          "detail" : "failed=1 of 26; bar <= 1\/26",
+          "name" : "1 failure-rate",
+          "pass" : true
+        },
+        {
+          "detail" : "notResumedOnSameSession=[] jobMessagesNotOne=[]",
+          "name" : "2 resume-same-session-no-resend",
+          "pass" : true
+        },
+        {
+          "detail" : "refused=2 problems=[]",
+          "name" : "3 refused-reasons-plain",
+          "pass" : true
+        },
+        {
+          "detail" : "pairs=16 late=[]",
+          "name" : "4 m1.4-start-within-30s",
+          "pass" : true
+        },
+        {
+          "detail" : "identical to run 1",
+          "name" : "5 determinism",
+          "pass" : true
+        }
+      ],
+      "jobs" : [
+        {
+          "cause" : "peer-removed",
+          "class" : "failed",
+          "id" : "j01",
+          "injected" : "removed",
+          "jobMessages" : 1,
+          "reason" : "Peer removed",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "failed"
+        },
+        {
+          "cause" : "no-clone",
+          "class" : "refused",
+          "id" : "j02",
+          "injected" : "noClone",
+          "jobMessages" : 0,
+          "reason" : "Bea has no clone of this repo. Share it with them first: true-peer offer https:\/\/github.com\/acme\/p1-fork-j02.git Bea",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : null,
+          "status" : "refused"
+        },
+        {
+          "cause" : "fetch-failed",
+          "class" : "landed",
+          "id" : "j03",
+          "injected" : "fetchFailed",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 30,
+          "status" : "done"
+        },
+        {
+          "cause" : "no-clone",
+          "class" : "refused",
+          "id" : "j04",
+          "injected" : "noClone",
+          "jobMessages" : 0,
+          "reason" : "Bea has no clone of this repo. Share it with them first: true-peer offer https:\/\/github.com\/acme\/p2-fork-j04.git Bea",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : null,
+          "status" : "refused"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j05",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j06",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j07",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j08",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j10",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j11",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j12",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "path-not-allowed",
+          "class" : "landed",
+          "id" : "j13",
+          "injected" : "pathNotAllowed",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 30,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j14",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j15",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "error",
+          "class" : "landed",
+          "id" : "j16",
+          "injected" : "error",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j17",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j18",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j19",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j20",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j21",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j22",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j23",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j24",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j25",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j26",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j27",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j28",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j29",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j30",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j31",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j32",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j33",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        }
+      ],
+      "notInjectable" : [
+
+      ],
+      "run" : 2,
+      "totals" : {
+        "failed" : 1,
+        "landed" : 23,
+        "rate" : "1\/26",
+        "refused" : 2,
+        "stopped" : 6,
+        "stopsShownAsFailed" : 0
+      },
+      "waitBeforeStop" : [
+        {
+          "id" : "j11",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j12",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j17",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j29",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j30",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j31",
+          "seconds" : 0,
+          "started" : true
+        }
+      ]
+    },
+    {
+      "criteria" : [
+        {
+          "detail" : "failed=1 of 26; bar <= 1\/26",
+          "name" : "1 failure-rate",
+          "pass" : true
+        },
+        {
+          "detail" : "notResumedOnSameSession=[] jobMessagesNotOne=[]",
+          "name" : "2 resume-same-session-no-resend",
+          "pass" : true
+        },
+        {
+          "detail" : "refused=2 problems=[]",
+          "name" : "3 refused-reasons-plain",
+          "pass" : true
+        },
+        {
+          "detail" : "pairs=16 late=[]",
+          "name" : "4 m1.4-start-within-30s",
+          "pass" : true
+        },
+        {
+          "detail" : "identical to run 1",
+          "name" : "5 determinism",
+          "pass" : true
+        }
+      ],
+      "jobs" : [
+        {
+          "cause" : "peer-removed",
+          "class" : "failed",
+          "id" : "j01",
+          "injected" : "removed",
+          "jobMessages" : 1,
+          "reason" : "Peer removed",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "failed"
+        },
+        {
+          "cause" : "no-clone",
+          "class" : "refused",
+          "id" : "j02",
+          "injected" : "noClone",
+          "jobMessages" : 0,
+          "reason" : "Bea has no clone of this repo. Share it with them first: true-peer offer https:\/\/github.com\/acme\/p1-fork-j02.git Bea",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : null,
+          "status" : "refused"
+        },
+        {
+          "cause" : "fetch-failed",
+          "class" : "landed",
+          "id" : "j03",
+          "injected" : "fetchFailed",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 30,
+          "status" : "done"
+        },
+        {
+          "cause" : "no-clone",
+          "class" : "refused",
+          "id" : "j04",
+          "injected" : "noClone",
+          "jobMessages" : 0,
+          "reason" : "Bea has no clone of this repo. Share it with them first: true-peer offer https:\/\/github.com\/acme\/p2-fork-j04.git Bea",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : null,
+          "status" : "refused"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j05",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j06",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j07",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j08",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j10",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j11",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j12",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "path-not-allowed",
+          "class" : "landed",
+          "id" : "j13",
+          "injected" : "pathNotAllowed",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 30,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j14",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j15",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "error",
+          "class" : "landed",
+          "id" : "j16",
+          "injected" : "error",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j17",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j18",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j19",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j20",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j21",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j22",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j23",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j24",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j25",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j26",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j27",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j28",
+          "injected" : "clean",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j29",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j30",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "stop",
+          "class" : "stopped",
+          "id" : "j31",
+          "injected" : "stop",
+          "jobMessages" : 1,
+          "reason" : "Stopped by sender",
+          "resumes" : 0,
+          "sameSession" : null,
+          "startDelay" : 0,
+          "status" : "canceled"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j32",
+          "injected" : "kill",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        },
+        {
+          "cause" : "none",
+          "class" : "landed",
+          "id" : "j33",
+          "injected" : "limit",
+          "jobMessages" : 1,
+          "reason" : "Finished",
+          "resumes" : 1,
+          "sameSession" : true,
+          "startDelay" : 0,
+          "status" : "done"
+        }
+      ],
+      "notInjectable" : [
+
+      ],
+      "run" : 3,
+      "totals" : {
+        "failed" : 1,
+        "landed" : 23,
+        "rate" : "1\/26",
+        "refused" : 2,
+        "stopped" : 6,
+        "stopsShownAsFailed" : 0
+      },
+      "waitBeforeStop" : [
+        {
+          "id" : "j11",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j12",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j17",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j29",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j30",
+          "seconds" : 0,
+          "started" : true
+        },
+        {
+          "id" : "j31",
+          "seconds" : 0,
+          "started" : true
+        }
+      ]
+    }
+  ]
+}

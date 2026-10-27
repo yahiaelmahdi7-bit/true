@@ -290,6 +290,30 @@ import Foundation
         #expect(s.a.engine.activity(jobId: e.id).contains { $0.text == "Resumed step reached sender" })
     }
 
+    @Test func builderKeepResumeFollowsTheNewStreamWithTheSameName() throws {
+        let s = sides(); defer { s.a.close(); s.b.close() }
+        let id = try #require(send(s.a)); settle(s.a, s.b)
+        let name = try #require(s.b.launcher.builders.first)
+        let old = try streamDir([initLine])
+        let next = try streamDir([initLine, #"{"type":"assistant","message":{"content":[{"type":"text","text":"Builder keep resumed progress"}]}}"#])
+        defer { try? FileManager.default.removeItem(at: old); try? FileManager.default.removeItem(at: next) }
+        s.a.engine.watchJob(jobId: id); settle(s.a, s.b)
+        s.b.engine.builderUpdate(name: name, state: .running, dir: old.path, run: 1)
+        s.b.engine.builderUpdate(name: name, state: .waiting, dir: old.path, waitReason: "Usage limit", run: 1)
+        settle(s.a, s.b)
+        #expect(s.b.engine.inboundJobs().first?.builderOwnsPause == true)
+        s.b.engine.builderUpdate(name: name, state: .running, dir: next.path, run: 2)
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline {
+            s.b.engine.flushActivity(id, force: true); settle(s.a, s.b)
+            if s.a.engine.activity(jobId: id).contains(where: { $0.text == "Builder keep resumed progress" }) { break }
+            usleep(20_000)
+        }
+        #expect(s.a.engine.activity(jobId: id).contains { $0.text == "Builder keep resumed progress" })
+        #expect(s.a.engine.result(jobId: id)?.status == .working)
+        #expect(s.b.launcher.resumeSessions.isEmpty)
+    }
+
     @Test func restartedEngineRestoresPausedDeadlineAndResumesOnlyOnce() throws {
         let s = sides(); defer { s.a.close(); s.b.close() }
         let e = try endedBuilder(s, last: limitLine)
