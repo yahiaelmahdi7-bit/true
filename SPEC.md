@@ -1079,3 +1079,34 @@ New optional meta fields read: `wait_reason`, `resume_at` (epoch seconds), `land
 - **Watcher signal for a stuck `waiting`** reuses kind `stuck`; with no `resume_at` there is nothing to be late for, so no signal.
 - **Light still:** the Hub renders with the dark palette in both modes (colours are fixed in `Theme`), so the "light" PNG differs from the dark one only in window chrome.
 - **Not mine:** `FDLeakTests.siteHTTPRunGivesBackItsPipe` failed once in the full parallel run (`leaked … → 26 < 5`) and passed when run alone. Not fixed.
+
+## Run 39 — Pair on this network
+
+**Why.** Pairing two Trues today means: press Invite, copy a long code, send it through some chat app, the other person pastes it and types a label. When both Macs are on the same Wi-Fi this should take a click on each side. Each True lists the other under "On this network" in the Peers window. One side clicks Invite, both screens show the same 6-digit code, both people click to confirm, and the existing pairing finishes on its own. Finishing still goes through the relay, so both Macs need internet. The paste-code flow stays for Macs on different networks. Design: `docs/designs/nearby-pairing.md` (approved 2026-10-26). UI name "On this network", code name `PeerLan*` ("Nearby" already means the Bluetooth iPhone card).
+
+**Scope.** In: Bonjour advertise + browse of `_true-peer._tcp` while the Peers window is open; the "On this network" section; a direct local TCP handshake with a 6-digit comparison code (commit-then-reveal); the invite sent sealed only after both people confirm; `PeerEngine.cancelInvite`; Info.plist local-network keys; Local Network denied state. Out: discovery without a shared network (Bluetooth / AWDL); pairing across the internet (paste flow); the phone app; any change to the relay or to how pairing completes after `pairWithInvite`.
+
+**Approach.**
+- *Visibility.* Advertise + browse start in `PeersWindow.show()` and stop on `NSWindow.willCloseNotification`. Nothing listens while the window is closed. A handshake arriving while the window is open but not key raises it and posts a notification.
+- *Transport seam.* `protocol PeerLanTransport` (advertise, browse results stream, connect, accept), shaped like `NearbyAdvertising` / `NearbyHost.sync` (idempotent `sync(open:)`). Live `PeerLanNetwork` uses Network.framework (`NWListener` with a Bonjour service, `NWBrowser(.bonjourWithTXTRecord)`, `NWConnection`), the repo's first `import Network`. Tests and the UI use a fake.
+- *Advertise (TXT).* Service name = `engine.ownName` (≤ 40, also cut to 63 UTF-8 bytes), computed once off the main thread. TXT: `v`="1", `s` = fresh random 8-byte salt per window-open (hex), `t` = first 8 bytes (hex) of SHA-256(salt ‖ own `mailboxId`). No keys, no stable id. A browser marks a row "Paired" when `t` matches SHA-256(salt ‖ mid) for any `peerLinks()` mailbox; its own row is hidden the same way. TXT rejected unless `v == "1"` and `s`/`t` are exactly 16 hex chars. Rows dedupe by `t`, drop on `.removed`, cap 50. Browser and listener restart with backoff (2, 4, 8… s, max 60) on `.failed`.
+- *Handshake* (one TCP connection, length-prefixed JSON frames, prefix ≤ 8 KB checked before allocating, 10 s per frame, any bad frame = close). S = sender (clicked Invite), R = receiver. (1) S→R `hello{v,name,keys,commit=SHA-256(nS)}`. (2) R→S `hello{v,name,keys,nR}`. (3) S→R `reveal{nS}`; R checks the commit. (4) Both compute `code` = first 4 bytes of SHA-256("true-lan-v1" ‖ S.sign ‖ R.sign ‖ nS ‖ nR) as UInt32 mod 1 000 000, shown "482 913". (5) R shows the prompt; Accept → `accept`; Decline / 90 s → `bye`. S shows "Check <R> shows 482 913 · Pair / Cancel"; Pair + received `accept` → step 6; Cancel / 120 s / `bye` → close. (6) S calls `engine.invite()`, seals `{invite}` with `PeerEnvelope.seal(… introduce: true)`, sends `invite{env}`. R opens with `pinned: { _ in nil }` and requires `opened.sender == hello.keys`, `mailboxId(S.sign) == env.from`, ts within ±2 min, invite keys equal to the hello keys; any mismatch → `done{err}`. (7) R calls `pairWithInvite(raw, label: <safe label>)` (S's name validated as in PeerEngine, else "Peer"; collision with an existing label gets " 2", " 3"…); `done{ok}` / `done{err}`. (8) S: `done{ok}` → "Pairing…" until the link is confirmed over the relay (30 s, then "Couldn't reach the relay. Check the internet and try again."); `done{err}`, connection loss, or 10 s silence after step 6 → `engine.cancelInvite(secret)`.
+- *`PeerEngine.cancelInvite(_ secret:)`* removes the matching `PendingInvite` and re-runs the relay wanted check. Called on every failure path after step 6; before step 6 no invite exists.
+- *Receiver limits.* One handshake at a time (a second gets `bye{busy}`); at most 5 connections per remote address per minute, then close silently.
+- *Sender row states.* Invite · Connecting… (10 s) · Check code · Waiting for <name> to accept… · Pairing… · Paired · Declined · Busy · Timed out · Can't reach this Mac.
+- *Local Network denied.* `NWBrowser` `.waiting(.dns(-65570))` → "True can't see this network. Allow it in System Settings → Privacy & Security → Local Network" + button. Other `.waiting`/`.failed` > 10 s → "Can't search this network right now" + paste fallback line.
+- *Info.plist.* `NSLocalNetworkUsageDescription` and `NSBonjourServices` = [`_true-peer._tcp`] in both `scripts/package.sh` heredocs.
+- *UI.* "On this network" sits right under the connection status line. Sending from it does not fill the "Invite a peer" box.
+
+**Risks.** Ad-hoc public builds may re-prompt for Local Network after each update; the app firewall may ask about incoming connections; guest Wi-Fi with client isolation hides Macs; both Macs need this version; people may skip comparing the code (same model as Bluetooth pairing).
+
+### Deviations (builder)
+
+- The TXT tag hashes the raw 16 mailbox bytes (hex-decoded), not the hex string.
+- `ownName` is already truncated to 40 in the engine, so no off-main compute is needed.
+- After Accept the receiver waits up to 120 s for the invite; after the sender sends it there is a 10 s silence timer (my elaboration of the design's timeouts).
+- A relay-confirm timeout leaves the invite alive and the link as-is; the row shows a plain "couldn't reach the relay" note.
+- Sender Cancel resets the row to Invite (no state); a receiver Decline shows the sender "<name> declined".
+- The notification fires only when running as a bundled .app (same guard as CloudNotifier).
+- The coordinator observes `peersChanged` off-main and hops to main (avoids a test deadlock).
+- Live tests (Bonjour, two Macs, dns-sd check, Local Network prompt) are written but NOT run by the builder. UI stills were not taken.

@@ -376,6 +376,24 @@ func craftedJob(from: PeerIdentity, to: PeerSide, id: String = UUID().uuidString
         #expect(!s.engine.wantsRelay)
     }
 
+    @Test func cancelInviteRemovesThePendingInviteAndTheWantedMailbox() {
+        let relay = FakeRelay(), clock = Clock()
+        let s = PeerSide("Al", relay: relay, clock: clock); defer { s.close() }
+        let keep = PeerInvite.parse(s.engine.invite())!.secret
+        let drop = PeerInvite.parse(s.engine.invite())!.secret
+        #expect(s.engine.liveInviteCount() == 2)
+        s.engine.cancelInvite(drop)
+        #expect(s.engine.liveInviteCount() == 1 && s.engine.wantsRelay)
+        s.engine.cancelInvite(Data(repeating: 7, count: 16))      // unknown secret: no-op
+        #expect(s.engine.liveInviteCount() == 1)
+        s.engine.cancelInvite(keep)
+        #expect(s.engine.liveInviteCount() == 0 && !s.engine.wantsRelay && !s.transport.wanted)
+        // and it stays gone after a restart
+        let again = PeerEngine(root: s.root, identity: s.identity, launcher: FakeLauncher(), transport: relay.transport(for: s.identity.mailboxId),
+                               inboundMode: { .bypass }, ownName: "Al", now: { clock.now() }, scheduler: { _, _ in })
+        #expect(again.liveInviteCount() == 0)
+    }
+
     @Test func delegateToUnknownPeerFails() {
         let r = rig(); defer { r.close() }
         if case .success = r.a.engine.delegate(peer: "Nobody", repo: testRepo, title: "T", brief: "B") { Issue.record("should fail") }
