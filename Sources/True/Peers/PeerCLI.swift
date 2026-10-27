@@ -31,6 +31,7 @@ enum PeerCLI {
             if let s = j.sha { r["sha"] = s }
             return r
         }
+        if (req["op"] as? String)?.hasPrefix("mission.") == true { return engine.missionService().handle(req) }
         switch req["op"] as? String {
         case "list":
             return ["ok": true, "peers": engine.peerLinks().map { $0.label }]
@@ -118,7 +119,7 @@ enum PeerCLI {
         import json, os, select, socket, sys, time
 
         DEFAULT_SOCK = __SOCKET__
-        USAGE = ("usage: true-peer lanes [1-4] | true-peer resume <jobId> | true-peer list | true-peer delegate <peer> [--repo R] --title T --brief-file F [--base B] [--background] | "
+        USAGE = ("usage: true-peer mission start <file.md> | status <id> | cancel <id> | approve <id> <job title> | true-peer lanes [1-4] | true-peer resume <jobId> | true-peer list | true-peer delegate <peer> [--repo R] --title T --brief-file F [--base B] [--background] | "
                  "true-peer delegate <peer> --dir D --title T --brief-file F | true-peer say <jobId> <text|-> | "
                  "true-peer offer <url> [--name N] [--note T] <peer> | true-peer shares | true-peer tail <jobId> [-f] [-n N] | true-peer stop <jobId> | true-peer status [jobId] | true-peer result <jobId>")
 
@@ -210,7 +211,31 @@ enum PeerCLI {
                 print(USAGE)
                 return
             cmd, args = argv[0], argv[1:]
-            if cmd == "list":
+            if cmd == "mission":
+                if not args or args[0] not in ("start", "status", "cancel", "approve"):
+                    die("usage: true-peer mission start <file.md> | status <id> | cancel <id> | approve <id> <job title>")
+                verb, values = args[0], args[1:]
+                if len(values) != (2 if verb == "approve" else 1):
+                    die("choose a mission file or id, and a job title for approve")
+                req = {"op": "mission." + verb}
+                if verb == "start":
+                    try:
+                        req["source"] = open(os.path.expanduser(values[0]), encoding="utf-8").read()
+                    except OSError as e:
+                        die("cannot read mission file: %s" % e)
+                else:
+                    req["missionId"] = values[0]
+                    if verb == "approve":
+                        req["job"] = values[1]
+                r = call(req)
+                if verb == "start":
+                    print(r["missionId"])
+                elif verb == "status":
+                    for j in r.get("jobs", []):
+                        print("%s  %s  %s  %s" % (j["title"], j["mac"], j["state"], j["reason"]))
+                else:
+                    print("Approved" if verb == "approve" else "Canceled")
+            elif cmd == "list":
                 for p in call({"op": "list"}).get("peers", []):
                     print(p)
             elif cmd == "delegate":

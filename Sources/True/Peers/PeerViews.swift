@@ -117,7 +117,7 @@ struct PeerJobsSection: View {
             HStack(spacing: 12) {
                 Image(systemName: "paperplane").frame(width: 32).foregroundStyle(Theme.hubSecondary)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(j.title).font(.body).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.tail)
+                    Text([j.missionName, j.title].compactMap { $0 }.joined(separator: " · ")).font(.body).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.tail)
                     Text("\(j.peerLabel) · \(peerElapsed(j.created, to: j.status.isFinal ? j.updated : nil))")
                         .font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1)
                 }
@@ -136,7 +136,7 @@ struct PeerJobsSection: View {
             HStack(spacing: 12) {
                 Image(systemName: "tray.and.arrow.down").frame(width: 32).foregroundStyle(Theme.hubSecondary)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(j.req.title).font(.body).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.tail)
+                    Text([j.req.missionName, j.req.title].compactMap { $0 }.joined(separator: " · ")).font(.body).foregroundStyle(Theme.text).lineLimit(1).truncationMode(.tail)
                     Text("\(j.peerLabel) · \(peerElapsed(j.received, to: j.finished))")
                         .font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1)
                     if let d = deskLine(j) { Text(d).font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1) }

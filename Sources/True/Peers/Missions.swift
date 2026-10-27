@@ -145,6 +145,7 @@ struct MissionLaunch {
     var job: MissionJob
     var base: String
     var branch: String
+    var missionName: String? = nil
 }
 
 struct MissionJobStatus {
@@ -189,6 +190,7 @@ final class MissionRunner {
     private let now: () -> Date
     private let schedule: (TimeInterval, @escaping () -> Void) -> Void
     private let routing: (MissionJob, Date) -> MissionDestination
+    private let prepare: () throws -> Void
     private let lock = NSRecursiveLock()
     private var armed = false
     private var generation = 0
@@ -205,12 +207,12 @@ final class MissionRunner {
     init(id: String, root: URL = MissionRunner.liveRoot, source: String? = nil, peers: [String],
          launcher: MissionJobLauncher, gate: MissionMergeGate, now: @escaping () -> Date,
          scheduler: @escaping (TimeInterval, @escaping () -> Void) -> Void,
-         route: @escaping (MissionJob, Date) -> MissionDestination) throws {
+         route: @escaping (MissionJob, Date) -> MissionDestination, prepare: @escaping () throws -> Void = {}) throws {
         guard !id.isEmpty, id != ".", id != "..", !id.contains("/"), !id.contains("\\") else {
             throw MissionValidationError(line: 1, reason: "Choose a mission name")
         }
         self.id = id; folder = root.appendingPathComponent(id, isDirectory: true)
-        self.launcher = launcher; self.gate = gate; self.now = now; schedule = scheduler; routing = route
+        self.launcher = launcher; self.gate = gate; self.now = now; schedule = scheduler; routing = route; self.prepare = prepare
         let fm = FileManager.default
         let text: String
         if let source {
@@ -276,7 +278,7 @@ final class MissionRunner {
 
     private func launch(for job: MissionJob, progress: MissionJobProgress) -> MissionLaunch {
         MissionLaunch(key: progress.launchKey!, job: job, base: mission.into ?? "mission/\(id)",
-                      branch: "peer/\(id)/job-\(mission.jobs.firstIndex(where: { $0.title == job.title })! + 1)-\(progress.attempt)")
+                      branch: PeerNaming.missionBranch(id: id, job: job.title, index: mission.jobs.firstIndex(where: { $0.title == job.title })!, attempt: progress.attempt), missionName: mission.name)
     }
 
     func reconcile() throws {
@@ -321,6 +323,14 @@ final class MissionRunner {
             let destination = routing(job, now())
             if case .waiting(let reason) = destination {
                 p.state = .waiting; p.reason = reason; p.destination = destination
+                try update(job.title, p); continue
+            }
+            var preparationError: String?
+            do { try prepare() }
+            catch PeerError.invalid(let reason) { preparationError = reason }
+            catch { preparationError = "Couldn't prepare the mission branch" }
+            if let reason = preparationError {
+                p.state = .needsYou; p.reason = reason; p.destination = destination
                 try update(job.title, p); continue
             }
             p.state = .starting; p.reason = ""; p.destination = destination
@@ -431,7 +441,7 @@ final class MissionPeerLauncher: MissionJobLauncher {
         guard case .peer(let peer) = destination else { throw PeerError.invalid("Choose a peer") }
         let prompt = launch.job.brief + "\nStart from \(launch.base). Push the finished work to \(launch.branch)."
         if case .failure(let error) = engine.delegate(peer: peer, repo: launch.job.repo, title: launch.job.title,
-                                                      brief: prompt, base: launch.base, mode: .background, fromAgent: launch.key) {
+                                                      brief: prompt, base: launch.base, mode: .background, fromAgent: launch.key, missionBranch: launch.branch, missionName: launch.missionName) {
             if case .invalid(let reason) = error { throw MissionLaunchError.refused(reason) }
         }
     }
@@ -471,7 +481,7 @@ final class MissionLocalLauncher: MissionJobLauncher {
         guard let clone = platform.resolveClone(repo: launch.job.repo) else { throw MissionLaunchError.refused("Repo isn't available on this Mac") }
         let worktree = clone + ".missions/" + launch.key
         if let reason = platform.prepareWorktree(clone: clone, base: launch.base, branch: launch.branch, worktree: worktree) { throw MissionLaunchError.refused(reason) }
-        if let reason = platform.launchBackground(agentName: launch.key, parent: "mission", cwd: worktree,
+        if let reason = platform.launchBackground(agentName: launch.key, parent: launch.missionName.map { "mission: " + $0 + " · " + launch.job.title } ?? "mission", cwd: worktree,
                                                    prompt: launch.job.brief + "\nPush the finished work to \(launch.branch).") { throw PeerError.invalid(reason) }
     }
     func resume(_ launch: MissionLaunch, at destination: MissionDestination) throws {
