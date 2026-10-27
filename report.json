@@ -1,0 +1,8 @@
+{
+  "left_undone": [
+    {
+      "check": null,
+      "what": "Exact peer and drill-m1 commands are blocked by nested sandbox-exec (sandbox_apply: Operation not permitted). With writable module caches and --disable-sandbox, the final peer suite passed 225 tests and the held-out M1 drill passed 3/3 runs; the frozen fixture checksum passed. Original-command verification remains pending in Foundry."
+    }
+  ]
+}

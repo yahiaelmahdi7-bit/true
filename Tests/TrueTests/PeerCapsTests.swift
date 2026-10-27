@@ -22,6 +22,49 @@ import Foundation
         #expect(b.engine.peerLinks().first.flatMap { b.engine.peerCaps($0.mailboxId) } != nil)
     }
 
+    @Test func connectedCardRefreshesBeforeItCanGoStaleWithoutChangingJobs() throws {
+        let (a, b, clock) = rig(); defer { a.close(); b.close() }
+        let id = try a.engine.delegate(peer: "Bea", repo: testRepo, title: "Work", brief: "x", mode: .pane).get()
+        settle(a, b)
+        let before = b.engine.inboundJobs()
+        for _ in 0..<5 {
+            clock.t = clock.t.addingTimeInterval(PeerCaps.staleAfter / 2)
+            a.delays.fireDue(clock); b.delays.fireDue(clock); settle(a, b)
+            let card = try #require(a.engine.peerCaps(b.identity.mailboxId))
+            #expect(!card.isStale(at: clock.now()) && card.updated == clock.now())
+        }
+        #expect(b.engine.inboundJobs() == before && a.engine.result(jobId: id)?.status == .accepted)
+        if case .failure(.invalid(let reason)) = a.engine.delegate(peer: "Bea", repo: "https://github.com/acme/missing", title: "Missing", brief: "x", mode: .pane) {
+            #expect(reason.contains("true-peer offer"))
+        } else { Issue.record("A fresh Card must refuse a missing clone") }
+    }
+
+    @Test func cloneAndCardFieldChangesAreAnnouncedAndOfflineRefreshStops() throws {
+        let (a, b, clock) = rig(); defer { a.close(); b.close() }
+        b.knobs.lanes = 3
+        b.launcher.remotes.append("https://github.com/acme/new.git")
+        settle(a, b)
+        let card = try #require(a.engine.peerCaps(b.identity.mailboxId))
+        #expect(card.repos.contains(try #require(PeerRepo.hash("https://github.com/acme/new"))))
+        #expect(card.lanesTotal == 3)
+        b.transport.setOnline(false); settle(a, b)
+        let before = a.engine.peerCaps(b.identity.mailboxId)?.updated
+        clock.t = clock.t.addingTimeInterval(600); b.delays.fireDue(clock); settle(a, b)
+        #expect(a.engine.peerCaps(b.identity.mailboxId)?.updated == before)
+        b.transport.setOnline(true); settle(a, b)
+        #expect(a.engine.peerCaps(b.identity.mailboxId)?.updated == clock.now())
+    }
+
+    @Test func aCardChangeDoesNotPostponeTheHeartbeat() throws {
+        let (a, b, clock) = rig(); defer { a.close(); b.close() }
+        clock.t = clock.t.addingTimeInterval(PeerCaps.staleAfter / 2 - 1)
+        b.engine.home = "/Users/new-home"; settle(a, b)
+        #expect(a.engine.peerCaps(b.identity.mailboxId)?.updated == clock.now())
+        clock.t = clock.t.addingTimeInterval(1)
+        b.delays.fireDue(clock); settle(a, b)
+        #expect(a.engine.peerCaps(b.identity.mailboxId)?.updated == clock.now())
+    }
+
     @Test func capsSurviveRestart() throws {
         let (a, b, _) = rig(); defer { a.close(); b.close() }
         let bea = try #require(a.engine.peerLinks().first)

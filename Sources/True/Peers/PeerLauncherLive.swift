@@ -13,6 +13,53 @@ final class PeerOrigin: @unchecked Sendable {
 /// The real Mac side of the peers engine: finds the clone, makes the worktree with git, opens a True tab or a builder.
 /// Called from the engine's work queue, so UI work hops to the main actor.
 final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
+    private let cardQueue = DispatchQueue(label: "true.peers.card-files")
+    private var cardSources: [String: DispatchSourceFileSystemObject] = [:]
+
+    deinit { for source in cardSources.values { source.cancel() } }
+
+    func observeCardChanges(_ changed: @escaping @Sendable () -> Void) {
+        cardQueue.async { [weak self] in self?.watchCardFiles(changed) }
+    }
+
+    /// Watch roots and their children as well as git configs: a clone can appear in stages.
+    /// Tool directories are watched too. This uses file events, with the engine's clock owning refresh deadlines.
+    private func watchCardFiles(_ changed: @escaping @Sendable () -> Void) {
+        let fm = FileManager.default
+        var paths = Set(SpawnRequest.allowedRoots())
+        paths.formUnion(SpawnRequest.allowedRoots().map { URL(fileURLWithPath: $0).deletingLastPathComponent().path })
+        for root in SpawnRequest.allowedRoots() {
+            for child in (try? fm.contentsOfDirectory(atPath: root)) ?? [] where !child.hasPrefix(".") && !child.hasSuffix(".peers") {
+                let path = root + "/" + child
+                var isDir: ObjCBool = false
+                if fm.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { paths.insert(path) }
+            }
+        }
+        for repo in Self.candidates() {
+            paths.insert(repo + "/.git")
+            paths.insert(repo + "/.git/config")
+        }
+        let toolDirs = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init) + ["/opt/homebrew/bin", "/usr/local/bin"]
+        paths.formUnion(toolDirs)
+        for path in cardSources.keys where !paths.contains(path) { cardSources.removeValue(forKey: path)?.cancel() }
+        for path in paths where cardSources[path] == nil {
+            let fd = open(path, O_EVTONLY)
+            guard fd >= 0 else { continue }
+            let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .delete, .rename, .attrib], queue: cardQueue)
+            source.setEventHandler { [weak self, weak source] in
+                guard let self else { return }
+                if let source, !source.data.intersection([.delete, .rename]).isEmpty {
+                    self.cardSources.removeValue(forKey: path)?.cancel()
+                }
+                self.watchCardFiles(changed)
+                changed()
+            }
+            source.setCancelHandler { close(fd) }
+            cardSources[path] = source
+            source.resume()
+        }
+    }
+
     private static func onMain<T: Sendable>(_ f: @MainActor () -> T) -> T {
         if Thread.isMainThread { return MainActor.assumeIsolated { f() } }
         return DispatchQueue.main.sync { MainActor.assumeIsolated { f() } }
@@ -117,6 +164,27 @@ final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
         return box.err
     }
 
+    var canResumeBackground: Bool { canRunBackground }
+    var keepsBuilderOnResume: Bool { true }
+
+    /// The builder CLI resumes its existing record and rotates the stream, retaining its name and session.
+    func launchBackground(agentName: String, parent: String, cwd: String, prompt: String, resumeSession: String?) -> String? {
+        guard let resumeSession else { return launchBackground(agentName: agentName, parent: parent, cwd: cwd, prompt: prompt) }
+        let records = HubScanner.builders(in: HubScanner.claudeDir.appendingPathComponent("builders"))
+        guard let record = records.first(where: { $0.name == agentName && $0.sessionID == resumeSession }),
+              [.done, .failed, .killed, .died].contains(record.state) else { return "Couldn't pick the background job back up" }
+        guard let file = CommandExecutor.writePrompt(prompt, name: agentName) else { return "Couldn't write the job prompt" }
+        final class Box: @unchecked Sendable { var error: String? }
+        let box = Box(), sem = DispatchSemaphore(value: 0)
+        Task.detached {
+            let (code, _) = await BuilderSpawn.systemRunner([SpawnRequest.builderPath(), "resume", record.id, "--prompt-file", file])
+            if code != 0 { box.error = "Couldn't pick the background job back up" }
+            sem.signal()
+        }
+        sem.wait()
+        return box.error
+    }
+
     func deliverLine(agent: String, line: String) {
         Self.onMain {
             guard let pane = AgentRegistry.shared.panes[agent] else { return }      // only an awake local agent gets the line
@@ -176,11 +244,11 @@ final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
 /// Hub builder list → peers engine: only touches the engine when a peer-named builder exists.
 @MainActor enum PeerBuilders {
     static func report(_ records: [BuilderRecord]) {
-        for u in updates(records) { PeerService.engine.builderUpdate(name: u.name, running: u.running, dir: u.dir) }
+        for u in updates(records) { PeerService.engine.builderUpdate(u) }
     }
 
-    /// A queued, waiting or unknown-state builder keeps its peer job open; only a finished one ends it.
-    static func updates(_ records: [BuilderRecord]) -> [(name: String, running: Bool, dir: String?)] {
-        records.filter { $0.name.hasPrefix("peer-") }.map { ($0.name, $0.state.isLive, $0.dir) }
+    /// Preserve waiting ownership and reset time instead of collapsing all live states into running.
+    static func updates(_ records: [BuilderRecord]) -> [BuilderRecord] {
+        records.filter { $0.name.hasPrefix("peer-") }
     }
 }

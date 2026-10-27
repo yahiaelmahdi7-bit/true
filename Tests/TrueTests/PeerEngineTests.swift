@@ -22,7 +22,9 @@ final class FakeLauncher: PeerLauncher, @unchecked Sendable {
         try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
         return nil
     }
-    var remotes = ["git@github.com:acme/app.git", "git@github.com:acme/other.git"]
+    private var cardChanged: (@Sendable () -> Void)?
+    func observeCardChanges(_ changed: @escaping @Sendable () -> Void) { cardChanged = changed }
+    var remotes = ["git@github.com:acme/app.git", "git@github.com:acme/other.git"] { didSet { cardChanged?() } }
     func cloneRemotes() -> [String] { remotes }
     func resolveClone(repo: String) -> String? { clone }
     func prepareWorktree(clone: String, base: String, branch: String, worktree: String) -> String? { worktreeError }
@@ -43,6 +45,7 @@ final class FakeLauncher: PeerLauncher, @unchecked Sendable {
     var resumePrompts: [String] = []
     var sessions: [UUID: String] = [:]
     var canResumeBackground: Bool { true }
+    var keepsBuilderOnResume = false
     func sessionId(forPane pane: UUID) -> String? { lock.lock(); defer { lock.unlock() }; return sessions[pane] }
     func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String, resumeSession: String?) -> UUID? {
         if let r = resumeSession { lock.lock(); resumeSessions.append(r); resumePrompts.append(firstPrompt); lock.unlock() }
@@ -127,7 +130,21 @@ final class RelayTestTransport: PeerTransport, @unchecked Sendable {
 
 /// One simulated Mac: its own temp root, identity, launcher, transport and engine.
 final class PeerSide: @unchecked Sendable {
-    final class Delays: @unchecked Sendable { var v: [TimeInterval] = [] }
+    final class Delays: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entries: [(Date, @Sendable () -> Void)] = []
+        var v: [TimeInterval] = []
+        func schedule(_ delay: TimeInterval, clock: Clock, action: @escaping @Sendable () -> Void) {
+            lock.lock(); defer { lock.unlock() }
+            v.append(delay); entries.append((clock.now().addingTimeInterval(delay), action))
+        }
+        func fireDue(_ clock: Clock) {
+            lock.lock()
+            let due = entries.filter { $0.0 <= clock.now() }; entries.removeAll { $0.0 <= clock.now() }
+            lock.unlock()
+            for e in due { e.1() }
+        }
+    }
     let root: URL, identity: PeerIdentity, launcher = FakeLauncher(), transport: RelayTestTransport, engine: PeerEngine
     let delays = Delays(); let name: String
     final class Knobs: @unchecked Sendable { var desk = false; var lanes = 2; var steering = true; var share = PeerShare.activity; var dirs: [String] = []; var chat = true
@@ -144,7 +161,7 @@ final class PeerSide: @unchecked Sendable {
         engine = PeerEngine(root: root, identity: identity, launcher: launcher, transport: transport, inboundMode: { mode },
                             ownName: name, steering: { k.steering }, share: { k.share }, allowedDirs: { k.dirs }, chatOn: { k.chat },
                             sharedRepos: { k.shares }, setSharedRepos: { k.shares = $0 }, desk: { k.desk }, lanes: { k.lanes }, projectsRoot: root.path + "/Projects",
-                            now: { clock.now() }, scheduler: { s, _ in d.v.append(s) })
+                            now: { clock.now() }, scheduler: { s, f in d.schedule(s, clock: clock, action: f) })
     }
     /// Run 32: a local chat bus per side; `sink` records what would be typed into panes.
     let sink = ChatSink()
@@ -329,7 +346,7 @@ func craftedJob(from: PeerIdentity, to: PeerSide, id: String = UUID().uuidString
         r.a.transport.setOnline(false)
         let id = try #require(delegate(r))
         #expect(r.a.engine.outboxCount() >= 1)
-        #expect(r.a.delays.v.first == 30)
+        #expect(r.a.delays.v.contains(30)) // Card heartbeats have their own schedule.
         #expect(r.b.launcher.panes.isEmpty)
         r.a.transport.setOnline(true); settle(r.a, r.b)                      // reconnect flushes the outbox
         #expect(r.a.engine.outboxCount() == 0)

@@ -50,6 +50,9 @@ struct InboundJob: Codable, Equatable, Sendable, Identifiable {
     var resumes: Int? = nil
     var pausedReason: String? = nil
     var resumeAt: Date? = nil
+    /// Builder keep owns waiting jobs; the peer engine must never relaunch these.
+    var builderOwnsPause: Bool? = nil
+    var builderRun: Int? = nil
     /// The accept check failed; the sender's resume request re-runs it.
     var acceptFailed: Bool? = nil
     var target: PeerTarget { req.target }
@@ -147,6 +150,8 @@ protocol PeerLauncher: AnyObject, Sendable {
     func paneAlive(_ pane: UUID) -> Bool
     /// Missions M1: remote URLs of the clones under allowed roots (hashed into the Card) and which tools are installed.
     func cloneRemotes() -> [String]
+    /// Notify when local clones or installed tools change.
+    func observeCardChanges(_ changed: @escaping @Sendable () -> Void)
     /// Missions M1: relaunch under an existing Claude session (`--resume <id>`).
     func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String, resumeSession: String?) -> UUID?
     func launchBackground(agentName: String, parent: String, cwd: String, prompt: String, resumeSession: String?) -> String?
@@ -154,6 +159,8 @@ protocol PeerLauncher: AnyObject, Sendable {
     func sessionId(forPane pane: UUID) -> String?
     /// Whether a finished background job can be relaunched under its session.
     var canResumeBackground: Bool { get }
+    /// The installed builder resumes its own record; other launchers may create a new one.
+    var keepsBuilderOnResume: Bool { get }
     func installedTools() -> [String: Bool]
 }
 
@@ -164,8 +171,10 @@ extension PeerLauncher {
     func launchBackground(agentName: String, parent: String, cwd: String, prompt: String, resumeSession: String?) -> String? { "Can't pick a background job back up here" }
     func sessionId(forPane pane: UUID) -> String? { nil }
     var canResumeBackground: Bool { false }
+    var keepsBuilderOnResume: Bool { false }
     func atPermissionPrompt(pane: UUID) -> Bool { false }
     func cloneRemotes() -> [String] { [] }
+    func observeCardChanges(_ changed: @escaping @Sendable () -> Void) {}
     func installedTools() -> [String: Bool] { [:] }
     func paneAlive(_ pane: UUID) -> Bool { true }
     func cloneRepo(url: String, into path: String) -> String? { "Cloning isn't available here" }

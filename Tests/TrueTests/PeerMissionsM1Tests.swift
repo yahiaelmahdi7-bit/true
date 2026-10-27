@@ -127,6 +127,7 @@ import Foundation
         let s = sides(bHome: "/Users/bo"); defer { s.a.close(); s.b.close() }
         let file = s.a.root.appendingPathComponent("notes.txt"); try Data("x".utf8).write(to: file)
         s.a.engine.home = s.a.root.path
+        settle(s.a, s.b) // Let the changed Card announce before measuring job traffic.
         let before = s.relay.delivered
         let r = send(s.a, brief: "Read \(file.path) first")
         #expect(reason(r)?.contains("path on your Mac") == true)
@@ -137,6 +138,7 @@ import Foundation
     @Test func ownDirOnSenderMacIsRefused() throws {
         let s = sides(bHome: "/Users/bo"); defer { s.a.close(); s.b.close() }
         s.a.engine.home = s.a.root.path
+        settle(s.a, s.b) // Let the changed Card announce before measuring job traffic.
         let before = s.relay.delivered
         #expect(reason(send(s.a, dir: s.a.root.path))?.contains("path on your Mac") == true)
         #expect(s.relay.delivered == before && s.a.engine.status(jobId: nil).isEmpty)
@@ -227,6 +229,127 @@ import Foundation
         let j = try #require(s.b.engine.inboundJobs().first)
         #expect(j.status == .paused && j.note.contains("reset time unknown"))
         #expect(j.resumeAt == s.clock.t.addingTimeInterval(1800) && s.b.delays.v.last == 1800)
+    }
+
+    @Test func builderKeepOwnsWaitingEvenAcrossRestartAndResumeRequests() throws {
+        let s = sides(); defer { s.a.close(); s.b.close() }
+        let id = try #require(send(s.a)); settle(s.a, s.b)
+        let name = try #require(s.b.launcher.builders.first)
+        let at = s.clock.now().addingTimeInterval(60)
+        s.b.engine.builderUpdate(name: name, state: .waiting, waitReason: "Usage limit", resumeAt: at)
+        settle(s.a, s.b)
+        let paused = try #require(s.b.engine.inboundJobs().first)
+        #expect(paused.status == .paused && paused.builderOwnsPause == true && paused.resumeAt == at)
+        #expect(s.a.engine.result(jobId: id)?.status == .paused)
+        _ = s.a.engine.resumeJob(jobId: id); settle(s.a, s.b)
+        #expect(s.b.launcher.resumeSessions.isEmpty)
+        let launcher = FakeLauncher()
+        let again = PeerEngine(root: s.b.root, identity: s.b.identity, launcher: launcher, transport: s.b.transport,
+                               now: { s.clock.now() }, scheduler: { _, _ in })
+        again.drain(); s.clock.t = at.addingTimeInterval(1)
+        again.recoverInterrupted(); again.performResume(id)
+        #expect(launcher.resumeSessions.isEmpty && again.inboundJobs().first?.status == .paused)
+        again.builderUpdate(name: name, state: .running)
+        again.drain()
+        #expect(again.inboundJobs().first?.status == .working && again.inboundJobs().first?.resumeAt == nil)
+        settle(s.a, s.b)
+        let deliveries = s.a.transport.hub.delivered
+        again.builderUpdate(name: name, state: .running); again.drain(); settle(s.a, s.b)
+        #expect(s.a.transport.hub.delivered == deliveries)
+    }
+
+    @Test func waitingWithoutResetTimeStaysPausedWithoutAnEngineTimer() throws {
+        let s = sides(); defer { s.a.close(); s.b.close() }
+        _ = try #require(send(s.a)); settle(s.a, s.b)
+        let name = try #require(s.b.launcher.builders.first)
+        let timers = s.b.delays.v.count
+        s.b.engine.builderUpdate(name: name, state: .waiting, waitReason: "Usage limit")
+        settle(s.a, s.b)
+        #expect(s.b.engine.inboundJobs().first?.resumeAt == nil)
+        #expect(s.b.engine.inboundJobs().first?.note.contains("reset time unknown") == true)
+        #expect(s.b.delays.v.count == timers)
+    }
+
+    @Test func simultaneousResumeTriggersLaunchOnlyOnceAndFollowTheNewStream() throws {
+        let s = sides(); defer { s.a.close(); s.b.close() }
+        let e = try endedBuilder(s, last: limitLine)
+        DispatchQueue.concurrentPerform(iterations: 2) { _ in s.b.engine.performResume(e.id) }
+        settle(s.a, s.b)
+        #expect(s.b.launcher.resumeSessions == ["sess-42"])
+        let resumed = try #require(s.b.launcher.builders.last)
+        let next = try streamDir([initLine, #"{"type":"assistant","message":{"content":[{"type":"text","text":"Resumed step reached sender"}]}}"#])
+        defer { try? FileManager.default.removeItem(at: next); try? FileManager.default.removeItem(at: e.dir) }
+        s.a.engine.watchJob(jobId: e.id); settle(s.a, s.b)
+        s.b.engine.builderUpdate(name: resumed, state: .running, dir: next.path)
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline {
+            s.b.engine.flushActivity(e.id, force: true); settle(s.a, s.b)
+            if s.a.engine.activity(jobId: e.id).contains(where: { $0.text == "Resumed step reached sender" }) { break }
+            usleep(20_000)
+        }
+        #expect(s.a.engine.activity(jobId: e.id).contains { $0.text == "Resumed step reached sender" })
+    }
+
+    @Test func restartedEngineRestoresPausedDeadlineAndResumesOnlyOnce() throws {
+        let s = sides(); defer { s.a.close(); s.b.close() }
+        let e = try endedBuilder(s, last: limitLine)
+        let at = try #require(s.b.engine.inboundJobs().first?.resumeAt)
+        let launcher = FakeLauncher(), timers = PeerSide.Delays()
+        let again = PeerEngine(root: s.b.root, identity: s.b.identity, launcher: launcher, transport: s.b.transport,
+                               now: { s.clock.now() }, scheduler: { d, f in timers.schedule(d, clock: s.clock, action: f) })
+        again.drain()
+        #expect(launcher.resumeSessions.isEmpty)
+        s.clock.t = at; timers.fireDue(s.clock); again.drain()
+        again.recoverInterrupted(); again.performResume(e.id)
+        #expect(launcher.resumeSessions == ["sess-42"] && again.inboundJobs().first?.resumes == 1)
+    }
+
+    @Test func paneLimitUsesTheSameSessionAndNeverResendsTheJob() throws {
+        let s = sides(); defer { s.a.close(); s.b.close() }
+        let id = try #require(send(s.a, mode: .pane)); settle(s.a, s.b)
+        let pane = s.b.launcher.pane; s.b.launcher.sessions[pane] = "pane-session"
+        s.b.engine.paneEvent(pane: pane, kind: .error, message: "Usage limit reached, resets 3pm")
+        settle(s.a, s.b)
+        let j = try #require(s.b.engine.inboundJobs().first)
+        #expect(j.status == .paused && s.a.engine.result(jobId: id)?.status == .paused)
+        s.clock.t = try #require(j.resumeAt)
+        s.b.delays.fireDue(s.clock); settle(s.a, s.b)
+        #expect(s.b.launcher.resumeSessions == ["pane-session"])
+        #expect(s.b.launcher.paneLines.isEmpty && s.b.engine.inboundJobs().count == 1)
+        #expect(s.b.engine.inboundJobs().first?.status == .working)
+    }
+
+    @Test func paneErrorsResumeThreeTimesThenKeepTheLastReason() throws {
+        let s = sides(); defer { s.a.close(); s.b.close() }
+        _ = try #require(send(s.a, mode: .pane)); settle(s.a, s.b)
+        s.b.launcher.sessions[s.b.launcher.pane] = "pane-session"
+        for n in 0...3 {
+            let pane = try #require(s.b.engine.inboundJobs().first?.pane)
+            s.b.engine.paneEvent(pane: pane, kind: .error, message: "Service unavailable \(n)")
+            settle(s.a, s.b)
+        }
+        #expect(s.b.launcher.resumeSessions == Array(repeating: "pane-session", count: 3))
+        #expect(s.b.engine.inboundJobs().first?.status == .failed)
+        #expect(s.b.engine.inboundJobs().first?.note.contains("Service unavailable 3") == true)
+    }
+
+    @Test func staleFinishedBuilderPollCannotResumeTheSameRunTwice() throws {
+        let s = sides(); defer { s.a.close(); s.b.close() }
+        s.b.launcher.keepsBuilderOnResume = true
+        let id = try #require(send(s.a)); settle(s.a, s.b)
+        let name = try #require(s.b.launcher.builders.first)
+        let dir = try streamDir([initLine, limitLine])
+        defer { try? FileManager.default.removeItem(at: dir) }
+        s.b.engine.builderUpdate(name: name, state: .done, dir: dir.path, run: 1)
+        settle(s.a, s.b)
+        s.b.engine.performResume(id)
+        s.b.engine.builderUpdate(name: name, state: .done, dir: dir.path, run: 1)
+        settle(s.a, s.b)
+        #expect(s.b.launcher.resumeSessions == ["sess-42"])
+        #expect(s.b.engine.inboundJobs().first?.status == .working && s.b.engine.inboundJobs().first?.builderRun == 2)
+        s.b.engine.builderUpdate(name: name, state: .running, dir: dir.path, run: 2)
+        settle(s.a, s.b)
+        #expect(s.b.launcher.resumeSessions.count == 1)
     }
 
     @Test func resetTimeParsing() {
