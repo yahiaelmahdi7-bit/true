@@ -68,9 +68,12 @@ cmd (`shasum -a 256 -c m1.sha256 && TRUE_DRILL=1 TRUE_DRILL_FIXTURE=... swift te
 drill test file is named in the cmd, so Foundry marks the job `contract-tampered` if a builder edits either. The
 builder prompt never mentions the fixture. (Builders have full disk access, so this is tamper detection, not secrecy.)
 
-**The M1 number.** Each replayed job ends `landed`, `refused` (stopped before sending, with a human reason) or
-`failed` (sent, then failed). **Failure rate = failed ÷ (landed + failed + refused)**, in-flight jobs excluded.
-Baseline from today's log: 12 failed of 32 finished = **37.5 %**. Pass: failure rate ≤ 5 % (≤ 1 of 32), every
+**The M1 number.** Each replayed job ends `landed`, `refused` (stopped before sending, with a human reason),
+`stopped` (the sender pressed Stop) or `failed` (sent, then failed). **Failure rate = failed ÷ (landed + failed +
+refused)**; stops and in-flight jobs are left out of it. Stops are reported on their own as wait-before-stop (how
+long the sender waited before giving up; lanes should shrink it). Baseline from today's log: 32 finished, 6 of them
+Stop presses; 6 real failures of the other 26 = **23 %** (peer removed 1, no local clone 2, couldn't fetch 1,
+directory not allowed 1, unknown error 1). Pass: failure rate ≤ 4 % (≤ 1 of 26), every
 kill/limit case resumes on the same session with zero re-sends, every refusal has a reason, and independent jobs on one
 project start ≤ 30 s apart (M1.4). The replay is deterministic, so it runs 3 times and all 3 must pass.
 
