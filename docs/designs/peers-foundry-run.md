@@ -46,6 +46,11 @@ peer-missions.md steps, each phase `fulfills` its checks. Builder prompt = the m
 | U6 | M3.1 Mind log + sync, M3.2 decisions in envelopes | `mind` → `swift test --filter PeerMind` | — | $8 |
 | U7 | M3.3 cross review, M3.4 ideas feed | `review` → `swift test --filter CrossReview\|IdeasFeed`; stills | stills | $10 |
 
+**Lanes (Yahia 2026-10-27: "use codex n deepseek").** Builds run off Claude: `lane = "codex"` for U0, U1, U2, U4,
+U6, U7 (the larger Swift units, UI ones included: the stills gate still guards taste); `lane = "deepseek"` for U3 and
+U5 (smaller). Foundry passes the lane to `builder start --lane` (Foundry commit "Job files take a lane"). Claude stays
+on my side of the run: merges, drill tests, the fixture, review of each unit's diff before merge.
+
 U0 adds idempotency tests: two resume triggers at once start one session; True restarted while `paused` resumes once at
 `resume_at`; builder keep and peer engine never both resume (f89353a now reports `waiting` as running).
 
