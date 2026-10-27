@@ -12,6 +12,7 @@ import Foundation
         let relay = FakeRelay(), clock = Clock()
         let a = PeerSide("Al", relay: relay, clock: clock), b = PeerSide("Bo", relay: relay, clock: clock, mode: mode)
         b.knobs.desk = desk
+        b.knobs.lanes = 1                  // Run 35 behaviour: one session per project (lanes are Missions M1.4)
         pairUp(a, b)
         return Rig(a: a, b: b)
     }
@@ -116,7 +117,7 @@ import Foundation
         let r = rig(); defer { r.close() }
         let j1 = send(r), j2 = send(r)
         r.a.engine.stopJob(jobId: j1); settle(r.a, r.b)
-        #expect(job(r, j1)?.status == .failed)
+        #expect(job(r, j1)?.status == .canceled)
         #expect(r.b.launcher.stopped.0 == [r.b.launcher.pane])
         #expect(r.b.launcher.panes.count == 2 && r.b.launcher.delivered.isEmpty)
         #expect(job(r, j2)?.pane == r.b.launcher.launched[1])
@@ -126,7 +127,7 @@ import Foundation
         let r = rig(); defer { r.close() }
         send(r); let j2 = send(r)
         r.a.engine.stopJob(jobId: j2); settle(r.a, r.b)
-        #expect(job(r, j2)?.status == .failed && r.b.launcher.panes.count == 1 && r.b.engine.desks().first?.inLine == 0)
+        #expect(job(r, j2)?.status == .canceled && r.b.launcher.panes.count == 1 && r.b.engine.desks().first?.inLine == 0)
     }
 
     @Test func deskOffKeepsOnePanePerJob() {

@@ -46,6 +46,15 @@ final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
         return out
     }
 
+    func cloneRemotes() -> [String] { Self.candidates().compactMap { remoteURL(ofRepoAt: $0) } }
+
+    func installedTools() -> [String: Bool] {
+        let dirs = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map(String.init) + ["/opt/homebrew/bin", "/usr/local/bin"]
+        return Dictionary(uniqueKeysWithValues: ["gh", "vercel", "wrangler", "docker"].map { t in
+            (t, dirs.contains { FileManager.default.isExecutableFile(atPath: $0 + "/" + t) })
+        })
+    }
+
     /// Run 34: `git clone` with the owner's own git credentials (never prompts). Only runs after the owner clicked Accept.
     func cloneRepo(url: String, into path: String) -> String? {
         guard PeerRepo.normalize(url) != nil else { return "That isn't a git repo URL" }
@@ -79,9 +88,13 @@ final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
     }
 
     func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String) -> UUID? {
+        launchPane(agentName: agentName, label: label, cwd: cwd, flags: flags, rolePath: rolePath, firstPrompt: firstPrompt, resumeSession: nil)
+    }
+
+    func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String, resumeSession: String?) -> UUID? {
         Self.onMain {
             AgentHooks.installPaneHooks(paths: AgentPaths.standard)
-            let argv = ["claude", "--name", agentName] + flags + ["--append-system-prompt-file", rolePath, firstPrompt]
+            let argv = ["claude"] + (resumeSession.map { ["--resume", $0] } ?? []) + ["--name", agentName] + flags + ["--append-system-prompt-file", rolePath, firstPrompt]
             let cmd = CommandExecutor.startupCommand(argv: argv, settings: AgentPaths.standard.paneSettingsPath)
             let pane = WorkspaceModel.shared.openProjectBeside(path: cwd, startupCommand: cmd)
             PeerOrigin.shared.mark(pane, label: label)
@@ -121,6 +134,11 @@ final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
     }
 
     /// Run 35: the desk pane's tab is still open (its terminal view is registered). A closed tab opens a fresh desk pane.
+    /// The Claude session running in that pane (the same probe PaneResume records from).
+    func sessionId(forPane pane: UUID) -> String? {
+        Self.onMain { SessionSnapshot.probe(pane).found?.sessionID }
+    }
+
     func paneAlive(_ pane: UUID) -> Bool {
         Self.onMain { TerminalRegistry.shared.view(for: pane) != nil }
     }

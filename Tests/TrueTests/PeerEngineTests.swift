@@ -22,6 +22,8 @@ final class FakeLauncher: PeerLauncher, @unchecked Sendable {
         try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
         return nil
     }
+    var remotes = ["git@github.com:acme/app.git", "git@github.com:acme/other.git"]
+    func cloneRemotes() -> [String] { remotes }
     func resolveClone(repo: String) -> String? { clone }
     func prepareWorktree(clone: String, base: String, branch: String, worktree: String) -> String? { worktreeError }
     func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String) -> UUID? {
@@ -36,6 +38,19 @@ final class FakeLauncher: PeerLauncher, @unchecked Sendable {
     func paneAlive(_ pane: UUID) -> Bool { lock.lock(); defer { lock.unlock() }; return !deadPanes.contains(pane) }
     func launchBackground(agentName: String, parent: String, cwd: String, prompt: String) -> String? {
         lock.lock(); builders.append(agentName); lock.unlock(); return nil
+    }
+    var resumeSessions: [String] = []
+    var resumePrompts: [String] = []
+    var sessions: [UUID: String] = [:]
+    var canResumeBackground: Bool { true }
+    func sessionId(forPane pane: UUID) -> String? { lock.lock(); defer { lock.unlock() }; return sessions[pane] }
+    func launchPane(agentName: String, label: String, cwd: String, flags: [String], rolePath: String, firstPrompt: String, resumeSession: String?) -> UUID? {
+        if let r = resumeSession { lock.lock(); resumeSessions.append(r); resumePrompts.append(firstPrompt); lock.unlock() }
+        return launchPane(agentName: agentName, label: label, cwd: cwd, flags: flags, rolePath: rolePath, firstPrompt: firstPrompt)
+    }
+    func launchBackground(agentName: String, parent: String, cwd: String, prompt: String, resumeSession: String?) -> String? {
+        lock.lock(); if let r = resumeSession { resumeSessions.append(r); resumePrompts.append(prompt) }; lock.unlock()
+        return launchBackground(agentName: agentName, parent: parent, cwd: cwd, prompt: prompt)
     }
     func headSHA(worktree: String) -> String? { "abc1234" }
     func remoteURL(ofRepoAt path: String) -> String? { "git@github.com:acme/app.git" }
@@ -115,7 +130,7 @@ final class PeerSide: @unchecked Sendable {
     final class Delays: @unchecked Sendable { var v: [TimeInterval] = [] }
     let root: URL, identity: PeerIdentity, launcher = FakeLauncher(), transport: RelayTestTransport, engine: PeerEngine
     let delays = Delays(); let name: String
-    final class Knobs: @unchecked Sendable { var desk = false; var steering = true; var share = PeerShare.activity; var dirs: [String] = []; var chat = true
+    final class Knobs: @unchecked Sendable { var desk = false; var lanes = 2; var steering = true; var share = PeerShare.activity; var dirs: [String] = []; var chat = true
         let lock = NSLock(); private var _shares: [String: [SharedRepo]] = [:]
         var shares: [String: [SharedRepo]] { get { lock.lock(); defer { lock.unlock() }; return _shares } set { lock.lock(); _shares = newValue; lock.unlock() } }
     }
@@ -128,7 +143,7 @@ final class PeerSide: @unchecked Sendable {
         let d = delays, k = knobs
         engine = PeerEngine(root: root, identity: identity, launcher: launcher, transport: transport, inboundMode: { mode },
                             ownName: name, steering: { k.steering }, share: { k.share }, allowedDirs: { k.dirs }, chatOn: { k.chat },
-                            sharedRepos: { k.shares }, setSharedRepos: { k.shares = $0 }, desk: { k.desk }, projectsRoot: root.path + "/Projects",
+                            sharedRepos: { k.shares }, setSharedRepos: { k.shares = $0 }, desk: { k.desk }, lanes: { k.lanes }, projectsRoot: root.path + "/Projects",
                             now: { clock.now() }, scheduler: { s, _ in d.v.append(s) })
     }
     /// Run 32: a local chat bus per side; `sink` records what would be typed into panes.
@@ -269,9 +284,9 @@ func craftedJob(from: PeerIdentity, to: PeerSide, id: String = UUID().uuidString
         let r = rig(); defer { r.close() }
         r.b.launcher.clone = nil
         let id = try #require(delegate(r))
-        #expect(r.b.engine.inboundJobs().first?.status == .failed)
+        #expect(r.b.engine.inboundJobs().first?.status == .needsYou)
         #expect((r.b.engine.inboundJobs().first?.note ?? "").hasPrefix("No local clone of"))
-        #expect(sentStatus(r, id) == .failed)
+        #expect(sentStatus(r, id) == .needsYou)
     }
 
     @Test func paneClosedBeforeResultFails() throws {
@@ -425,7 +440,7 @@ func craftedJob(from: PeerIdentity, to: PeerSide, id: String = UUID().uuidString
         #expect(r.a.engine.stopJob(jobId: id).isSuccess); settle(r.a, r.b)
         #expect(r.b.launcher.stopped.0 == [r.b.launcher.pane])
         let done = try #require(r.a.engine.result(jobId: id))
-        #expect(done.status == .failed && done.note.contains("Stopped by sender"))
+        #expect(done.status == .canceled && done.note.contains("Stopped by sender"))
     }
 
     @Test func stopWithSteeringOffIsRefused() throws {
@@ -489,7 +504,7 @@ func craftedJob(from: PeerIdentity, to: PeerSide, id: String = UUID().uuidString
         guard case .success(let id2) = r.a.engine.delegate(peer: "Bea", title: "Peek", brief: "peek", mode: .pane, fromAgent: "lead-1", dir: "/etc") else { Issue.record("delegate"); return }
         settle(r.a, r.b)
         #expect(r.b.launcher.panes.count == 1)
-        #expect(r.a.engine.status(jobId: id2).first?.status == .failed)
+        #expect(r.a.engine.status(jobId: id2).first?.status == .needsYou)
         #expect(r.a.engine.status(jobId: id).first?.status == .accepted)
     }
 }
