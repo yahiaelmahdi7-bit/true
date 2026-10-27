@@ -249,9 +249,14 @@ struct HubPanelContent: View {
     @State private var workFilter: HubFilter = .all
     @State private var openTile: HubTile?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var scheme
+
+    /// Test hook: draw these buckets instead of building them from the groups (stills of a fixed load).
+    var bucketsOverride: [TriageBucket]?
 
     private var buckets: [TriageBucket] {
-        HubTriage.build(groups: groups, seatStatus: actions.status, cloud: cloudJobs, watcher: watcherItems,
+        if let bucketsOverride { return bucketsOverride }
+        return HubTriage.build(groups: groups, seatStatus: actions.status, cloud: cloudJobs, watcher: watcherItems,
                         builders: builders, yourMove: yourMove, openPanes: openPanes, inbound: inboundJobs,
                         dismissed: dismissed, activity: activity, now: now)
     }
@@ -335,7 +340,7 @@ struct HubPanelContent: View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 10) {
-                    Text("Hub").font(.title2.weight(.semibold)).foregroundStyle(Theme.text)
+                    Text("Hub").font(.title2.weight(.semibold)).foregroundStyle(HubInk(scheme).primary)
                     if filter == .all { cloudPill }
                 }
                 if filter != .crew && filter != .chat { summary(buckets) }
@@ -369,7 +374,7 @@ struct HubPanelContent: View {
             }
         } label: {
             Label(filter == .seats ? "Agents" : filter == .crew ? "Crew" : "All", systemImage: "line.3.horizontal.decrease")
-                .font(.callout).foregroundStyle(Theme.dimText)
+                .font(.callout).foregroundStyle(HubInk(scheme).faint)
         }
         .menuStyle(.borderlessButton).fixedSize()
         .accessibilityLabel("Filter")
@@ -385,9 +390,9 @@ struct HubPanelContent: View {
                     Text("Backlog").font(.callout)
                     Text("\(n)").font(.callout.monospacedDigit())
                 }
-                .foregroundStyle(showBacklog ? Theme.text : Theme.hubSecondary)
+                .foregroundStyle(showBacklog ? HubInk(scheme).primary : HubInk(scheme).secondary)
                 .padding(.horizontal, 11).frame(height: 28)
-                .background(Color.white.opacity(showBacklog ? 0.16 : 0.08), in: .capsule).contentShape(.capsule)
+                .background(HubInk(scheme).chip.opacity(showBacklog ? 1.6 : 1), in: .capsule).contentShape(.capsule)
             }
             .buttonStyle(.plain).help("Older work").accessibilityLabel("Backlog, \(n)")
             .accessibilityHint(showBacklog ? "Back to the board" : "Opens older work")
@@ -399,11 +404,11 @@ struct HubPanelContent: View {
         let offline = cloudLink == .offline
         return Button { if offline { onRetryCloud() } } label: {
             HStack(spacing: 5) {
-                Circle().fill(cloudLink == .connected ? Theme.text : offline ? Theme.verdictWarn : Theme.dimText).frame(width: 6, height: 6)
-                Text(cloudLink.label).font(.caption).foregroundStyle(Theme.hubSecondary).lineLimit(1).fixedSize()
+                Circle().fill(cloudLink == .connected ? HubInk(scheme).primary : offline ? Theme.verdictWarn : HubInk(scheme).faint).frame(width: 6, height: 6)
+                Text(cloudLink.label).font(.caption).foregroundStyle(HubInk(scheme).secondary).lineLimit(1).fixedSize()
             }
             .padding(.horizontal, 9).padding(.vertical, 4)
-            .background(Color.white.opacity(0.07), in: .capsule).contentShape(.capsule)
+            .background(HubInk(scheme).chip, in: .capsule).contentShape(.capsule)
         }
         .buttonStyle(.plain).disabled(!offline)
         .help(offline ? "The cloud factory did not answer. Try again" : "Cloud factory")
@@ -428,16 +433,16 @@ struct HubPanelContent: View {
                 if working > 0 { Text("\(needs > 0 ? " · " : "")\(working) working") }
                 if review > 0 { Text("\(needs + working > 0 ? " · " : "")\(review) to review") }
             }
-            .font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1).fixedSize()
+            .font(.callout).foregroundStyle(HubInk(scheme).secondary).lineLimit(1).fixedSize()
         } else {
-            Text(liveSummary).font(.callout).foregroundStyle(Theme.hubSecondary).lineLimit(1)
+            Text(liveSummary).font(.callout).foregroundStyle(HubInk(scheme).secondary).lineLimit(1)
         }
     }
 
     private func headerButton(_ symbol: String, help: String, hint: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.text)
-                .frame(width: 28, height: 28).background(Color.white.opacity(0.10), in: .circle)
+            Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(HubInk(scheme).primary)
+                .frame(width: 28, height: 28).background(HubInk(scheme).chip, in: .circle)
                 .contentShape(.circle)
         }
         .buttonStyle(.plain).help(help).accessibilityLabel(help.replacingOccurrences(of: " (Esc)", with: ""))
