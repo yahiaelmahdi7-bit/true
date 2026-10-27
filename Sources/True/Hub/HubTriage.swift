@@ -53,6 +53,10 @@ struct TriageItem: Identifiable, Equatable {
     var noun = "items"
     /// One line of "what it is doing now" for a Working card; empty = none.
     var activity = ""
+    /// Another person's Mac that runs this job ("Mahmoud's Mac"); empty = this Mac (or the cloud when `isCloud`).
+    var machine = ""
+    /// Dollars spent so far, when the source records it.
+    var cost: Double?
 }
 
 /// One visible entry: a row, or a run of same-project rows folded into one.
@@ -204,7 +208,7 @@ enum HubTriage {
         let at = b.state == .running ? b.started : (b.ended ?? b.started)
         func make(_ sec: TriageSection, _ tone: TriageTone, _ sub: String, _ label: String) -> TriageItem {
             TriageItem(id: "builder:\(b.id)", section: sec, tone: tone, title: b.name, subtitle: sub, project: project,
-                       at: at, actionLabel: label, action: .builder(b.id), noun: "builders")
+                       at: at, actionLabel: label, action: .builder(b.id), noun: "builders", cost: b.cost)
         }
         switch b.state {
         case .running: return make(.working, .working, "\(model)running \(ran)", "Open")
