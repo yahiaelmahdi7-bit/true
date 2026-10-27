@@ -50,6 +50,9 @@ struct InboundJob: Codable, Equatable, Sendable, Identifiable {
     var resumes: Int? = nil
     var pausedReason: String? = nil
     var resumeAt: Date? = nil
+    /// Builder keep owns waiting jobs; the peer engine must never relaunch these.
+    var builderOwnsPause: Bool? = nil
+    var builderRun: Int? = nil
     /// The accept check failed; the sender's resume request re-runs it.
     var acceptFailed: Bool? = nil
     var target: PeerTarget { req.target }
@@ -154,6 +157,8 @@ protocol PeerLauncher: AnyObject, Sendable {
     func sessionId(forPane pane: UUID) -> String?
     /// Whether a finished background job can be relaunched under its session.
     var canResumeBackground: Bool { get }
+    /// The installed builder resumes its own record; other launchers may create a new one.
+    var keepsBuilderOnResume: Bool { get }
     func installedTools() -> [String: Bool]
 }
 
@@ -164,6 +169,7 @@ extension PeerLauncher {
     func launchBackground(agentName: String, parent: String, cwd: String, prompt: String, resumeSession: String?) -> String? { "Can't pick a background job back up here" }
     func sessionId(forPane pane: UUID) -> String? { nil }
     var canResumeBackground: Bool { false }
+    var keepsBuilderOnResume: Bool { false }
     func atPermissionPrompt(pane: UUID) -> Bool { false }
     func cloneRemotes() -> [String] { [] }
     func installedTools() -> [String: Bool] { [:] }

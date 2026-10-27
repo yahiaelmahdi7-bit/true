@@ -32,6 +32,7 @@ final class PeerEngine: @unchecked Sendable {
     private let projectsRoot: String
     private var offers: [PeerOffer]
 
+    private let resumeLock = NSRecursiveLock()
     private let lock = NSLock()
     private let work = DispatchQueue(label: "true.peers.work")
     private let net = DispatchQueue(label: "true.peers.net")
@@ -57,9 +58,15 @@ final class PeerEngine: @unchecked Sendable {
     private var tailers: [String: PeerStreamTailer] = [:]
     // Run 36a — caps (what each peer's True can do) + own-path guard
     private var caps: [String: PeerCaps]
+    private var cardSnapshot: Data?
+    private var cardSentAt: Date?
+    private var cardHeartbeatArmed = false
+    private let cardRefreshLock = NSLock()
+    private var cardRefreshArmed = false
+    private var cloneHashes: [String] = []
     private var capsFirstAsked: [String: Date] = [:]
     /// Our home directory, announced to peers in caps; tests set another one.
-    var home = NSHomeDirectory()
+    var home = NSHomeDirectory() { didSet { cardChanged() } }
     private var prompting: Set<UUID> = []
     private var activityCache: [String: [PeerActivityItem]] = [:]
     static let activityKeep = 200
@@ -114,11 +121,18 @@ final class PeerEngine: @unchecked Sendable {
         transport.onMessage = { [weak self] _, _, blob in self?.receive(blob) }
         transport.onStatus = { [weak self] up in
             guard let self else { return }
-            if up { self.sendCapsToAll(); self.flush() }
+            if up {
+                self.work.async { [weak self] in
+                    self?.refreshCloneCache(); self?.refreshCard(); self?.flush()
+                }
+            }
+            self.armCardRefresh()
             self.changed()
         }
         for i in invites { scheduleWantedCheck(at: i.expires) }
+        if transport.isConnected { refreshCloneCache() }
         updateWanted()
+        armCardRefresh()
         if !outbox.isEmpty { net.async { [self] in pump() } }
         work.async { [weak self] in self?.recoverInterrupted() }
     }
@@ -172,7 +186,22 @@ final class PeerEngine: @unchecked Sendable {
     private func saveOutbox(_ i: OutboxItem) { Self.write((try? Self.enc().encode(i)) ?? Data(), to: outboxURL(i.id)) }
     func jobDir(_ jobId: String) -> URL { root.appendingPathComponent("jobs/\(jobId)", isDirectory: true) }
     func resultPath(_ jobId: String) -> String { jobDir(jobId).appendingPathComponent("result.md").path }
-    private func changed() { NotificationCenter.default.post(name: .peersChanged, object: nil) }
+    private func changed() {
+        NotificationCenter.default.post(name: .peersChanged, object: nil)
+    }
+
+    private func cardChanged() {
+        // update() can call this while holding the job lock.
+        cardRefreshLock.lock()
+        guard !cardRefreshArmed else { cardRefreshLock.unlock(); return }
+        cardRefreshArmed = true
+        cardRefreshLock.unlock()
+        work.async { [weak self] in
+            guard let self else { return }
+            self.cardRefreshLock.lock(); self.cardRefreshArmed = false; self.cardRefreshLock.unlock()
+            self.refreshCard()
+        }
+    }
 
     /// One line per finished inbound job. Brief TEXT is never here — only its hash.
     private func log(_ j: InboundJob) {
@@ -438,6 +467,8 @@ final class PeerEngine: @unchecked Sendable {
                 changed(); return
             }
             addShare(SharedRepo(url: o.url, path: path, slug: slug), peer: o.peerMailbox)
+            refreshCloneCache()
+            cardChanged()
             _ = setOffer(id) { $0.status = .accepted }
             if let l = link(o.peerMailbox) { sealAndQueue(["t": "offer", "id": id, "ack": true, "slug": slug], to: l, owner: l.mailboxId) }
             changed()
@@ -473,20 +504,56 @@ final class PeerEngine: @unchecked Sendable {
 
     // MARK: caps (Run 36a)
 
-    /// What this True announces: `watch` = activity only while a lease is held.
-    /// Missions M1 adds the Card: job kinds, hashed repos, lane counts, tools present (yes/no only).
+    private func refreshCloneCache() {
+        // Accepted clones live under .peers, outside the launcher's ordinary repo scan.
+        let shared = sharedRepos().values.flatMap { $0 }.filter { !$0.path.isEmpty }.map { $0.url }
+        let hashes = Array(Set((launcher.cloneRemotes() + shared).compactMap { PeerRepo.hash($0) })).sorted()
+        lock.lock(); cloneHashes = hashes; lock.unlock()
+    }
+
+    /// What this True announces: job kinds, cached clone hashes, lanes, tools and home.
     func ownCaps() -> [String: Any] {
-        let hashes = Array(Set(launcher.cloneRemotes().compactMap { PeerRepo.hash($0) })).sorted()
         let total = lanes()
-        lock.lock(); let busy = Set(inbound.filter { !$0.status.isFinal && $0.desk != nil }.compactMap { $0.desk }).count; lock.unlock()
+        lock.lock()
+        let hashes = cloneHashes
+        let busy = Set(inbound.filter { !$0.status.isFinal && $0.desk != nil && $0.pane != nil }.map { "\($0.desk ?? "")|\($0.lane ?? 1)" }).count
+        lock.unlock()
         return ["t": "caps", "version": PeerCaps.currentVersion, "features": PeerCaps.ownFeatures, "home": home,
                 "kinds": ["repo", "dir"], "repos": hashes, "lanes": ["total": total, "free": max(0, total - busy)],
                 "tools": launcher.installedTools()]
     }
 
-    func sendCapsToAll() {
-        lock.lock(); let ls = links.filter { $0.confirmed }; lock.unlock()
-        for l in ls { sendCaps(to: l) }
+    func sendCapsToAll(heartbeatDue: Bool = false) {
+        guard transport.isConnected else { return }
+        let card = ownCaps()
+        lock.lock()
+        let ls = links.filter { $0.confirmed }
+        let snapshot = try? JSONSerialization.data(withJSONObject: card, options: [.sortedKeys])
+        let due = heartbeatDue || snapshot != cardSnapshot || cardSentAt.map { now().timeIntervalSince($0) >= PeerCaps.staleAfter / 2 } ?? true
+        guard due else { lock.unlock(); return }
+        cardSnapshot = snapshot
+        cardSentAt = now()
+        lock.unlock()
+        for l in ls { sealAndQueue(card, to: l, owner: l.mailboxId) }
+        armCardRefresh()
+    }
+
+    /// Status changes are cheap; only the heartbeat rescans local clones.
+    private func refreshCard() { sendCapsToAll() }
+
+    private func armCardRefresh() {
+        lock.lock()
+        guard transport.isConnected, !cardHeartbeatArmed else { lock.unlock(); return }
+        cardHeartbeatArmed = true
+        lock.unlock()
+        scheduler(PeerCaps.staleAfter / 2) { [weak self] in
+            guard let self else { return }
+            self.lock.lock(); self.cardHeartbeatArmed = false; self.lock.unlock()
+            self.work.async { [weak self] in
+                guard let self, self.transport.isConnected else { return }
+                self.refreshCloneCache(); self.sendCapsToAll(heartbeatDue: true); self.armCardRefresh()
+            }
+        }
     }
     private func sendCaps(to link: PeerLink) { sealAndQueue(ownCaps(), to: link, owner: link.mailboxId) }
 
@@ -832,7 +899,9 @@ final class PeerEngine: @unchecked Sendable {
     private func update(_ jobId: String, _ f: (inout InboundJob) -> Void) -> InboundJob? {
         lock.lock(); defer { lock.unlock() }
         guard let i = inbound.firstIndex(where: { $0.req.jobId == jobId }) else { return nil }
+        let before = inbound[i]
         f(&inbound[i]); saveInbound()
+        if before.status != inbound[i].status || before.desk != inbound[i].desk || before.lane != inbound[i].lane || before.pane != inbound[i].pane { cardChanged() }
         return inbound[i]
     }
 
@@ -1071,7 +1140,24 @@ final class PeerEngine: @unchecked Sendable {
         if let cj { captureSession(cj) }
         lock.lock(); let j = inbound.first { $0.pane == pane && !$0.status.isFinal }; lock.unlock()
         guard let j else { return }
-        if kind == .error { noteError(j.id, message) }
+        if kind == .error {
+            work.async { [weak self] in
+                guard let self else { return }
+                self.resumeLock.lock(); defer { self.resumeLock.unlock() }
+                self.lock.lock(); let current = self.inbound.first { $0.id == j.id }; self.lock.unlock()
+                guard let current, current.pane == pane, !current.status.isFinal, current.status != .paused else { return }
+                let reason = PeerMask.firstLine(message.split(whereSeparator: \.isNewline).last.map(String.init) ?? "")
+                if PeerResume.isUsageLimit(message) {
+                    let at = PeerResume.resumeTime(from: message, now: self.now())
+                    self.pause(j.id, reason: "Usage limit", at: at ?? self.now().addingTimeInterval(PeerResume.unknownWait), known: at != nil)
+                } else {
+                    self.pause(j.id, reason: reason.isEmpty ? "Claude stopped with an error" : reason, at: self.now(), known: true)
+                    self.performResume(j.id)
+                }
+            }
+            return
+        }
+        guard j.status != .paused else { return }
         trackPermissionPrompt(j, kind: kind, tool: tool)
         queueActivity(j, Self.items(kind: kind, message: message, tool: tool, detail: detail, at: now(), level: share()))
         let exists = FileManager.default.fileExists(atPath: resultPath(j.id))
@@ -1117,30 +1203,62 @@ final class PeerEngine: @unchecked Sendable {
 
     func paneClosed(pane: UUID) {
         lock.lock(); let j = inbound.first { $0.pane == pane && !$0.status.isFinal }; lock.unlock()
-        guard let j else { return }
+        guard let j, j.status != .paused else { return }
         if FileManager.default.fileExists(atPath: resultPath(j.id)) { end(j.id, .done, "Finished", reportAs: .done) }
         else { end(j.id, .failed, "Closed before it finished", reportAs: .failed) }
     }
 
-    /// Builder state changed (the Hub's builder list). `running == false` means it ended.
+    /// Hub updates arrive on the main actor. Never block it behind a resume that is opening a pane.
+    func builderUpdate(_ record: BuilderRecord) {
+        work.async { [weak self] in
+            self?.builderUpdate(name: record.name, state: record.state, dir: record.dir, waitReason: record.waitReason,
+                                resumeAt: record.resumeAt.map { Date(timeIntervalSince1970: $0) }, run: record.runs)
+        }
+    }
+
+    /// Compatibility for callers that only know whether the builder ended.
     func builderUpdate(name: String, running: Bool, dir: String? = nil) {
+        builderUpdate(name: name, state: running ? .running : .done, dir: dir)
+    }
+
+    func builderUpdate(name: String, state: BuilderState, dir: String? = nil, waitReason: String? = nil, resumeAt: Date? = nil, run: Int? = nil) {
+        resumeLock.lock(); defer { resumeLock.unlock() }
         lock.lock(); let j = inbound.first { $0.builder == name && !$0.status.isFinal }; lock.unlock()
         guard let j else { return }
-        if running {
+        if let run {
+            guard run >= (j.builderRun ?? run) else { return }
+            if run != j.builderRun { _ = update(j.id) { $0.builderRun = run } }
+        }
+        if state == .waiting {
+            let reason = PeerMask.firstLine(waitReason ?? "Usage limit").replacingOccurrences(of: "_", with: " ")
+            pause(j.id, reason: reason.isEmpty ? "Usage limit" : reason, at: resumeAt, known: resumeAt != nil, builderOwned: true)
+            return
+        }
+        if state.isLive {
+            guard state == .running else { return }
             if let dir { startTailer(j, dir: dir) }
             guard j.status != .working else { return }
-            if let u = update(j.id, { $0.status = .working; $0.note = "Working" }) { report(u, .working, "Working") }
+            if let u = update(j.id, { $0.status = .working; $0.note = "Working"; $0.builderOwnsPause = nil; $0.pausedReason = nil; $0.resumeAt = nil }) { report(u, .working, "Working") }
             changed()
+        } else if j.status == .paused && j.builderOwnsPause != true {
+            return // The same finished builder may be polled again before our resume timer fires.
         } else if FileManager.default.fileExists(atPath: resultPath(j.id)) {
             end(j.id, .done, "Finished", reportAs: .done)
         } else {
             let reason = dir.flatMap { Self.builderFailureReason(dir: $0) }
-            if launcher.canResumeBackground, j.sessionId != nil {
+            if let dir { startTailer(j, dir: dir) }
+            lock.lock(); let tailer = tailers[j.id]; lock.unlock()
+            tailer?.sync()
+            lock.lock(); let session = inbound.first { $0.id == j.id }?.sessionId; lock.unlock()
+            if launcher.canResumeBackground, session != nil {
                 if let r = reason, PeerResume.isUsageLimit(r) {
                     let at = PeerResume.resumeTime(from: r, now: now())
                     pause(j.id, reason: "Usage limit", at: at ?? now().addingTimeInterval(PeerResume.unknownWait), known: at != nil); return
                 }
-                if (j.resumes ?? 0) < PeerResume.maxResumes { performResume(j.id); return }
+                if (j.resumes ?? 0) < PeerResume.maxResumes {
+                    pause(j.id, reason: PeerMask.firstLine(reason ?? "Claude stopped with an error"), at: now(), known: true)
+                    performResume(j.id); return
+                }
             }
             end(j.id, .failed, Self.withReason("Ended without a result", reason), reportAs: .failed)
         }
@@ -1148,19 +1266,32 @@ final class PeerEngine: @unchecked Sendable {
 
     // MARK: Missions M1 — pause and resume
 
-    /// Park a job: paused, with why and when (the receiver's clock); arm a timer to resume it then.
-    private func pause(_ jobId: String, reason: String, at: Date, known: Bool) {
+    /// Builder waiting is observed only; all other pauses belong to the engine.
+    private func pause(_ jobId: String, reason: String, at: Date?, known: Bool, builderOwned: Bool = false) {
+        resumeLock.lock(); defer { resumeLock.unlock() }
         let note = known ? "Paused: \(reason)" : "Paused: \(reason), reset time unknown"
-        guard let u = update(jobId, { $0.status = .paused; $0.pausedReason = reason; $0.resumeAt = at; $0.note = note }) else { return }
-        lock.lock(); let tl = tailers.removeValue(forKey: jobId); lock.unlock()
-        tl?.sync(); tl?.stop()
+        lock.lock(); let cur = inbound.first { $0.id == jobId }; lock.unlock()
+        guard let cur, !cur.status.isFinal else { return }
+        if cur.status == .paused && cur.pausedReason == reason && cur.resumeAt == at && (cur.builderOwnsPause == true) == builderOwned { return }
+        guard let u = update(jobId, { $0.status = .paused; $0.pausedReason = reason; $0.resumeAt = at; $0.note = note; $0.builderOwnsPause = builderOwned }) else { return }
+        stopTailer(jobId)
         report(u, .paused, note)
         changed()
+        if !builderOwned, let at { scheduleResume(jobId, at: at) }
+    }
+
+    private func stopTailer(_ jobId: String) {
+        lock.lock(); let tl = tailers.removeValue(forKey: jobId); lock.unlock()
+        tl?.sync(); tl?.stop()
+    }
+
+    private func scheduleResume(_ jobId: String, at: Date) {
         scheduler(max(1, at.timeIntervalSince(now()))) { [weak self] in
             guard let self else { return }
             self.work.async {
+                self.resumeLock.lock(); defer { self.resumeLock.unlock() }
                 self.lock.lock(); let cur = self.inbound.first { $0.id == jobId }; self.lock.unlock()
-                if cur?.status == .paused, let r = cur?.resumeAt, r <= self.now().addingTimeInterval(1) { self.performResume(jobId) }
+                if cur?.status == .paused, cur?.builderOwnsPause != true, cur?.resumeAt == at, at <= self.now().addingTimeInterval(1) { self.performResume(jobId) }
             }
         }
     }
@@ -1181,11 +1312,18 @@ final class PeerEngine: @unchecked Sendable {
 
     /// Relaunch a paused / interrupted job under its own Claude session. Past the cap, or with no session, it fails.
     func performResume(_ jobId: String) {
+        resumeLock.lock(); defer { resumeLock.unlock() }
         lock.lock(); let cur = inbound.first { $0.id == jobId }; lock.unlock()
-        guard let j = cur, !j.status.isFinal else { return }
-        guard let sid = sessionFor(j), let wt = j.worktree else { end(jobId, .failed, "Couldn't pick the job back up", reportAs: .failed); return }
+        guard let j = cur, j.status == .paused, j.builderOwnsPause != true else { return }
+        guard let sid = sessionFor(j), let wt = j.worktree else {
+            end(jobId, .failed, Self.withReason("Hit an error", j.pausedReason), reportAs: .failed); return
+        }
         let n = (j.resumes ?? 0) + 1
         guard n <= PeerResume.maxResumes else { end(jobId, .failed, Self.withReason("Stopped after \(PeerResume.maxResumes) restarts", j.pausedReason), reportAs: .failed); return }
+        stopTailer(jobId)
+        // StopFailure leaves Claude alive. Close that tab while the job is still paused,
+        // before a second process can resume the same session.
+        if let old = j.pane, launcher.paneAlive(old) { launcher.stop(panes: [old], builders: []) }
         let dir = jobDir(jobId)
         var pane: UUID?, builder: String?
         if j.desk != nil {
@@ -1194,7 +1332,9 @@ final class PeerEngine: @unchecked Sendable {
                                        rolePath: dir.appendingPathComponent("role.md").path, firstPrompt: prompt, resumeSession: sid)
             if pane == nil { end(jobId, .failed, "Couldn't open a tab for the job", reportAs: .failed); return }
         } else if j.builder != nil {
-            let name = PeerNaming.agentName(label: j.peerLabel, jobId: jobId) + "-r\(n)"
+            let name = launcher.keepsBuilderOnResume ? (j.builder ?? PeerNaming.agentName(label: j.peerLabel, jobId: jobId)) : PeerNaming.agentName(label: j.peerLabel, jobId: jobId) + "-r\(n)"
+            // The live builder keeps its name. Reserve its next run before a stale Hub poll can arrive.
+            if let run = j.builderRun { _ = update(jobId) { $0.builderRun = run + 1 } }
             if let err = launcher.launchBackground(agentName: name, parent: PeerNaming.parentName(label: j.peerLabel), cwd: wt, prompt: "Continue from where you stopped.", resumeSession: sid) {
                 end(jobId, .failed, err, reportAs: .failed); return
             }
@@ -1204,7 +1344,7 @@ final class PeerEngine: @unchecked Sendable {
                                        rolePath: dir.appendingPathComponent("role.md").path, firstPrompt: "Continue from where you stopped.", resumeSession: sid)
             if pane == nil { end(jobId, .failed, "Couldn't open a tab for the job", reportAs: .failed); return }
         }
-        if let u = update(jobId, { $0.status = .working; $0.note = "Resumed"; $0.sessionId = sid; $0.resumes = n; $0.pausedReason = nil; $0.resumeAt = nil; $0.pane = pane; $0.builder = builder ?? $0.builder }) {
+        if let u = update(jobId, { $0.status = .working; $0.note = "Resumed"; $0.sessionId = sid; $0.resumes = n; $0.builderOwnsPause = nil; $0.pausedReason = nil; $0.resumeAt = nil; $0.pane = pane; $0.builder = builder ?? $0.builder }) {
             report(u, .working, "Resumed")
         }
         changed()
@@ -1212,9 +1352,15 @@ final class PeerEngine: @unchecked Sendable {
 
     /// Launch: a job whose tab is gone (True quit or crashed) pauses, then resumes at once.
     func recoverInterrupted() {
+        resumeLock.lock(); defer { resumeLock.unlock() }
         lock.lock()
+        let paused = inbound.filter { $0.status == .paused && $0.builderOwnsPause != true }
         let hit = inbound.filter { !$0.status.isFinal && $0.status != .paused && $0.status != .queued && $0.pane.map { !launcher.paneAlive($0) } ?? false }
         lock.unlock()
+        for j in paused {
+            if let at = j.resumeAt, at > now() { scheduleResume(j.id, at: at) }
+            else { performResume(j.id) }
+        }
         for j in hit {
             if sessionFor(j) == nil { continue }
             pause(j.id, reason: "True restarted", at: now(), known: true)

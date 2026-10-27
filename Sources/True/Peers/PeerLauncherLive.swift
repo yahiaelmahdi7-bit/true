@@ -117,6 +117,27 @@ final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
         return box.err
     }
 
+    var canResumeBackground: Bool { canRunBackground }
+    var keepsBuilderOnResume: Bool { true }
+
+    /// The builder CLI resumes its existing record and rotates the stream, retaining its name and session.
+    func launchBackground(agentName: String, parent: String, cwd: String, prompt: String, resumeSession: String?) -> String? {
+        guard let resumeSession else { return launchBackground(agentName: agentName, parent: parent, cwd: cwd, prompt: prompt) }
+        let records = HubScanner.builders(in: HubScanner.claudeDir.appendingPathComponent("builders"))
+        guard let record = records.first(where: { $0.name == agentName && $0.sessionID == resumeSession }),
+              [.done, .failed, .killed, .died].contains(record.state) else { return "Couldn't pick the background job back up" }
+        guard let file = CommandExecutor.writePrompt(prompt, name: agentName) else { return "Couldn't write the job prompt" }
+        final class Box: @unchecked Sendable { var error: String? }
+        let box = Box(), sem = DispatchSemaphore(value: 0)
+        Task.detached {
+            let (code, _) = await BuilderSpawn.systemRunner([SpawnRequest.builderPath(), "resume", record.id, "--prompt-file", file])
+            if code != 0 { box.error = "Couldn't pick the background job back up" }
+            sem.signal()
+        }
+        sem.wait()
+        return box.error
+    }
+
     func deliverLine(agent: String, line: String) {
         Self.onMain {
             guard let pane = AgentRegistry.shared.panes[agent] else { return }      // only an awake local agent gets the line
@@ -176,11 +197,11 @@ final class PeerLauncherLive: PeerLauncher, @unchecked Sendable {
 /// Hub builder list → peers engine: only touches the engine when a peer-named builder exists.
 @MainActor enum PeerBuilders {
     static func report(_ records: [BuilderRecord]) {
-        for u in updates(records) { PeerService.engine.builderUpdate(name: u.name, running: u.running, dir: u.dir) }
+        for u in updates(records) { PeerService.engine.builderUpdate(u) }
     }
 
-    /// A queued, waiting or unknown-state builder keeps its peer job open; only a finished one ends it.
-    static func updates(_ records: [BuilderRecord]) -> [(name: String, running: Bool, dir: String?)] {
-        records.filter { $0.name.hasPrefix("peer-") }.map { ($0.name, $0.state.isLive, $0.dir) }
+    /// Preserve waiting ownership and reset time instead of collapsing all live states into running.
+    static func updates(_ records: [BuilderRecord]) -> [BuilderRecord] {
+        records.filter { $0.name.hasPrefix("peer-") }
     }
 }
