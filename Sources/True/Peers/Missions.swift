@@ -138,6 +138,7 @@ struct MissionJobProgress: Codable, Equatable {
     var attempt = 0
     var launchKey: String?
     var mergeBlocked = false
+    var fixRounds = 0
 }
 
 struct MissionLaunch {
@@ -171,7 +172,12 @@ extension MissionJobLauncher {
     }
 }
 
-enum MissionMergeAnswer { case merged, inputRequired(String) }
+enum MissionMergeAnswer {
+    case merged
+    case inputRequired(String)
+    /// A red check or merge conflict: send the job back to its worker with this note (a fix round).
+    case fix(String)
+}
 protocol MissionMergeGate: AnyObject {
     /// U2 owns the real gate and idempotency by remote SHA. Repeating this call must be safe.
     func merge(_ launch: MissionLaunch, at destination: MissionDestination, check: String?) throws -> MissionMergeAnswer
@@ -310,6 +316,20 @@ final class MissionRunner {
                 switch answer {
                 case .merged: p.state = .merged; p.reason = ""; p.mergeBlocked = false
                 case .inputRequired(let reason): p.state = .needsYou; p.reason = reason; p.mergeBlocked = true
+                case .fix(let note):
+                    if p.fixRounds >= 2 {
+                        // The 2nd fix round is still red: hand it to Yahia with the plain reason, no 3rd resume.
+                        p.state = .needsYou; p.reason = note; p.mergeBlocked = true
+                    } else {
+                        p.fixRounds += 1
+                        p.reason = ""; p.mergeBlocked = false
+                        p.state = .running
+                        try update(job.title, p) // durable intent BEFORE the resume side effect, so a replay never resumes twice
+                        var resumeLaunch = launch(for: job, progress: p)
+                        resumeLaunch.note = note
+                        do { try launcher.resume(resumeLaunch, at: destination) }
+                        catch { p.state = .needsYou; p.reason = "Couldn't resume the job"; p.mergeBlocked = true }
+                    }
                 }
                 try update(job.title, p)
             }

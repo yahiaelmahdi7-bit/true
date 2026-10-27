@@ -5,13 +5,14 @@ import Darwin
 final class MissionGitMergeGate: MissionMergeGate {
     let folder: URL
     private let resolve: (String) -> String?
+    private let checkTimeout: TimeInterval
     private let mutex = NSRecursiveLock()
     private struct Consent: Codable {
         var approved: Set<String> = []
         var pending: [String: String] = [:]
     }
-    init(folder: URL, resolveClone: @escaping (String) -> String?) {
-        self.folder = folder; resolve = resolveClone
+    init(folder: URL, resolveClone: @escaping (String) -> String?, checkTimeout: TimeInterval = 20 * 60) {
+        self.folder = folder; resolve = resolveClone; self.checkTimeout = checkTimeout
     }
     private var consentURL: URL { folder.appendingPathComponent("merge-consent.json") }
     private func consent() throws -> Consent {
@@ -109,19 +110,22 @@ final class MissionGitMergeGate: MissionMergeGate {
                 let merged = git(["-c", "user.name=True", "-c", "user.email=true@localhost", "merge", "--no-edit", "--no-ff", sha], worktree.path)
                 guard merged.0 == 0 else {
                     let short = git(["rev-parse", "--short", baseRef], clone).1
-                    return .inputRequired("rebase on \(short)")
+                    return .fix("rebase on \(short)")
                 }
                 let home = FileManager.default.temporaryDirectory.appendingPathComponent("true-check-home-" + UUID().uuidString)
                 try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 defer { try? FileManager.default.removeItem(at: home) }
                 let env = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin", "HOME": home.path,
                            "LANG": "en_US.UTF-8", "TMPDIR": FileManager.default.temporaryDirectory.path]
-                let result = Subprocess.exec("/bin/sh", ["-c", "cd \"$1\" && " + check, "mission-check", worktree.path],
-                                             timeout: nil, mergeStderr: true, env: env)
-                guard let result, result.status == 0 else {
-                    let output = result.map { String(decoding: $0.out, as: UTF8.self) } ?? "Couldn't run the check"
+                let outcome = Self.runCheck("/bin/sh", ["-c", "cd \"$1\" && " + check, "mission-check", worktree.path],
+                                             env: env, timeout: checkTimeout)
+                if outcome.timedOut {
+                    return .inputRequired("check timed out after \(Self.timeoutText(checkTimeout))")
+                }
+                guard outcome.status == 0 else {
+                    let output = outcome.output
                     let tail = output.split(separator: "\n").suffix(8).joined(separator: "\n")
-                    return .inputRequired(PeerMask.text(tail.isEmpty ? "Check failed" : tail))
+                    return .fix(PeerMask.text(tail.isEmpty ? "Check failed" : tail))
                 }
                 guard git(["push", "origin", "HEAD:refs/heads/" + base], worktree.path).0 == 0 else {
                     return .inputRequired("can't merge: no shared remote")
@@ -130,4 +134,67 @@ final class MissionGitMergeGate: MissionMergeGate {
             }
         } catch PeerError.invalid(let reason) { return .inputRequired(reason) }
     }
+
+    private static func timeoutText(_ timeout: TimeInterval) -> String {
+        let minutes = Int((timeout / 60).rounded())
+        return minutes >= 1 ? "\(minutes) min" : "\(Int(timeout))s"
+    }
+
+    /// Runs the check command in its own process group and kills the whole group on timeout (TERM, then KILL after a
+    /// short grace). Subprocess's timeout only signals `/bin/sh`; grandchildren keep the output pipe open forever, so
+    /// the group must die for the call to return and for the per-repo lock and worktree to be released.
+    private static func runCheck(_ exe: String, _ args: [String], env: [String: String], timeout: TimeInterval)
+        -> (status: Int32, output: String, timedOut: Bool) {
+        let pipe = Pipe()
+        let write = pipe.fileHandleForWriting
+        let read = pipe.fileHandleForReading
+
+        var attr: posix_spawnattr_t?
+        guard posix_spawnattr_init(&attr) == 0 else { return (-1, "", false) }
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
+        var actions: posix_spawn_file_actions_t?
+        guard posix_spawn_file_actions_init(&actions) == 0 else {
+            posix_spawnattr_destroy(&attr); return (-1, "", false)
+        }
+        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        posix_spawn_file_actions_adddup2(&actions, write.fileDescriptor, 1)
+        posix_spawn_file_actions_adddup2(&actions, write.fileDescriptor, 2)
+
+        let argv: [UnsafeMutablePointer<CChar>?] = ([exe] + args).map { strdup($0) } + [nil]
+        defer { for p in argv { free(p) } }
+        let envp: [UnsafeMutablePointer<CChar>?] = env.map { strdup("\($0.key)=\($0.value)") } + [nil]
+        defer { for p in envp { free(p) } }
+
+        var pid: pid_t = 0
+        let spawned = posix_spawn(&pid, exe, &actions, &attr, argv, envp) == 0
+        posix_spawn_file_actions_destroy(&actions)
+        posix_spawnattr_destroy(&attr)
+        try? write.close()
+        guard spawned else { try? read.close(); return (-1, "", false) }
+
+        let box = CheckOutputBox()
+        let done = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            box.data = read.readDataToEndOfFile()
+            try? read.close()
+            done.signal()
+        }
+
+        let timedOut = done.wait(timeout: .now() + timeout) == .timedOut
+        if timedOut {
+            _ = Darwin.kill(-pid, SIGTERM)
+            Thread.sleep(forTimeInterval: 1)
+            if Darwin.kill(pid, 0) == 0 { _ = Darwin.kill(-pid, SIGKILL) }
+            done.wait()
+        }
+        var status: Int32 = 0
+        _ = waitpid(pid, &status, 0)
+        let code: Int32 = (status & 0x7f) == 0 ? (status >> 8) & 0xff : 1
+        return (code, String(decoding: box.data, as: UTF8.self), timedOut)
+    }
+}
+
+/// Mutable capture for the check reader thread; the semaphore orders the write before the caller reads it back.
+private final class CheckOutputBox: @unchecked Sendable {
+    var data = Data()
 }

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Testing
 @testable import True
 
@@ -43,8 +44,11 @@ extension MissionsTests {
         func remoteHead() throws -> String { try git(["rev-parse", "refs/heads/mission/demo"], in: remote) }
         func clean() { try? FileManager.default.removeItem(at: root) }
         func reason(_ answer: MissionMergeAnswer) -> String {
-            if case .inputRequired(let reason) = answer { return reason }
-            Issue.record("Expected input-required"); return ""
+            switch answer {
+            case .inputRequired(let reason): return reason
+            case .fix(let note): return note
+            case .merged: Issue.record("Expected input-required"); return ""
+            }
         }
         func merged(_ answer: MissionMergeAnswer) {
             if case .merged = answer {} else { Issue.record("Expected merged") }
@@ -107,6 +111,29 @@ extension MissionsTests {
         _ = try w.git(["fetch", w.repo.path, "refs/heads/peer/demo/1-work:refs/heads/peer/demo/1-work"], in: w.remote)
         _ = try w.git(["checkout", "main"])
         w.merged(try w.gate.merge(w.launch, at: .peer("Bea"), check: nil))
+    }
+
+    @Test func checkTimeoutKillsTheWholeGroupAndFreesTheLock() throws {
+        let w = GitWorld(); defer { w.clean() }; try w.setup()
+        let pidFile = w.root.appendingPathComponent("grandchild.pid").path
+        try w.mission(check: "{ sleep 600 & echo $! > '\(pidFile)'; wait; }")
+        let gate = MissionGitMergeGate(folder: w.folder, resolveClone: { _ in w.repo.path }, checkTimeout: 2)
+        let start = Date()
+        let answer = try gate.merge(w.launch, at: .mine, check: nil)
+        #expect(Date().timeIntervalSince(start) < 15)
+        #expect(w.reason(answer).contains("check timed out"))
+        // The per-repo lock and worktree are freed: a second merge takes them right away.
+        try w.mission(check: "true")
+        w.merged(try gate.merge(w.launch, at: .mine, check: nil))
+        // The sleeping grandchild that kept the pipe open is gone.
+        guard let pidText = try? String(contentsOfFile: pidFile, encoding: .utf8),
+              let pid = Int32(pidText.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            Issue.record("grandchild pid was not recorded"); return
+        }
+        var alive = true
+        for _ in 0..<200 where Darwin.kill(pid, 0) == 0 { usleep(10_000) }
+        alive = Darwin.kill(pid, 0) == 0
+        #expect(!alive)
     }
 
     @Test func missionCLIRoundTripUsesRunnerAndFolderLease() throws {
