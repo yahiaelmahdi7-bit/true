@@ -125,7 +125,7 @@ struct HubPanel: View {
                                         builders: hub.builders, now: now, seatsOnly: hub.filter == .seats)
             HubPanelContent(groups: groups, allSeats: registry.crew, filter: $hub.filter, now: now,
                             actions: seatActions,
-                            onNew: { registry.builder = BuilderDraft() },
+                            onNew: { showNewCloud = true },
                             onClose: { registry.panelOpen = false },
                             onDetail: { detail = $0 },
                             onReveal: { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: $0.cwd)]) },
@@ -163,7 +163,8 @@ struct HubPanel: View {
         }
         .sheet(item: $detail) { BuilderDetailSheet(record: $0) }
         .sheet(item: $cloudDetail) { CloudJobSheet(job: $0) { cloudDetail = nil } }
-        .sheet(isPresented: $showNewCloud) { NewCloudJobSheet(projects: projectKeys) { showNewCloud = false } }
+        .sheet(isPresented: $showNewCloud) { NewCloudJobSheet(projects: projectKeys, done: { showNewCloud = false },
+                                                     onChooseMac: { showNewCloud = false; registry.builder = BuilderDraft() }) }
         .sheet(item: $watcherOpen) { WatcherItemSheet(item: $0, store: watcher) }
     }
 

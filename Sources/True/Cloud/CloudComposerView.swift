@@ -7,17 +7,22 @@ import SwiftUI
 struct NewCloudJobSheet: View {
     let projects: [String]
     var done: () -> Void
+    /// "On my Mac" was picked: the host closes this sheet and opens the agent builder.
+    var onChooseMac: () -> Void = {}
     @State private var model: CloudComposerModel
 
-    init(projects: [String], done: @escaping () -> Void) {
+    init(projects: [String], done: @escaping () -> Void, onChooseMac: @escaping () -> Void = {}) {
         self.projects = projects
         self.done = done
+        self.onChooseMac = onChooseMac
         _model = State(initialValue: CloudComposerModel(projects: projects))
     }
 
     var body: some View {
         CloudComposerContent(model: model, onRun: { Task { await run() } }, onCancel: done,
-                             onChooseFolder: chooseFolder, onRecheck: { Task { await checkCloud() } })
+                             onChooseFolder: chooseFolder, onRecheck: { Task { await checkCloud() } },
+                             onChooseMac: onChooseMac,
+                             onAddToCloud: { Task { await model.addToCloud(sync: { p, progress in try CloudSync().sync(localRepo: p, progress: progress) }) } })
             .frame(width: CloudComposerContent.width)
             .presentationBackground(CloudComposerContent.base)
             .environment(\.colorScheme, .dark)
@@ -58,6 +63,8 @@ struct CloudComposerContent: View {
     var onCancel: () -> Void = {}
     var onChooseFolder: () -> Void = {}
     var onRecheck: () -> Void = {}
+    var onChooseMac: () -> Void = {}
+    var onAddToCloud: () -> Void = {}
 
     @FocusState private var listFocus: Bool
 
@@ -91,7 +98,8 @@ struct CloudComposerContent: View {
     private var header: some View {
         HStack(spacing: 16) {
             Image(systemName: "icloud.and.arrow.up").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.hubSecondary)
-            Text("Run in cloud").font(.title3.weight(.semibold))
+            Text("New").font(.title3.weight(.semibold))
+            runsOnSwitch
             Spacer(minLength: 8)
             HStack(spacing: 8) {
                 Circle().fill(model.link == .offline ? Theme.verdictWarn : model.link == .online ? Color.white : Theme.dimText)
@@ -104,6 +112,30 @@ struct CloudComposerContent: View {
         .padding(.horizontal, 24).frame(height: 56)
     }
 
+    /// Cloud is selected on open. "On my Mac" hands over to the agent builder; the choice is never remembered.
+    private var runsOnSwitch: some View {
+        Picker("Runs on", selection: Binding(get: { model.runsOn },
+                                             set: { model.runsOn = $0; if $0 == .myMac { onChooseMac() } })) {
+            Text("Cloud").tag(CloudRunsOn.cloud)
+            Text("On my Mac").tag(CloudRunsOn.myMac)
+        }
+        .pickerStyle(.segmented).labelsHidden().frame(width: 190)
+        .accessibilityLabel("Runs on")
+    }
+
+    @ViewBuilder private var addToCloud: some View {
+        switch model.add {
+        case .idle: PlainButton("Add to cloud", action: onAddToCloud)
+        case .adding: Text("Adding…").font(.callout).foregroundStyle(Theme.hubSecondary)
+        case .added: Label("In the cloud", systemImage: "checkmark").font(.callout).foregroundStyle(Theme.hubSecondary)
+        case .failed(let m):
+            HStack(spacing: 8) {
+                Text(m).font(.callout).foregroundStyle(Theme.hubFailed)
+                PlainButton("Retry", action: onAddToCloud)
+            }
+        }
+    }
+
     // MARK: repo
 
     private var repoSection: some View {
@@ -113,6 +145,7 @@ struct CloudComposerContent: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
                         RepoRow(info: sel, now: now, highlighted: false).frame(maxWidth: .infinity)
+                        if sel.isRunnable { addToCloud }
                         PlainButton("Change") { model.clearSelection() }
                     }
                     .padding(.vertical, 8).padding(.leading, 12).padding(.trailing, 12)
