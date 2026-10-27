@@ -241,7 +241,11 @@ struct HubPanelContent: View {
     var onRunCloud: () -> Void = {}
     var onRetryCloud: () -> Void = {}
     var onTriage: (TriageItem) -> Void = { _ in }
+    /// Retry on a failure tile. nil = no retry engine yet: the tile opens the item, where its existing actions live.
+    var onRetry: ((HubTile) -> Void)?
     @State private var jump: String?
+    @State private var showBacklog = false
+    @State private var openTile: HubTile?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var buckets: [TriageBucket] {
@@ -259,23 +263,8 @@ struct HubPanelContent: View {
             } else if filter == .crew {
                 CrewTabView(snapshot: crew, notice: crewNotice, onPick: onCrewPick)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: crewNotice)
-            } else if groups.isEmpty && allSeats.isEmpty && buckets.allSatisfy({ $0.count == 0 }) {
-                ContentUnavailableView {
-                    Label("No agents yet", systemImage: "person.crop.circle.badge.plus")
-                } description: {
-                    Text("An agent is a saved Claude setup. Create one, then wake it in a tab.")
-                } actions: {
-                    // Custom (not .borderedProminent): prominent buttons dim when the window isn't key. Same inverted
-                    // white-on-black device as the attention pill.
-                    Button(action: onNew) {
-                        Text("New Agent").font(.callout.weight(.semibold)).foregroundStyle(.black)
-                            .padding(.horizontal, 16).padding(.vertical, 6).background(.white, in: .capsule)
-                    }
-                    .buttonStyle(.plain)
-                }
             } else if filter == .all {
-                TriageListView(buckets: buckets, now: now, jump: $jump, peers: AnyView(PeerJobsSection()), onAction: onTriage,
-                               onDismiss: { onDismiss([$0.id]) }, onClearBacklog: onDismiss, backlogStartsOpen: backlogOpen)
+                workBoard(buckets)
             } else if groups.isEmpty {
                 ContentUnavailableView("Nothing running", systemImage: "moon.zzz",
                                        description: Text("No Claude sessions or background tasks right now."))
@@ -294,6 +283,44 @@ struct HubPanelContent: View {
         // Seats and Crew read best narrow; the All tab uses the whole card.
         .frame(maxWidth: filter == .all || filter == .chat ? .infinity : Self.width)
         .frame(maxWidth: .infinity)
+        .sheet(item: $openTile) { t in
+            HubTileSheet(tile: t, now: now, onItem: { openTile = nil; onTriage($0) },
+                         onDismissItem: { onDismiss([$0.id]); openTile = nil }, onClose: { openTile = nil })
+        }
+    }
+
+    /// Work · All: the tile board, or the backlog's own view when the header count was tapped.
+    @ViewBuilder private func workBoard(_ buckets: [TriageBucket]) -> some View {
+        if showBacklog {
+            HubBacklogView(items: buckets.first { $0.section == .backlog }.map(Self.flatItems) ?? [], now: now,
+                           onItem: onTriage, onDismiss: { onDismiss([$0.id]) }, onClear: onDismiss,
+                           onBack: { showBacklog = false })
+        } else {
+            HubBoardView(board: HubTriage.board(buckets), now: now, onNew: onNew, onMain: mainAction, onSecondary: secondaryAction,
+                         onOpenTile: { openTile = $0 }, onItem: onTriage)
+        }
+    }
+
+    private static func flatItems(_ b: TriageBucket) -> [TriageItem] {
+        b.entries.flatMap { e -> [TriageItem] in
+            switch e {
+            case .row(let i): return [i]
+            case .group(_, _, _, _, let xs): return xs
+            }
+        }
+    }
+
+    /// A tile's one main button: a single item goes straight to its action, a queue opens its sheet.
+    private func mainAction(_ t: HubTile) {
+        switch t.kind {
+        case .single: if let i = t.items.first { onTriage(i) }
+        case .failures: if let onRetry { onRetry(t) } else if t.items.count == 1 { onTriage(t.items[0]) } else { openTile = t }
+        case .group, .more: openTile = t
+        }
+    }
+
+    private func secondaryAction(_ t: HubTile) {
+        if t.items.count == 1 { onTriage(t.items[0]) } else { openTile = t }
     }
 
     private var rowTransition: AnyTransition {
@@ -321,11 +348,30 @@ struct HubPanelContent: View {
             .pickerStyle(.segmented).labelsHidden().frame(width: 250)
             .accessibilityLabel("Show")
             .accessibilityHint("All: everything running and your agents. Agents: only your agents. Crew: specialists Claude can call in.")
+            if filter == .all { backlogButton(buckets) }
             if filter == .all { headerButton("icloud.and.arrow.up", help: "Run in cloud", hint: "Sends a repo and a prompt to the cloud factory", action: onRunCloud) }
             headerButton("plus", help: "New Agent", hint: "Opens the agent builder", action: onNew)
             headerButton("xmark", help: "Close (Esc)", hint: "Closes the Hub", action: onClose)
         }
         .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 14)
+    }
+
+    /// "Backlog 144": a count, never rows on the board. Opens the backlog's own view; tapping again goes back.
+    @ViewBuilder private func backlogButton(_ buckets: [TriageBucket]) -> some View {
+        let n = buckets.first { $0.section == .backlog }?.count ?? 0
+        if n > 0 {
+            Button { showBacklog.toggle() } label: {
+                HStack(spacing: 5) {
+                    Text("Backlog").font(.callout)
+                    Text("\(n)").font(.callout.monospacedDigit())
+                }
+                .foregroundStyle(showBacklog ? Theme.text : Theme.hubSecondary)
+                .padding(.horizontal, 11).frame(height: 28)
+                .background(Color.white.opacity(showBacklog ? 0.16 : 0.08), in: .capsule).contentShape(.capsule)
+            }
+            .buttonStyle(.plain).help("Older work").accessibilityLabel("Backlog, \(n)")
+            .accessibilityHint(showBacklog ? "Back to the board" : "Opens older work")
+        }
     }
 
     /// "Cloud · connected" / "Cloud · offline — retry": one compact pill, the offline one is the retry button.
