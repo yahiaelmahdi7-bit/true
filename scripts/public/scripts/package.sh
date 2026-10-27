@@ -63,6 +63,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSMicrophoneUsageDescription</key><string>Programs you run in True may use the microphone.</string>
   <!-- Same for Apple Events: osascript run inside True is refused (-1743) with no prompt without this key. -->
   <key>NSAppleEventsUsageDescription</key><string>Programs you run in True, such as osascript, may control other apps.</string>
+  <!-- Run 39: "On this network" finds other Macs running True over Bonjour while the Peers window is open. -->
+  <key>NSLocalNetworkUsageDescription</key><string>True finds other Macs running True on this network so you can pair with a click.</string>
+  <key>NSBonjourServices</key><array><string>_true-peer._tcp</string></array>
 </dict>
 </plist>
 PLIST

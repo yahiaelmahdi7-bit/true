@@ -241,6 +241,21 @@ final class PeerEngine: @unchecked Sendable {
         return PeerInvite(mailboxId: identity.mailboxId, kaPub: k.ka, signPub: k.sign, secret: secret).string
     }
 
+    /// Inviter: drop an invite that was handed out but never used (the nearby handshake failed after minting it), and stop
+    /// watching the relay for it if nothing else needs it.
+    func cancelInvite(_ secret: Data) {
+        let h = PeerCrypto.sha256Hex(secret)
+        lock.lock()
+        let before = invites.count
+        invites.removeAll { $0.secretHash == h && !$0.used }
+        let gone = invites.count != before
+        if gone { saveInvites() }
+        lock.unlock()
+        guard gone else { return }
+        updateWanted()
+        changed()
+    }
+
     /// Joiner: pin the inviter's keys FROM THE INVITE and send a sealed pair-request. `label` is what we call them.
     func pairWithInvite(_ raw: String, label: String) -> Result<PeerLink, PeerError> {
         let name = label.trimmingCharacters(in: .whitespacesAndNewlines)
