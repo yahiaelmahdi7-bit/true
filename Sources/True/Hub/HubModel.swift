@@ -76,6 +76,14 @@ enum BuilderState: String, Sendable {
     /// needs Yahia's OK. `landed` / `unlanded`: merged on main / undone. `other`: any status True does not know
     /// (never `failed`); the raw text stays on the record.
     case queued, waiting, held, landed, unlanded, other
+
+    /// Still going or coming back: anything a reader must not treat as finished. Unknown text counts as live.
+    var isLive: Bool {
+        switch self {
+        case .running, .queued, .waiting, .other: return true
+        case .done, .failed, .killed, .died, .paused, .held, .landed, .unlanded: return false
+        }
+    }
 }
 
 /// One `~/.claude/builders/<id>/meta.json`.
