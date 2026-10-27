@@ -252,7 +252,7 @@ enum PeerService {
     static func startIfPaired() {
         let fm = FileManager.default
         let r = PeerEngine.standardRoot
-        guard fm.fileExists(atPath: r.appendingPathComponent("peers.json").path) || fm.fileExists(atPath: r.appendingPathComponent("invites.json").path) else { return }
-        Task.detached(priority: .utility) { _ = engine }
+        guard fm.fileExists(atPath: MissionRunner.liveRoot.path) || fm.fileExists(atPath: r.appendingPathComponent("peers.json").path) || fm.fileExists(atPath: r.appendingPathComponent("invites.json").path) else { return }
+        Task.detached(priority: .utility) { engine.missionService().recover() }
     }
 }

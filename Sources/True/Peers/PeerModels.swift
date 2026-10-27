@@ -78,6 +78,7 @@ struct SentJob: Codable, Equatable, Sendable, Identifiable {
     var updated: Date
     /// Run 30 (optional so older sent.json still loads).
     var target: PeerTarget? = nil
+    var missionName: String? = nil
     var seq: Int? = nil
     var lastActivity: Date? = nil
     /// Missions M1: the job this one retries; why/when the receiver paused it (the receiver's clock, display only).

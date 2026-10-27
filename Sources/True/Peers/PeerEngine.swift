@@ -14,6 +14,19 @@ final class PeerEngine: @unchecked Sendable {
     private let now: @Sendable () -> Date
     private var cloneLocks: [String: NSLock] = [:]
     private let scheduler: @Sendable (TimeInterval, @escaping @Sendable () -> Void) -> Void
+    private let missionOwnerLock = NSLock()
+    private var missionOwner: MissionService?
+    func missionService() -> MissionService {
+        missionOwnerLock.lock(); defer { missionOwnerLock.unlock() }
+        if let missionOwner { return missionOwner }
+        final class Callback: @unchecked Sendable { let run: () -> Void; init(_ run: @escaping () -> Void) { self.run = run } }
+        let service = MissionService.live(engine: self, platform: launcher, now: now, scheduler: { [scheduler] delay, action in
+            let callback = Callback(action)
+            scheduler(delay) { callback.run() }
+        })
+        missionOwner = service
+        return service
+    }
     let ownName: String
     private let steering: @Sendable () -> Bool
     private let share: @Sendable () -> PeerShare
@@ -623,7 +636,7 @@ final class PeerEngine: @unchecked Sendable {
 
     /// Hand a job to a paired peer. `repo` is a local path or a git remote URL; empty = a job with no project. Returns the jobId.
     func delegate(peer: String, repo rawRepo: String = "", title: String, brief: String, base: String = "main", mode: PeerMode = .pane,
-                  fromAgent: String = "agent", dir rawDir: String = "") -> Result<String, PeerError> {
+                  fromAgent: String = "agent", dir rawDir: String = "", missionBranch: String? = nil, missionName: String? = nil) -> Result<String, PeerError> {
         lock.lock(); let link = links.first { $0.label.lowercased() == peer.lowercased() }; lock.unlock()
         guard let link else { return .failure(.invalid("No peer named \(peer)")) }
         let repo = rawRepo.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -641,6 +654,8 @@ final class PeerEngine: @unchecked Sendable {
         let id = UUID().uuidString.lowercased()
         var req: [String: Any] = ["t": "job", "jobId": id, "title": title, "brief": brief, "base": base,
                                   "mode": mode.rawValue, "fromAgent": fromAgent]
+        if let missionBranch { req["missionBranch"] = missionBranch }
+        if let missionName { req["missionName"] = missionName }
         if !remote.isEmpty { req["repo"] = remote }   // older receivers drop a job whose repo is "", so omit it entirely
         let target: PeerTarget = dir.isEmpty ? .repo(repo: remote, base: base) : .dir(path: dir)
         if !dir.isEmpty { req["target"] = target.wire }
@@ -649,7 +664,7 @@ final class PeerEngine: @unchecked Sendable {
         let t = now()
         let job = SentJob(jobId: id, peerLabel: link.label, peerMailbox: link.mailboxId, title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                           repo: remote, base: base, mode: mode, fromAgent: fromAgent,
-                          status: .queued, note: "Sending", branch: nil, sha: nil, result: nil, created: t, updated: t, target: target)
+                          status: .queued, note: "Sending", branch: nil, sha: nil, result: nil, created: t, updated: t, target: target, missionName: missionName)
         lock.lock(); sent.append(job); saveSent(); lock.unlock()
         guard sealAndQueue(req, to: link, jobId: id, owner: link.mailboxId) else {
             lock.lock()
@@ -872,7 +887,7 @@ final class PeerEngine: @unchecked Sendable {
         let screened = InjectionScreen.screen(job.title + "\n" + job.brief)
         let j = InboundJob(req: job, peerLabel: link.label, peerMailbox: link.mailboxId, status: mode == .ask ? .queued : .accepted,
                            note: mode == .ask ? "Waiting for you" : "Starting", inboundMode: mode, flags: screened.reasons,
-                           received: now(), finished: nil, branch: PeerNaming.branch(label: link.label, jobId: job.jobId), steering: steering())
+                           received: now(), finished: nil, branch: job.missionBranch ?? PeerNaming.branch(label: link.label, jobId: job.jobId), steering: steering())
         inbound.append(j); saveInbound()
         lock.unlock()
         let dir = jobDir(job.jobId)

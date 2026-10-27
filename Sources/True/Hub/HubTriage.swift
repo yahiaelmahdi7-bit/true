@@ -141,7 +141,7 @@ enum HubTriage {
         // A peer's job waiting on Accept is yours to answer; once accepted it is the peer-jobs list's business.
         for j in inbound where j.status == .queued && j.inboundMode == .ask {
             let repo = j.req.hasRepo ? (j.req.repo as NSString).lastPathComponent : "no project"
-            items.append(TriageItem(id: "inbound:\(j.id)", section: .needsYou, tone: .needsYou, title: j.req.title,
+            items.append(TriageItem(id: "inbound:\(j.id)", section: .needsYou, tone: .needsYou, title: [j.req.missionName, j.req.title].compactMap { $0 }.joined(separator: " · "),
                                     subtitle: "From \(j.peerLabel) · waiting for Accept", project: repo,
                                     at: j.received.timeIntervalSince1970, actionLabel: "Accept",
                                     action: .inbound(j.id), noun: "peer jobs"))
@@ -203,7 +203,7 @@ enum HubTriage {
         let model = b.model.isEmpty ? "" : b.model.capitalized + " · "
         let at = b.state == .running ? b.started : (b.ended ?? b.started)
         func make(_ sec: TriageSection, _ tone: TriageTone, _ sub: String, _ label: String) -> TriageItem {
-            TriageItem(id: "builder:\(b.id)", section: sec, tone: tone, title: b.name, subtitle: sub, project: project,
+            TriageItem(id: "builder:\(b.id)", section: sec, tone: tone, title: b.parent.flatMap { $0.hasPrefix("mission: ") ? String($0.dropFirst(9)) : nil } ?? b.name, subtitle: sub, project: project,
                        at: at, actionLabel: label, action: .builder(b.id), noun: "builders")
         }
         switch b.state {

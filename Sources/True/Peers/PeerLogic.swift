@@ -58,6 +58,8 @@ struct PeerJobRequest: Codable, Equatable, Sendable {
     var fromAgent: String
     /// Run 30: a `dir` target — an absolute (or `~/`) folder on the receiver, checked against `peer.allowedDirs`. nil = repo/scratch.
     var dir: String? = nil
+    var missionBranch: String? = nil
+    var missionName: String? = nil
     var hasRepo: Bool { !repo.isEmpty }
     var target: PeerTarget { dir.map { .dir(path: $0) } ?? .repo(repo: repo, base: base) }
 }
@@ -169,8 +171,13 @@ enum PeerValidate {
         guard let mode = str("mode").flatMap(PeerMode.init) else { return .failure(.invalid("mode must be pane or background")) }
         let from = str("fromAgent") ?? "agent"
         guard from.count <= 80, !hasBadControl(from), !from.contains("\n") else { return .failure(.invalid("bad fromAgent")) }
+        let missionBranch = str("missionBranch")
+        if let branch = missionBranch {
+            guard branch.hasPrefix("peer/"), validRef(branch) else { return .failure(.invalid("bad mission branch")) }
+        }
+        let missionName = str("missionName").map { PeerMask.firstLine($0, limit: 120) }
         return .success(PeerJobRequest(jobId: jobId.lowercased(), title: title, brief: brief, repo: repo, base: base,
-                                       mode: mode, fromAgent: from, dir: dir))
+                                       mode: mode, fromAgent: from, dir: dir, missionBranch: missionBranch, missionName: missionName))
     }
 
     /// A branch/ref name: conservative charset, no leading dash, no `..`.
@@ -275,6 +282,10 @@ enum PeerNaming {
         return out.isEmpty ? "peer" : String(out.prefix(24))
     }
     static func branch(label: String, jobId: String) -> String { "peer/\(slug(label))/\(shortId(jobId))" }
+    static func missionBranch(id: String, job: String, index: Int, attempt: Int = 0) -> String {
+        // A fresh attempt must not reset a branch still checked out by the previous job.
+        "peer/\(id)/\(index + 1)-\(slug(job))" + (attempt == 0 ? "" : "-retry-\(attempt)")
+    }
     static func agentName(label: String, jobId: String) -> String { "peer-\(slug(label))-\(shortId(jobId))" }
     static func parentName(label: String) -> String { "peer-\(slug(label))" }
     /// `<repoParent>/<repoName>.peers/<shortId>`
