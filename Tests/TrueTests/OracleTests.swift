@@ -49,12 +49,19 @@ final class OracleKnobs: @unchecked Sendable { var on = true; var projects: [Str
         return Rig(a: a, b: b, abus: ab, bbus: bb, brain: brain, knobs: k, oracle: o)
     }
     /// dev@al asks `@oracle@bea`; returns the question id once the answer has travelled back.
+    /// The bus's file watcher can deliver a line on its own thread instead of inline (the question to the oracle, or the
+    /// answer to the pane), so keep settling until the final reply is in Al's channel and in the asker's pane (2 s cap).
     @discardableResult
     func ask(_ r: Rig, _ q: String, agent: String = "dev") async -> String {
         guard case .success(let m) = r.a.engine.postChat(channel: "@oracle@bea", agent: agent, text: q) else { fatalError("post failed") }
-        r.a.engine.flushChat(); settle(r.a, r.b)
-        await r.oracle.waitIdle()
-        r.b.engine.flushChat(); settle(r.a, r.b)
+        for _ in 0..<200 {
+            r.a.engine.flushChat(); settle(r.a, r.b)
+            await r.oracle.waitIdle()
+            r.b.engine.flushChat(); settle(r.a, r.b)
+            if let reply = r.abus.tail("@" + agent).last(where: { $0.re == m.id }), !reply.text.hasPrefix("Waking"),
+               r.a.sink.lines(agent).contains(ChatNaming.line(reply)) { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
         return m.id
     }
     func close(_ r: Rig) { r.a.close(); r.b.close() }
