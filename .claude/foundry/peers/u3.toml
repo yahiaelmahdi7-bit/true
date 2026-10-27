@@ -1,0 +1,75 @@
+id = "peers-u3"
+repo = "/Users/y/Projects/true"
+lane = "deepseek"
+budget_usd = 5
+max_attempts = 3
+autonomy = "low"
+goal = '''
+Peers M2, unit U3: the fix round, plus a check timeout that really kills the check. Pass = the held-out M2 drill
+(Tests/TrueTests/PeersDrillM2Tests.swift, run by .claude/foundry/peers/drill-m2.sh) goes 3/3. Read the drill first; it
+is the spec in code. Design: docs/designs/peer-missions.md (fixRounds max 2 near line 124; "red check -> the job goes
+back with the failing output" near line 203). U1 + U2 are merged: Sources/True/Peers/Missions.swift (MissionRunner,
+MissionLaunch, launchers, retryJob), MissionMerge.swift (MissionGitMergeGate), MissionService.swift. Reuse them.
+
+A. Fix round (Missions.swift).
+1. Today a red check sets the job to needsYou + mergeBlocked (around Missions.swift:311), and retryJob on a completed
+   job re-merges the same sha, so it is red again. Change: when the gate answers red check or conflict, send the job
+   back to its worker with `launcher.resume(launch, at:)` where `launch.note` is the failing output (the last lines of
+   the check output; for a conflict, the rebase reason). The worker pushes to the same job branch; when it completes
+   again the gate runs again on the new head.
+2. At most 2 fix rounds per job. The counter (fixRounds) is persisted with the job state, so a restart / recover()
+   never grants extra rounds. After the 2nd fix round is still red, the job goes to needsYou with the plain reason
+   (the check tail) for Yahia; no 3rd resume.
+3. Other input-required answers (no check:, no shared remote, first-merge approval) are NOT fix rounds: unchanged.
+4. Idempotent: replaying after a crash (job back to completed, new MissionService + recover()) must not merge twice
+   and must not resume twice for the same red result.
+
+B. Check timeout with tree kill (MissionMerge.swift).
+5. The gate runs `check:` via Subprocess.exec(..., timeout: nil) while holding the per-repo lock. Give it a timeout
+   (default 20 min, injectable for tests). Subprocess's timeout only SIGTERMs /bin/sh; grandchildren keep the pipe
+   open. Run the check in its own process group and kill the whole group (TERM, then KILL after a short grace) on
+   timeout, so the call returns. A timed-out check answers input-required "check timed out after N min", the lock
+   is freed, the worktree removed.
+6. Test (MissionMergeTests, extend): a check that spawns a sleeping grandchild and hangs -> the gate returns
+   input-required within the test timeout, a second merge can take the lock right after, and the grandchild pid is
+   gone.
+
+Rules: injected clock and scheduler only. M1 behaviour must not change: Peer tests and the M1 drill stay green, the
+U2 merge tests stay green. Don't edit any file named in the checks (the drill files are frozen by sha256). Reasons
+plain and short. main is never written; never push anything except mission branches inside tests' temp remotes.
+'''
+
+[[check]]
+id = "missions"
+kind = "cmd"
+cmd = "swift test --filter MissionsTests 2>&1 | grep -E \"MissionsTests'? passed\""
+expect_exit = 0
+timeout_s = 2400
+
+[[check]]
+id = "merge"
+kind = "cmd"
+cmd = "swift test --filter MissionMergeTests"
+expect_exit = 0
+timeout_s = 2400
+
+[[check]]
+id = "peer"
+kind = "cmd"
+cmd = "swift test --filter Peer"
+expect_exit = 0
+timeout_s = 2400
+
+[[check]]
+id = "drill-m1"
+kind = "cmd"
+cmd = "sh .claude/foundry/peers/drill-m1.sh Tests/TrueTests/PeersDrillM1Tests.swift"
+expect_exit = 0
+timeout_s = 2400
+
+[[check]]
+id = "drill-m2"
+kind = "cmd"
+cmd = "sh .claude/foundry/peers/drill-m2.sh Tests/TrueTests/PeersDrillM2Tests.swift"
+expect_exit = 0
+timeout_s = 2400
