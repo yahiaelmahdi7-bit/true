@@ -39,12 +39,14 @@ peer-missions.md steps, each phase `fulfills` its checks. Builder prompt = the m
 |---|---|---|---|---|
 | U0 | M1 follow-up: builder `waiting` → peer `paused` + `resume_at`; engine never also resumes | `peer` → `swift test --filter Peer`; `drill-m1` → drill below | — | $8 |
 | U1 | M2.1 mission file + router, M2.2 runner + reconcile | `missions` → `swift test --filter Mission` | — | $10 |
-| U2 | M2.3 merge gate, M2.4 Board + CLI | `missions`; `board-stills` → `swift test --filter MissionBoardSnapshot` | stills | $8 |
+| U2 | M2.3 merge gate + CLI (`true-peer mission start\|status\|cancel`, mission name on job rows); Board moved to U4 | `missions` | — | $6 |
 | U3 | M2 drill | `drill-m2` → `TRUE_DRILL=1 swift test --filter PeersDrillM2` | — | $5 |
-| U4 | M2.5 blind plans + Blender | `blender` → `swift test --filter Blender`; stills | stills | $10 |
+| U4 | M2.4 Board + M2.5 blind plans + Blender (one design pass) | `blender` → `swift test --filter Blender`; `board-stills` → `swift test --filter MissionBoardSnapshot`; stills | stills | $10 |
 | U5 | M2.6 two takes | `takes` → `swift test --filter TwoTakes` | — | $6 |
 | U6 | M3.1 Mind log + sync, M3.2 decisions in envelopes | `mind` → `swift test --filter PeerMind` | — | $8 |
 | U7 | M3.3 cross review, M3.4 ideas feed | `review` → `swift test --filter CrossReview\|IdeasFeed`; stills | stills | $10 |
+
+**Re-scope (Yahia, 2026-10-28: "Slim M2").** M1's drill showed independent jobs already start side by side (16 pairs, all ≤ 30 s), so M2 drops what M1 covers and keeps order + merge. U1 unchanged; U2 loses the Board ($8 → $6); U4 gains it. Run total $63.
 
 **Lanes (Yahia 2026-10-27: "use codex n deepseek").** Builds run off Claude: `lane = "codex"` for U0, U1, U2, U4,
 U6, U7 (the larger Swift units, UI ones included: the stills gate still guards taste); `lane = "deepseek"` for U3 and

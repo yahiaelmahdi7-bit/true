@@ -160,6 +160,7 @@ stored in UserDefaults `peer.lanes` beside `peer.desk`. No new control: the Peer
 row per lane.
 
 ## Approach — M2 Missions + Board (new `Missions.swift`, `MissionBoardView.swift`; `PeerCLI.swift`; Hub)
+**Re-scope (Yahia, 2026-10-28: "Slim M2").** M1's drill showed independent jobs already start side by side (16 pairs, all ≤ 30 s), so M2 drops what M1 covers and keeps order + merge. Router lane juggling and the "jobs overlap" goal are dropped; the Board screen moves to U4 with the Blender (one design pass, one stills gate).
 **Mission file** (Markdown, written by Yahia's Claude from his goal, editable before start; copied to
 `~/.true/missions/<id>/mission.md` at start and never changed after; events in `events.jsonl`, append-only):
 ```
@@ -186,8 +187,8 @@ the job needs), `review` (`cross` to cross-review this job alone). Validation at
 unique titles, every `needs` title exists, no cycles, `where` is valid, `repo` present. No `check:` → the merge gate
 asks Yahia instead of merging.
 
-**Router (`where: auto`) — a rule in code.** The Mac whose fresh Card has the repo, the `tool` and a free lane; ties →
-the peer (keeps Yahia's Mac free); nobody fits → the job waits with the reason on the Board.
+**Router (`where: auto`) — a rule in code (slim).** The peer if its fresh Card has the repo and the `tool`; otherwise Yahia's
+Mac. No free-lane counting: M1 lanes run jobs side by side. Neither fits (no repo here either) → the job waits with the reason in its status.
 
 **Runner — reuse, don't rebuild.** Remote jobs go through today's `PeerEngine` send (M1 behaviour included); jobs on
 Yahia's own Mac start through `AgentLaunch` as background sessions in worktrees. `Missions.swift` holds only the order,
@@ -208,7 +209,8 @@ branch reaches **main** only by Yahia's click (after M3, after cross review).
 run without it) · Cancel mission. Cancel stops every unfinished job (sender stop → `canceled`). After a True crash or
 restart the runner reconciles from `events.jsonl` + the jobs' statuses and carries on.
 
-**Board.** In the Hub, one card per mission, one row per job: Mac · state · current step (36a live view) · time · cost
+**Board (moved to U4, with the Blender).** Until then: the mission name on each job's existing row and `true-peer mission status <id>`.
+Later, in the Hub, one card per mission, one row per job: Mac · state · current step (36a live view) · time · cost
 when known; `blocked` rows say what they wait for. `true-peer mission start|status|cancel <id>` on the CLI. Plain labels.
 
 **Two blind plans + Blender (M2.5; new `MissionBlend.swift`).** Turned on only after M2.1–M2.4 have run a few
@@ -339,8 +341,8 @@ the project (latest 10, ≤ 2 KB) go into both blind planners and the Blender. S
   rate and hand re-sends reported as measured from `sent.json` (target < 5% and 0), before/after shown to Yahia. The
   rate is reported two ways, with `canceled` counted as a failure (like the 29% baseline) and without, and with the
   raw counts, because 20 jobs is a small sample.
-- **M2:** one real FDOS mission with ≥ 3 jobs and ≥ 1 `needs` edge runs from one command; overlap visible in
-  `events.jsonl`; one forced red check goes through a fix round; wall-clock compared with the same jobs sent one by one last week.
+- **M2:** one real FDOS mission with ≥ 3 jobs and ≥ 1 `needs` edge runs from one command; one forced red check goes
+  through a fix round. (Slim M2: overlap and wall-clock are a monitor only; M1's drill already proves side-by-side starts.)
 - **M2.5 Blender, does it actually help:** (a) every blend passes the code check (a ledger with sections, or
   "Plans agree"); (b) Yahia rates the first 10 blends with one tap: *better than either plan · as good as the better
   one · worse*, target ≥ 6 of 10 "better than either" and ≤ 1 "worse"; (c) across the next missions, fix rounds +

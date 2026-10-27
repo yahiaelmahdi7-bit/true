@@ -1,0 +1,63 @@
+id = "peers-u1"
+repo = "/Users/y/Projects/true"
+lane = "codex"
+budget_usd = 10
+max_attempts = 3
+autonomy = "low"
+goal = '''
+Peers M2, unit U1 (Slim M2): the mission file, its validation and router (M2.1), and the runner with states and
+reconcile (M2.2). Engine and tests only: no UI, no CLI (the CLI is U2, the Board is U4).
+Spec: docs/designs/peer-missions.md "Approach — M2 Missions + Board" (read the "Re-scope" line first: the router is the
+slim rule, there is no free-lane counting) and its Steps lines for M2.1 and M2.2; docs/designs/peers-foundry-run.md (U1 row).
+
+A. Mission file + validation + router (new Sources/True/Peers/Missions.swift).
+1. Parse the Markdown mission format exactly as the spec shows: "# Mission: <name>", one "## <job title>" per job, field
+   lines (repo, where, needs, tool, review, check), the rest of the section is the job's brief.
+2. Validation at start refuses with one plain line that names the file line: unique titles, every `needs` title exists,
+   no cycles, `where` is auto, mine or a paired peer's label, `repo` present.
+3. Router for `where: auto`, a rule in code: the peer if its fresh Card has the repo and the `tool`; otherwise Yahia's
+   Mac; neither has the repo -> the job waits with a plain reason. Use the M1 Card (PeerCaps, isStale) as it is.
+
+B. Runner + states + reconcile (Missions.swift; reuse, don't rebuild).
+4. At start the file is copied to <missions root>/<id>/mission.md (root injectable; live = ~/.true/missions) and never
+   changed after; every state change is appended to events.jsonl in that folder.
+5. Remote jobs go out through PeerEngine's existing send (M1 preflight and resume included). Jobs on Yahia's Mac start
+   as background sessions in worktrees through the existing launch path. Both sit behind injectable protocols so tests
+   use fakes.
+6. A job starts only when every job it `needs` is merged. Merging is a seam: a protocol whose answer is merged or
+   input-required with a reason. U1 ships the protocol and a test fake only; U2 builds the real merge gate. Nothing in
+   U1 lets a user start a mission yet.
+7. Mission states running, needs-you, done, canceled. A job that fails or is declined blocks only its dependents;
+   independent jobs carry on; the mission goes needs-you with three actions as functions: retry job, skip it
+   (dependents run without it), cancel mission. Cancel stops every unfinished job (sender stop -> canceled).
+8. Reconcile: a new runner opened on the same folder after a crash rebuilds state from events.jsonl plus the jobs'
+   statuses and carries on. No job is ever started twice.
+
+Tests: new suite MissionsTests in Tests/TrueTests/MissionsTests.swift. The spec's FDOS example parses; each validation
+error refuses with its line; a router rule table; a fake launcher runs the example in `needs` order; a failed job blocks
+only its dependents; kill + relaunch carries on with zero double starts; cancel stops everything unfinished.
+
+Rules: injected clock and scheduler only (no real Timer or Date()). M1 behaviour must not change: Peer tests and the M1
+drill stay green. Don't edit any file named in the checks. Reasons plain and short, no ids or file:line. No UI changes.
+'''
+
+[[check]]
+id = "missions"
+kind = "cmd"
+cmd = "swift test --filter MissionsTests 2>&1 | grep -E \"MissionsTests'? passed\""
+expect_exit = 0
+timeout_s = 2400
+
+[[check]]
+id = "peer"
+kind = "cmd"
+cmd = "swift test --filter Peer"
+expect_exit = 0
+timeout_s = 2400
+
+[[check]]
+id = "drill-m1"
+kind = "cmd"
+cmd = "sh .claude/foundry/peers/drill-m1.sh Tests/TrueTests/PeersDrillM1Tests.swift"
+expect_exit = 0
+timeout_s = 2400
