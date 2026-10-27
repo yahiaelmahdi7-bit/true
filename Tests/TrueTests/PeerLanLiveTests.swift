@@ -11,12 +11,14 @@ import Foundation
         let identity = PeerIdentity.generate(), launcher = FakeLauncher()
         let engine: PeerEngine
         let lan: PeerLanCoordinator
-        init(_ name: String, relay: (PeerIdentity) -> PeerTransport) {
+        init(_ name: String, loopback: Bool = false, relay: (PeerIdentity) -> PeerTransport) {
             engine = PeerEngine(root: root, identity: identity, launcher: launcher, transport: relay(identity), inboundMode: { .bypass },
                                 ownName: name, steering: { true }, share: { .activity }, allowedDirs: { [] }, chatOn: { false },
                                 sharedRepos: { [:] }, setSharedRepos: { _ in }, desk: { false }, projectsRoot: root.path + "/Projects",
                                 now: { Date() }, scheduler: { s, f in DispatchQueue.global().asyncAfter(deadline: .now() + s, execute: f) })
-            lan = PeerLanCoordinator(transport: PeerLanNetwork(), engine: engine)
+            let net = PeerLanNetwork()
+            if loopback { net.dialInterface = .loopback }
+            lan = PeerLanCoordinator(transport: net, engine: engine)
         }
         func close() { lan.close(); try? FileManager.default.removeItem(at: root) }
     }
@@ -42,7 +44,7 @@ import Foundation
     /// Steps 1 + 3 together: real Bonjour, real handshake, real relay. Both temp engines end with a confirmed link.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["TRUE_LIVE_RELAY"] == "1"))
     func fullFlowOverRealBonjourAndRelay() async throws {
-        let a = Side("Live Al \(UUID().uuidString.prefix(4))", relay: { PeerRelayLive(identity: $0, relayURL: { PeerRelay.defaultURL }) })
+        let a = Side("Live Al \(UUID().uuidString.prefix(4))", loopback: true, relay: { PeerRelayLive(identity: $0, relayURL: { PeerRelay.defaultURL }) })
         let b = Side("Live Bo \(UUID().uuidString.prefix(4))", relay: { PeerRelayLive(identity: $0, relayURL: { PeerRelay.defaultURL }) })
         defer { a.close(); b.close() }
         a.lan.open(); b.lan.open()
@@ -54,6 +56,8 @@ import Foundation
         #expect(b.lan.prompt?.code == code)
         a.lan.confirmSend(); b.lan.accept()
         #expect(await until(45) { a.lan.sendState[row] == .paired })
-        #expect(a.engine.peerLinks().first?.confirmed == true && b.engine.peerLinks().first?.confirmed == true)
+        #expect(a.engine.peerLinks().first?.confirmed == true)
+        // The receiver's link confirms on the sender's first relay message after the intro, a beat later.
+        #expect(await until(30) { b.engine.peerLinks().first?.confirmed == true })
     }
 }

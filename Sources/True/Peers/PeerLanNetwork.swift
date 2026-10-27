@@ -32,9 +32,14 @@ final class PeerLanNetwork: PeerLanTransport {
         }
     }
 
+    /// Live tests on one Mac set `.loopback`: macOS does not deliver a process's connection to itself over its LAN address.
+    var dialInterface: NWInterface.InterfaceType?
+
     func connect(to id: String) -> PeerLanConnection? {
         guard let ep = endpoints[id] else { return nil }
-        return PeerLanNWConnection(NWConnection(to: ep, using: .tcp), remote: "")
+        let p = NWParameters.tcp
+        if let t = dialInterface { p.requiredInterfaceType = t }
+        return PeerLanNWConnection(NWConnection(to: ep, using: p), remote: "")
     }
 
     // MARK: listener
@@ -168,13 +173,20 @@ final class PeerLanNWConnection: PeerLanConnection {
         conn.send(content: framed, completion: .contentProcessed { _ in })
     }
 
-    func close() { finish() }
+    /// Graceful: frames already sent (a last "done" or "bye") reach the other side first. `cancel()` alone drops them.
+    func close() { finish(flush: true) }
 
-    private func finish() {
+    private func finish(flush: Bool = false) {
         guard !closed else { return }
         closed = true
         conn.stateUpdateHandler = nil
-        conn.cancel()
+        if flush {
+            let c = conn
+            c.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in c.cancel() })
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { c.cancel() }
+        } else {
+            conn.cancel()
+        }
         onFrame = nil; onReady = nil
         let cb = onClose; onClose = nil
         cb?()
