@@ -7,17 +7,22 @@ import SwiftUI
 struct NewCloudJobSheet: View {
     let projects: [String]
     var done: () -> Void
+    /// "On my Mac" was picked: the host closes this sheet and opens the agent builder.
+    var onChooseMac: () -> Void = {}
     @State private var model: CloudComposerModel
 
-    init(projects: [String], done: @escaping () -> Void) {
+    init(projects: [String], done: @escaping () -> Void, onChooseMac: @escaping () -> Void = {}) {
         self.projects = projects
         self.done = done
+        self.onChooseMac = onChooseMac
         _model = State(initialValue: CloudComposerModel(projects: projects))
     }
 
     var body: some View {
         CloudComposerContent(model: model, onRun: { Task { await run() } }, onCancel: done,
-                             onChooseFolder: chooseFolder, onRecheck: { Task { await checkCloud() } })
+                             onChooseFolder: chooseFolder, onRecheck: { Task { await checkCloud() } },
+                             onChooseMac: onChooseMac,
+                             onAddToCloud: { Task { await model.addToCloud(sync: { p, progress in try CloudSync().sync(localRepo: p, progress: progress) }) } })
             .frame(width: CloudComposerContent.width)
             .presentationBackground(CloudComposerContent.base)
             .environment(\.colorScheme, .dark)
@@ -58,8 +63,13 @@ struct CloudComposerContent: View {
     var onCancel: () -> Void = {}
     var onChooseFolder: () -> Void = {}
     var onRecheck: () -> Void = {}
+    var onChooseMac: () -> Void = {}
+    var onAddToCloud: () -> Void = {}
 
     @FocusState private var listFocus: Bool
+    @FocusState private var taskFocus: Bool
+    /// Model and effort stay folded into one line until "Change".
+    @State private var showPickers = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -67,10 +77,13 @@ struct CloudComposerContent: View {
             Divider().overlay(Theme.hairline)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    repoSection
                     taskSection
-                    modelSection
-                    effortSection
+                    repoSection
+                    modelLine
+                    if showPickers {
+                        modelSection
+                        effortSection
+                    }
                     moreSection
                 }
                 .padding(20)
@@ -91,7 +104,8 @@ struct CloudComposerContent: View {
     private var header: some View {
         HStack(spacing: 16) {
             Image(systemName: "icloud.and.arrow.up").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.hubSecondary)
-            Text("Run in cloud").font(.title3.weight(.semibold))
+            Text("New").font(.title3.weight(.semibold))
+            runsOnSwitch
             Spacer(minLength: 8)
             HStack(spacing: 8) {
                 Circle().fill(model.link == .offline ? Theme.verdictWarn : model.link == .online ? Color.white : Theme.dimText)
@@ -104,6 +118,30 @@ struct CloudComposerContent: View {
         .padding(.horizontal, 24).frame(height: 56)
     }
 
+    /// Cloud is selected on open. "On my Mac" hands over to the agent builder; the choice is never remembered.
+    private var runsOnSwitch: some View {
+        Picker("Runs on", selection: Binding(get: { model.runsOn },
+                                             set: { model.runsOn = $0; if $0 == .myMac { onChooseMac() } })) {
+            Text("Cloud").tag(CloudRunsOn.cloud)
+            Text("On my Mac").tag(CloudRunsOn.myMac)
+        }
+        .pickerStyle(.segmented).labelsHidden().frame(width: 190)
+        .accessibilityLabel("Runs on")
+    }
+
+    @ViewBuilder private var addToCloud: some View {
+        switch model.add {
+        case .idle: PlainButton("Add to cloud", action: onAddToCloud)
+        case .adding: Text("Adding…").font(.callout).foregroundStyle(Theme.hubSecondary)
+        case .added: Label("In the cloud", systemImage: "checkmark").font(.callout).foregroundStyle(Theme.hubSecondary)
+        case .failed(let m):
+            HStack(spacing: 8) {
+                Text(m).font(.callout).foregroundStyle(Theme.hubFailed)
+                PlainButton("Retry", action: onAddToCloud)
+            }
+        }
+    }
+
     // MARK: repo
 
     private var repoSection: some View {
@@ -113,11 +151,16 @@ struct CloudComposerContent: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
                         RepoRow(info: sel, now: now, highlighted: false).frame(maxWidth: .infinity)
-                        PlainButton("Change") { model.clearSelection() }
+                        if sel.isRunnable { addToCloud }
+                        PlainButton("Switch") { model.clearSelection() }
                     }
                     .padding(.vertical, 8).padding(.leading, 12).padding(.trailing, 12)
                     .background(Theme.hubCardFill, in: Self.shape)
                     .overlay(Self.shape.strokeBorder(Theme.hubCardStroke, lineWidth: 0.5))
+                    if sel.isRunnable, case .idle = model.add {
+                        Text("Add to cloud sends a copy of the latest commit so your first job starts faster.")
+                            .font(.caption).foregroundStyle(Theme.dimText)
+                    }
                     if let p = sel.problem {
                         Label(p, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(Theme.hubFailed)
                     }
@@ -180,7 +223,6 @@ struct CloudComposerContent: View {
             .onKeyPress(.upArrow) { model.moveCursor(-1); return .handled }
             .onKeyPress(.downArrow) { model.moveCursor(1); return .handled }
             .onKeyPress(.return) { guard model.filtered.indices.contains(model.cursor) else { return .ignored }; model.pickCursor(); return .handled }
-            .onAppear { listFocus = true }
         }
     }
 
@@ -193,7 +235,7 @@ struct CloudComposerContent: View {
             TextEditor(text: $m.prompt)
                 .font(.body).scrollContentBackground(.hidden)
                 .padding(.horizontal, 8).padding(.vertical, 8)
-                .frame(height: Self.editorHeight(for: model.prompt))
+                .frame(height: Self.editorHeight(for: model.prompt, minLines: 4))
                 .background(Color.white.opacity(0.05), in: Self.shape)
                 .overlay(alignment: .topLeading) {
                     if model.prompt.isEmpty {
@@ -202,14 +244,26 @@ struct CloudComposerContent: View {
                     }
                 }
                 .overlay(Self.shape.strokeBorder(Theme.hubCardStroke, lineWidth: 0.5))
+                .focused($taskFocus)
+                .onAppear { taskFocus = true }
+        }
+    }
+
+    /// "Sonnet 5.5 · High" + Change: the pickers open only on request.
+    private var modelLine: some View {
+        HStack(spacing: 8) {
+            Text("\(model.models.first { $0.id == model.model }?.label ?? model.model) · \(CloudModel.effortLabel(model.effort))")
+                .font(.callout).foregroundStyle(Theme.hubSecondary)
+            Spacer(minLength: 8)
+            PlainButton(showPickers ? "Done" : "Change") { withAnimation(.snappy) { showPickers.toggle() } }
         }
     }
 
     /// ~6 lines to start, grows with the text to ~14, then the editor scrolls.
-    static func editorHeight(for text: String, perLine: CGFloat = 20) -> CGFloat {
+    static func editorHeight(for text: String, perLine: CGFloat = 20, minLines: Int = 6) -> CGFloat {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
             .reduce(0) { $0 + max(1, Int((Double($1.count) / 72).rounded(.up))) }
-        return CGFloat(min(max(lines, 6), 14)) * perLine + 16
+        return CGFloat(min(max(lines, minLines), 14)) * perLine + 16
     }
 
     // MARK: model + effort

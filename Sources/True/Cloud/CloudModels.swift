@@ -70,9 +70,9 @@ struct CloudHealth: Decodable, Equatable, Sendable {
         efforts = ef.isEmpty ? CloudModel.builtInEfforts : ef
     }
 
-    /// "Connected · streambox · 1 of 2 running".
+    /// "Cloud connected · 1 of 2 running".
     var statusLine: String {
-        var s = "Connected · streambox"
+        var s = "Cloud connected"
         if let r = running { s += maxJobs.map { " · \(r) of \($0) running" } ?? " · \(r) running" }
         return s
     }

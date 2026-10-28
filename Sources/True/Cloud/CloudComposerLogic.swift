@@ -113,6 +113,12 @@ enum CloudSendState: Equatable {
     case failed(CloudSendStep, String)
 }
 
+/// Where the job runs. Not saved: every New starts on Cloud.
+enum CloudRunsOn: Equatable { case cloud, myMac }
+
+/// "Add to cloud": the repo's bundle sync on its own, without starting a job.
+enum CloudAddState: Equatable { case idle, adding, added, failed(String) }
+
 enum CloudComposerLink: Equatable { case checking, online, offline }
 
 /// The composer's state. Side effects (git reads, sync, HTTP) are injected so the snapshot tests can drive every
@@ -134,6 +140,8 @@ final class CloudComposerModel {
     var link: CloudComposerLink = .checking
     var runningJobs = 0
     var send: CloudSendState = .idle
+    var runsOn: CloudRunsOn = .cloud
+    var add: CloudAddState = .idle
 
     @ObservationIgnored let prefs: CloudPrefs
     @ObservationIgnored let projects: [String]
@@ -191,7 +199,7 @@ final class CloudComposerModel {
     }
 
     func choose(_ info: CloudRepoInfo) {
-        selected = info
+        selected = info; add = .idle
         prefs.repo = info.path
         if !repos.contains(where: { $0.path == info.path }), info.isRunnable { repos.insert(info, at: 0) }
     }
@@ -202,7 +210,7 @@ final class CloudComposerModel {
         choose(info)
     }
 
-    func clearSelection() { selected = nil; search = ""; cursor = 0 }
+    func clearSelection() { selected = nil; add = .idle; search = ""; cursor = 0 }
 
     func moveCursor(_ delta: Int) {
         let n = filtered.count
@@ -234,12 +242,23 @@ final class CloudComposerModel {
         case .offline: return "Cloud offline · can't run right now"
         case .online:
             if let h = health { var c = h; if c.running == nil { c.running = runningJobs }; return c.statusLine }
-            return "Connected · streambox · \(runningJobs) running"
+            return "Cloud connected · \(runningJobs) running"
         }
     }
 
     /// The whole send: pack → upload (inside `sync`) → create. Inputs stay as they are on failure; `send` says
     /// which step broke so the sheet can show Retry on it.
+    /// Sends the selected repo to the cloud without a job, so a later job starts from a ready copy.
+    func addToCloud(sync: @escaping @Sendable (String, @escaping @Sendable (CloudSendStep) -> Void) throws -> CloudSync.Result) async {
+        guard let repo = selected, repo.isRunnable, add != .adding else { return }
+        add = .adding
+        let outcome: Result<CloudSync.Result, Error> = await Task.detached { Result { try sync(repo.path) { _ in } } }.value
+        switch outcome {
+        case .success: add = .added
+        case .failure: add = .failed("Couldn't add it. Try again.")
+        }
+    }
+
     func run(client: CloudClient, sync: @escaping @Sendable (String, @escaping @Sendable (CloudSendStep) -> Void) throws -> CloudSync.Result,
              onDone: () -> Void) async {
         guard canRun, let repo = selected else { return }
