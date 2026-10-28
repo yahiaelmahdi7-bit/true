@@ -1169,3 +1169,11 @@ Plan: `docs/designs/remote-web-v2.md` (built). Web app only (`Resources/Remote/*
 - Picker sort: live before dead, Claude before shell. Downloads reply → toast "Saved to Downloads on the Mac".
 - Builder paused/held that is already acked goes to Older; acked fresh failure also Older.
 - "60m ago" is shown as "1h ago" (minutes up to 59).
+
+### Run 40 — Addendum A as-built (pane composer) + review fixes
+- **Composer.** Pane view has a growing textarea above a key strip. Empty box: button is "Enter" and sends `\r`. With text: "Send" sends text then `\r`; multi-line text is bracketed-paste wrapped when the pane enabled it (`ESC[2004h`), else `\n`→`\r`. Return key in the box inserts a newline and sends nothing. Verified in headless Chromium with a fake WebSocket: empty→`\r`, "hi"→`hi\r`, `a\nb`→`ESC[200~a\nbESC[201~\r`, Ctrl armed + "c"→`\x03`.
+- **Key strip.** 11 keys, horizontal scroll with edge fade (fade mask removed at scroll end); Ctrl arms for the next character typed in the box; label "⏎ Enter".
+- **Raw mode.** `#kbd` toggle gives xterm's own textarea the keyboard (`inputmode` none otherwise).
+- **Keyboard-safe.** `visualViewport` fit, `html.inpane` scroll lock, ResizeObserver pins output to bottom; composer and strip sit on the bottom edge, header stays visible.
+- **R1–R5.** Pane names fall back to topic → branch → "Pane N" when the name repeats the tab title or collides; tab headers keep their case (17 px, wrap to 2 lines); pane-view toasts sit above the key strip (placed by JS: top = keys.top − 8); `ago()` uses the hub reply's `now`; stale shots deleted and regenerated.
+- **Deviations / limits.** Upload chip sits above the key strip. Shots use a fake WebSocket and a DOM-set 46 % upload chip; the "keyboard" shot is a 390×508 viewport stand-in. Real iPhone keyboard / raw-mode behaviour untested. Non-bracketed multi-line path reviewed in code only.
