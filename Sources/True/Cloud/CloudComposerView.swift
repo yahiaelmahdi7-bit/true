@@ -152,7 +152,7 @@ struct CloudComposerContent: View {
                     HStack(spacing: 8) {
                         RepoRow(info: sel, now: now, highlighted: false).frame(maxWidth: .infinity)
                         if sel.isRunnable { addToCloud }
-                        PlainButton("Change") { model.clearSelection() }
+                        PlainButton("Switch") { model.clearSelection() }
                     }
                     .padding(.vertical, 8).padding(.leading, 12).padding(.trailing, 12)
                     .background(Theme.hubCardFill, in: Self.shape)

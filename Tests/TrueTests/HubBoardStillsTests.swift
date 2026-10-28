@@ -46,7 +46,7 @@ struct HubBoardStillsTests {
             model.link = .online
             model.selected = CloudRepoInfo(path: "/Users/y/Projects/gamenight", kind: .ready, branch: "main", sha: "a1b2c3d4e5",
                                            subject: "Fix footer links", committedAt: Self.now - 3600, dirtyCount: 0)
-            try snapshot("3-new-composer", width: CloudComposerContent.width, height: 613, dark: dark) {
+            try snapshot("3-new-composer", width: CloudComposerContent.width, height: 472, dark: dark) {
                 CloudComposerContent(model: model, now: Self.now)
             }
             let tile = try #require(HubTriage.board(HubBoardFixture.today).needsYou.first { $0.title == "9 reviews waiting" })
