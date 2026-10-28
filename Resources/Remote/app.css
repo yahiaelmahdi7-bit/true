@@ -87,6 +87,7 @@ button.row:active{background:var(--press);transform:none}
 #toast i{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:none}
 #toast.ok i{background:var(--text-1)}
 #toastText{overflow:hidden;text-overflow:ellipsis}
+#toast.wrap{white-space:normal;text-align:center}
 
 /* ---- floating tab bar + action ---- */
 #nav{position:fixed;left:16px;right:16px;bottom:calc(var(--safe-b) + 12px);z-index:3;display:flex;align-items:center;gap:12px;padding-left:var(--safe-l);padding-right:var(--safe-r)}
@@ -180,7 +181,8 @@ textarea::placeholder,input::placeholder{color:var(--text-3)}
 #vBody img{max-width:100%;max-height:100%;object-fit:contain}
 #vBar{display:flex;gap:12px;padding:12px 16px calc(var(--safe-b) + 12px);background:var(--term-glass);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);border-top:1px solid var(--term-line)}
 #vBar button{flex:1;height:50px;border-radius:var(--r-card);background:var(--term-fill);color:var(--term-bg);font-size:17px;font-weight:600}
-#vBar button.alt{background:var(--viewer-soft);color:var(--term-ink)}
+#vBar button.alt{background:var(--viewer-soft);color:var(--term-ink);flex:none;padding:0 16px}
+#vBar button:disabled{opacity:.4}
 
 /* ---- send ---- */
 .item{position:relative;display:flex;align-items:center;gap:12px;min-height:56px;padding:8px 16px}
@@ -238,3 +240,13 @@ textarea::placeholder,input::placeholder{color:var(--text-3)}
 .row2 .c{display:block;color:var(--text-1);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #termTabs .tab h2{margin:12px 16px 4px;font-size:13px;color:var(--text-1);text-transform:uppercase;letter-spacing:.6px}
 #grid button.failed{background:var(--bg-3)}
+
+/* ---- shared list pieces ---- */
+.row .p{display:block;font-size:13px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row.dim,.row:disabled{opacity:.45}
+.c.bad{color:var(--accent)}
+.chip{flex:none;display:inline-flex;align-items:center;min-height:24px;padding:0 8px;border-radius:999px;background:var(--bg-3);color:var(--text-2);font-size:13px;font-weight:600;white-space:nowrap}
+.chip.needsYou{background:var(--accent-soft);color:var(--accent-ink)}
+.chip.working{background:var(--bg-3);color:var(--text-0)}
+.busy{opacity:.5;pointer-events:none}
+.empty .soft{width:auto;min-width:120px;padding:0 24px}

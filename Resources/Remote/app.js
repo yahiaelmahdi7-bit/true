@@ -308,7 +308,7 @@ function applyScale() {
 
 function openPane(id, title) {
   paneId = id; view = 'term'; location.hash = 'p=' + id;
-  retTab = tab; clearTimeout(termTimer); for (const id of Object.values(SECTIONS)) $(id).hidden = true; showNav(false); $('term').className = 'in'; $('term').hidden = false; $('paneTitle').textContent = title || 'Pane';
+  retTab = tab; $('backLbl').textContent = TAB_TITLES[tab]; $('back').setAttribute('aria-label', 'Back to ' + TAB_TITLES[tab]); clearTimeout(termTimer); for (const id of Object.values(SECTIONS)) $(id).hidden = true; showNav(false); $('term').className = 'in'; $('term').hidden = false; $('paneTitle').textContent = title || 'Pane';
   ensureTerm(); term.reset(); retry = 0; wsEverOpen = false; banner('');
   connect();
 }
@@ -430,8 +430,130 @@ async function loadTerms() {
   } catch (e) { if (++listFails >= 2) banner('Mac asleep or offline — retrying…'); }
 }
 
+
+// ---------- pane naming + "send to session" (shared by Panes, the picker and the paperclip) ----------
+const lastPart = (p) => (p || '').replace(/\/+$/, '').split('/').pop();
+const shortCwd = (c) => (c || '').replace(/^\/(Users|home)\/[^/]+/, '~');
+function paneName(p) { return p.agent || p.repo || lastPart(p.cwd) || p.title || 'Pane'; }
+function paneSub(p) {
+  if (p.topic) return p.topic;
+  if (p.branch && p.branch !== 'main' && p.branch !== 'master') return p.branch;
+  return shortCwd(p.cwd) || 'pane ' + p.id.slice(0, 4);
+}
+// One tab's panes -> [{p, name, sub}], needs-you first (stable); rows that still read the same get "· pane 2", "· pane 3".
+function paneItems(panes) {
+  const sorted = panes.map((p, i) => ({ p, i })).sort((a, b) => (b.p.needsYou - a.p.needsYou) || (a.i - b.i));
+  const seen = new Map();
+  return sorted.map(({ p }) => {
+    const name = paneName(p); let sub = paneSub(p);
+    const key = name + '\n' + sub, n = (seen.get(key) || 0) + 1; seen.set(key, n);
+    if (n > 1) sub += ' · pane ' + n;
+    return { p, name, sub };
+  });
+}
+async function fetchTabs() {
+  const r = await api('/api/tabs');
+  if (r.status === 401) { unpair(); throw new Error('401'); }
+  if (!r.ok) throw new Error(String(r.status));
+  return (await r.json()).tabs || [];
+}
+
+// The one list-row component (Hub, Panes, pickers). opts: glyph, name, sub, label (small line above), chip {cls,text}, st {key,text}, chev, dim, onclick.
+function listRow(o) {
+  const b = el('button', 'row' + (o.dim ? ' dim' : '')), box = el('span', 't');
+  if (o.label) box.appendChild(el('span', 'p', o.label));
+  box.appendChild(el('span', 'n', o.name));
+  if (o.sub) box.appendChild(el('span', 'c' + (o.subTone ? ' ' + o.subTone : ''), o.sub));
+  b.append(glyph(o.glyph || 'term'), box);
+  if (o.chip) b.appendChild(el('span', 'chip ' + o.chip.cls, o.chip.text));
+  if (o.st) { const st = el('span', 'st ' + o.st.key); st.append(document.createElement('i'), el('b', null, o.st.text)); b.appendChild(st); }
+  if (o.chev) { const c = ic('chev'); c.classList.add('chev'); b.appendChild(c); }
+  if (o.dim) b.disabled = true; else if (o.onclick) b.onclick = o.onclick;
+  return b;
+}
+function stateBlock(title, text, retry) {
+  const d = el('div', 'empty'); d.append(el('h2', null, title), el('p', null, text));
+  if (retry) { const b = el('button', 'soft', 'Retry'); b.onclick = retry; d.appendChild(b); }
+  return d;
+}
+function skeletonGroup(n) {
+  const g = el('div', 'group'); g.setAttribute('aria-hidden', 'true');
+  for (let i = 0; i < n; i++) { const s = el('div', 'sk'); s.innerHTML = '<i></i><b><u></u><u></u></b>'; g.appendChild(s); }
+  return g;
+}
+
+const RECENT_KEY = 'true.recentPane';
+function getRecentPane() { try { return localStorage.getItem(RECENT_KEY); } catch (e) { return null; } }
+function setRecentPane(id) { try { localStorage.setItem(RECENT_KEY, id); } catch (e) { /* private mode */ } }
+
+// POST .../input {intent:stage}: puts the attachment in the pane's input box. Never retried (not idempotent).
+async function stageAttachment(paneId, attach) {
+  try {
+    const r = await api2('/api/pane/' + encodeURIComponent(paneId) + '/input', 'POST',
+      JSON.stringify({ intent: 'stage', text: '', attach: [attach] }), { 'Content-Type': 'application/json' });
+    if (r.status === 401) { unpair(); return 'unpaired'; }
+    if (r.status === 404) { const d = await r.json().catch(() => ({})); return /attachment/i.test(d.error || '') ? 'noAttach' : 'noPane'; }
+    if (!r.ok) return 'error';
+    const d = await r.json().catch(() => ({}));
+    return d.outcome || 'staged';
+  } catch (e) { return 'error'; }
+}
+function toast(msg) { banner(msg, true); setTimeout(() => banner(''), 3200); }
+// outcome -> { msg, open (go to the pane), keep (leave the picker up) }
+function outcomeInfo(outcome, name) {
+  switch (outcome) {
+    case 'staged': case 'landed': return { msg: 'Added to ' + name + ' — type your message', open: true };
+    case 'stuckInComposer': return { msg: "It's in " + name + "'s input box but didn't go further", open: true };
+    case 'promptGone': return { msg: name + ' moved on before it arrived', open: true };
+    case 'noPane': return { msg: 'That pane closed — pick another', keep: true };
+    case 'noAttach': return { msg: 'That shot is gone from the Mac' };
+    case 'error': return { msg: "Couldn't send — nothing was added", keep: true };
+    default: return { msg: 'Sent to ' + name + ", couldn't confirm — check it", open: true };   // unverified
+  }
+}
+
+// Pane picker sheet: refetches /api/tabs on every open. onPick(pane, name) resolves to an outcome string.
+function openPicker(attach, stay) {
+  let body = null, sending = false;
+  const paint = (fn) => { body.textContent = ''; fn(); };
+  const load = async () => {
+    paint(() => body.appendChild(skeletonGroup(3)));
+    let tabs;
+    try { tabs = await fetchTabs(); } catch (e) { if (String(e.message) !== '401') paint(() => body.appendChild(stateBlock("Can't reach the Mac", 'Check it is awake and on Tailscale.', load))); return; }
+    show(tabs);
+  };
+  const pick = async (p, name) => {
+    if (sending) return; sending = true; body.classList.add('busy');
+    const outcome = await stageAttachment(p.id, attach);
+    sending = false; body.classList.remove('busy');
+    if (outcome === 'unpaired') return;
+    const info = outcomeInfo(outcome, name);
+    if (info.open) setRecentPane(p.id);
+    if (info.keep) { toast(info.msg); load(); return; }
+    closeSheet();
+    if (info.open && !stay) { $('viewer').hidden = true; viewerShot = null; openPane(p.id, name); }
+    toast(info.msg);
+  };
+  const show = (tabs) => paint(() => {
+    const groups = tabs.map((t) => ({ t, items: paneItems(t.panes || []).sort((a, b) => (b.p.claude - a.p.claude) || 0) }));
+    const all = groups.flatMap((g) => g.items);
+    if (!all.some((x) => x.p.live)) { body.appendChild(stateBlock('No open panes on the Mac', 'Open a pane on the Mac and it shows up here.')); return; }
+    const row = (x) => listRow({ glyph: x.p.claude ? 'seat' : 'term', name: x.name, sub: x.p.claude ? x.sub : 'Shell · ' + x.sub, dim: !x.p.live,
+      chip: x.p.live ? null : { cls: 'idle', text: 'Not running' }, onclick: () => pick(x.p, x.name) });
+    const rec = all.find((x) => x.p.live && x.p.id === getRecentPane());
+    if (rec) { body.appendChild(el('h3', 'sec', 'Recent')); const g = el('div', 'group'); g.appendChild(row(rec)); body.appendChild(g); }
+    for (const { t, items } of groups) {
+      if (!items.length) continue;
+      body.appendChild(el('h3', 'sec', t.title));
+      const g = el('div', 'group'); items.forEach((x) => g.appendChild(row(x))); body.appendChild(g);
+    }
+  });
+  openSheet('Send to session', (b) => { body = b; }, 'Cancel');
+  load();
+}
+
 function showNav(on) { $('nav').hidden = !on; document.body.classList.toggle('hasnav', on); }
-const TAB_TITLES = { panes: 'Hub', shots: 'Shots', send: 'Send' };
+const TAB_TITLES = { panes: 'Hub', terms: 'Panes', shots: 'Shots', send: 'Send' };
 function setTab(name) {
   tab = name; $('inTitle').textContent = TAB_TITLES[name]; window.scrollTo(0, 0); document.body.classList.remove('scrolled'); view = name === 'panes' ? 'list' : name;
   for (const [t, id] of Object.entries(SECTIONS)) $(id).hidden = t !== name;
@@ -496,7 +618,7 @@ async function openViewer(s) {
   const path = '/api/shots/' + s.id;
   try {
     const e = await blobFor(path);
-    viewerShot = { blob: e.blob, name: 'True-' + s.id + '.' + extFor(e.blob.type) };
+    viewerShot = { id: s.id, blob: e.blob, name: 'True-' + s.id + '.' + extFor(e.blob.type) };
     $('vBody').textContent = '';
     const img = document.createElement('img'); img.src = e.url; img.alt = 'Screenshot'; $('vBody').appendChild(img);
     $('vTitle').textContent = new Date(s.created).toLocaleString();
@@ -514,6 +636,7 @@ function saveBlob(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
+$('vSend').onclick = () => viewerShot && openPicker({ id: viewerShot.id });
 $('vShare').onclick = () => viewerShot && shareBlob(viewerShot.blob, viewerShot.name);
 $('vSave').onclick = () => viewerShot && saveBlob(viewerShot.blob, viewerShot.name);
 
