@@ -34,7 +34,6 @@ Out:
 - No new routes, no auth/security changes, no other Swift changes.
 - **"Mark all as seen" / any bulk ack** — cut (see Review). Per-builder Ack in the builder sheet stays.
 - The native iOS app (`ios/`), the Mac Hub UI, the Mac's own builder visibility rule (`HubModel.swift:150-157`).
-- Typing/Send behaviour of the existing line field (raw bytes; it works today).
 - Attaching non-image files from a pane (the Send tab's upload still sends any file to Downloads, unchanged).
 
 ## Approach
@@ -181,6 +180,48 @@ parallel browsers (memory: Playwright floods kill the Mac). Offline case: `conte
   `builder status`, and unacked failures stay red at the top of "Older".
 - Another True session is live in this repo → worktree only; the merge touches only the files above.
 - Rollback: revert the merge commit and re-run `scripts/package.sh`; the previous web app is in git.
+
+## Addendum A — pane composer (added 2026-10-29, after launch; Yahia's ask)
+"The chat interface when interacting with a pane is ass with a lack of freedom, like the enter doesn't exist and the
+chat box bugs out with the keyboard popping up." Causes (verified in the code): the key bar has no Enter key (an
+empty Send sends `\r`, but the button looks disabled); the line field is a one-line `<input>`; `#term` is
+`position:fixed; inset:0` with no `visualViewport` handling, so iOS Safari pans the whole page when the keyboard opens
+(header slides off, terminal jumps, a gap can remain on close); tapping the terminal focuses xterm and pops the
+keyboard; Ctrl only affects `term.onData`, so it does nothing for the line field.
+This replaces the Out line "Typing/Send behaviour of the existing line field".
+
+1. **Composer** = auto-growing `<textarea id="text">` (1 → 5 lines at 17 px, then it scrolls inside), keeping today's
+   `autocapitalize="off" autocorrect="off" spellcheck="false"`, `enterkeyhint="enter"`, placeholder "Message <pane>".
+   **Return inserts a new line** (Yahia's call) — remove the Enter→submit handling.
+2. **Action button** right of the composer (44×44), one button with two states:
+   - box empty → **Enter** (⏎ glyph, `aria-label="Press Enter"`), always enabled, sends `\r`.
+   - box has text → **Send** (accent), sends the text then `\r`. Multi-line text: if `term.modes.bracketedPasteMode`
+     → `\x1b[200~` + text + `\x1b[201~` + `\r`; else every `\n` becomes `\r`, then a final `\r`.
+   - After sending: clear the box, shrink to 1 line, keep focus (keyboard stays up).
+   The paperclip (Approach 4) sits left of the composer.
+3. **Key strip** = one horizontally scrollable row, every key ≥ 44×44, a soft fade on the trailing edge when more
+   keys are off-screen. Order: ⏎ Enter · Esc · ↑ · ↓ · Tab · Ctrl · ⌃C · ← · → · Paste · ⌨ Type in terminal.
+4. **Ctrl from the composer**: with Ctrl armed, the next single character typed into the box is sent at once as its
+   control character (same mapping as `term.onData`), removed from the box, and Ctrl disarms.
+5. **Keyboard-safe layout**: while the pane view is open, size `#term` to `visualViewport` (height + offsetTop) on
+   its `resize` and `scroll` events; lock page scroll (`overflow:hidden` + `overscroll-behavior:none` on html/body)
+   while in the pane view and release it on Back; header stays pinned at the top, composer + strip sit directly on
+   the keyboard; bottom safe-area padding only when the keyboard is closed; if the terminal was scrolled to the
+   bottom before a resize, keep it at the bottom. Keyboard closes → no gap. No `visualViewport` → today's behaviour.
+6. **Tapping the terminal never opens the keyboard** (it is read-and-scroll). **⌨ Type in terminal** toggles raw
+   mode (`aria-pressed`): focuses xterm's input so keys go straight to the pane (vim, shells); tap again or Back to
+   leave raw mode.
+Don't break: Paste key, Fit, the raw-bytes path, the RemoteTests HTML/JS rules.
+
+Checks (Playwright cannot raise the iOS keyboard):
+- An init script replaces `window.WebSocket` with a recorder that also emits `\x1b[?2004h` (bracketed paste on) as
+  a binary frame. Assert sent bytes: empty box + button → `\r`; "hi" + Send → `hi\r`; "a⏎b" + Send →
+  `\x1b[200~a\nb\x1b[201~\r`; Ctrl armed + "c" typed in the box → `\x03` and the box is empty; ⏎ key → `\r`.
+- Return in the box inserts `\n` and sends nothing.
+- Screenshot the pane view at 390×844 and at 390×508 (keyboard-open stand-in, light + dark): header visible,
+  composer + strip at the bottom, no gap, every key ≥ 44 pt.
+- Live check (Yahia): open a pane on the phone, tap the box — the header stays put, the box sits on the keyboard,
+  the keyboard closes without leaving a gap; Enter button answers a Claude menu.
 
 ## Review
 Goldfish, 2026-10-29: naive-reader 3/4/2 · zoom-out 0/3/3 · critic 1/9/3 (merged 4 blockers / 12 shoulds / 6 nits).
