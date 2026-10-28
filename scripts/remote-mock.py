@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Dev-only mock of True's phone server, so Resources/Remote/* can be opened in a desktop browser at phone size.
 MOCK_STATE=normal|empty|offline|pairing (default normal), MOCK_PORT (default 8899). Pair code: 123456. No WebSocket.
-MOCK_FAULT=comma list: input404 inputUnknownAttach outcome=<wire> drop413 drop503x2 drop507 tabsEmpty hubEmpty
+MOCK_FAULT=comma list: input404 inputUnknownAttach outcome=<wire> drop413 drop503x2 drop507 tabsEmpty hubEmpty tabs500 hub500
 builders=0|1|200 ack500.  Every POST/DELETE is appended to the log; GET /__log returns it, DELETE /__log clears it."""
 import json, uuid, mimetypes, os, pathlib, re, struct, time, zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -118,6 +118,8 @@ class H(BaseHTTPRequestHandler):
         if STATE == "offline": return self.send(503, dict(error="offline"))
         if STATE == "pairing": return self.send(401, dict(error="unpaired"))
         empty = STATE == "empty"
+        if p == "/api/hub" and "hub500" in FAULT: return self.send(500, dict(error="boom"))
+        if p == "/api/tabs" and "tabs500" in FAULT: return self.send(500, dict(error="boom"))
         if p == "/api/hub": return self.send(200, hub())
         if p == "/api/tabs": return self.send(200, tabs())
         if p.startswith("/api/hub/builder/"):

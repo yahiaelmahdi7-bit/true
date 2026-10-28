@@ -402,35 +402,41 @@ let tab = 'panes', retTab = 'panes';
 const SECTIONS = { panes: 'list', terms: 'termlist', shots: 'shots', send: 'send' };
 let inboxTimer = null, seenInbox = new Set(), shotCache = new Map(), viewerShot = null, inboxLoaded = false;
 
-// Every live terminal pane on the Mac (GET /api/tabs), grouped by Mac tab. Tap one to watch and type into it.
+// Every terminal pane on the Mac (GET /api/tabs), grouped by Mac tab. Tap a live one to watch and type into it; dead ones sit dimmed.
+let termsLoaded = false;
 async function loadTerms() {
   if (view !== 'terms' || document.hidden) return;
+  const host = $('termTabs');
+  if (!termsLoaded) { host.textContent = ''; host.appendChild(skeletonGroup(3)); $('termEmpty').hidden = true; }
   try {
-    const r = await api('/api/tabs');
-    if (r.status === 401) { unpair(); return; }
-    if (!r.ok) throw new Error(String(r.status));
-    const tabs = (await r.json()).tabs || [];
-    listFails = 0; banner('');
-    const host = $('termTabs'); host.textContent = ''; let n = 0;
+    const tabs = await fetchTabs();
+    listFails = 0; banner(''); termsLoaded = true;
+    host.textContent = ''; let n = 0;
     for (const t of tabs) {
-      const live = (t.panes || []).filter((p) => p.live);
-      if (!live.length) continue;
-      const sec = el('section', 'tab');
-      sec.appendChild(el('h2', null, t.title));
-      for (const p of live) {
-        n++;
-        const b = el('button', 'row2'), box = el('span', 't');
-        box.append(el('span', 'n', p.title), el('span', 'c', p.cwd || ''));
-        b.append(box, el('span', 'chip ' + (p.needsYou ? 'needsYou' : p.busy ? 'working' : 'idle'), p.needsYou ? 'Needs you' : p.busy ? 'Working' : 'Idle'));
-        b.onclick = () => openPane(p.id, p.title);
-        sec.appendChild(b);
+      const panes = t.panes || [];
+      if (!panes.length) continue;
+      n += panes.length;
+      const h = el('h3', 'sec'), right = el('span', 's', panes.length + (panes.length === 1 ? ' pane' : ' panes'));
+      if (t.selected) right.textContent = 'On Mac screen · ' + right.textContent;
+      h.append(el('span', null, t.title), right);
+      const grp = el('div', 'group');
+      for (const { p, name, sub } of paneItems(panes)) {
+        const live = p.live !== false;
+        grp.appendChild(listRow({
+          glyph: p.claude ? 'seat' : 'term', name, sub, dim: !live, chev: live,
+          chip: !live ? { cls: 'idle', text: 'Not running' } : p.needsYou ? { cls: 'needsYou', text: 'Needs you' } : p.busy ? { cls: 'working', text: 'Working' } : { cls: 'idle', text: 'Idle' },
+          onclick: () => openPane(p.id, name),
+        }));
       }
-      host.appendChild(sec);
+      host.append(h, grp);
     }
     $('termEmpty').hidden = n > 0;
-  } catch (e) { if (++listFails >= 2) banner('Mac asleep or offline — retrying…'); }
+  } catch (e) {
+    if (e.message === '401') return;
+    if (++listFails >= 2) banner('Mac asleep or offline — retrying…');
+    if (!termsLoaded) { host.textContent = ''; host.appendChild(stateBlock("Can't reach the Mac", 'Check that it is awake and True is open.', () => { listFails = 0; loadTerms(); })); }
+  }
 }
-
 
 // ---------- pane naming + "send to session" (shared by Panes, the picker and the paperclip) ----------
 const lastPart = (p) => (p || '').replace(/\/+$/, '').split('/').pop();
