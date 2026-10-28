@@ -169,10 +169,10 @@ textarea::placeholder,input::placeholder{color:var(--text-3)}
 .stack .soft{margin:0}
 
 /* ---- shots ---- */
-#grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2px}
-#grid button{aspect-ratio:1;background:var(--bg-3);overflow:hidden;min-height:44px}
-#grid button:active{transform:none;opacity:.8}
-#grid img{width:100%;height:100%;object-fit:cover;display:block}
+#grid,.shotgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:2px}
+#grid button,.shotgrid button{aspect-ratio:1;background:var(--bg-3);overflow:hidden;min-height:44px}
+#grid button:active,.shotgrid button:active{transform:none;opacity:.8}
+#grid img,.shotgrid img{width:100%;height:100%;object-fit:cover;display:block}
 #viewer{position:fixed;inset:0;z-index:5;display:flex;flex-direction:column;background:var(--term-bg);color:var(--term-ink);animation:tabin 220ms var(--ease)}
 .vbar{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:calc(var(--safe-t) + 52px);padding:var(--safe-t) 12px 0;background:var(--term-glass);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid var(--term-line)}
 .vbar .tbtn{color:var(--term-ink)}
@@ -239,7 +239,7 @@ textarea::placeholder,input::placeholder{color:var(--text-3)}
 .row2 .t{flex:1;min-width:0}.row2 .n{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row2 .c{display:block;color:var(--text-1);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #termTabs .tab h2{margin:12px 16px 4px;font-size:13px;color:var(--text-1);text-transform:uppercase;letter-spacing:.6px}
-#grid button.failed{background:var(--bg-3)}
+#grid button.failed,.shotgrid button.failed{background:var(--bg-3)}
 
 /* ---- shared list pieces ---- */
 .row .p{display:block;font-size:13px;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -250,3 +250,15 @@ textarea::placeholder,input::placeholder{color:var(--text-3)}
 .chip.working{background:var(--bg-3);color:var(--text-0)}
 .busy{opacity:.5;pointer-events:none}
 .empty .soft{width:auto;min-width:120px;padding:0 24px}
+
+/* ---- paperclip + upload chip ---- */
+#upchip{display:flex;align-items:center;gap:12px;min-height:56px;margin-bottom:8px;padding:8px 12px;border-radius:var(--r-card);background:var(--term-key)}
+#upchip img{width:32px;height:32px;border-radius:8px;object-fit:cover;background:var(--term-line)}
+#upchip .t{flex:1;min-width:0;display:block}
+#upchip .n{font-size:15px;font-weight:600}
+#upchip .c{font-size:13px;opacity:.7}
+#upchip .bar4{display:block;background:var(--term-line)}
+#upchip .bar4 i{background:var(--term-fill)}
+#upchip.bad .c{color:var(--accent);opacity:1}
+#upAct{flex:none;min-height:44px;padding:0 8px;font-size:15px;font-weight:600;color:var(--term-ink)}
+#clip{flex:none;width:44px;height:44px;display:grid;place-items:center;border-radius:12px;background:var(--term-key);color:var(--term-ink)}

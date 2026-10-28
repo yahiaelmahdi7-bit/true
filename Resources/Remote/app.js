@@ -698,6 +698,35 @@ async function peekInbox() {
 setInterval(peekInbox, 15000);
 
 // ----- upload (phone -> Mac) -----
+const UPLOAD_ERR = { 413: 'Too big (200 MB max)', 507: 'Mac disk is full', 408: 'Timed out', 503: 'Mac is busy, try again' };
+// One raw-body POST to /api/drop. Returns { promise, abort }; the promise resolves with the reply JSON and rejects with
+// { msg } (or { aborted }). The Mac takes 2 uploads at a time; a 503 means "busy" — wait 1s, 2s, 4s… (6 tries) and go again.
+function uploadFile(file, hooks) {
+  hooks = hooks || {};
+  let xhr = null, timer = null, dead = false, rej = null;
+  const promise = new Promise((resolve, reject) => {
+    rej = reject;
+    const attempt = (n) => {
+      const x = xhr = new XMLHttpRequest();
+      x.open('POST', '/api/drop');
+      x.setRequestHeader('Authorization', 'Bearer ' + getToken());
+      x.setRequestHeader('X-Filename', encodeURIComponent(file.name || 'iPhone-upload'));
+      x.upload.onprogress = (e) => { if (e.lengthComputable && hooks.onProgress) hooks.onProgress(Math.round((e.loaded / e.total) * 100)); };
+      x.onload = () => {
+        if (dead) return;
+        if (x.status === 401) { unpair(); reject({ msg: '', unpaired: true }); return; }
+        if (x.status === 503 && n < 6) { if (hooks.onWait) hooks.onWait(); timer = setTimeout(() => attempt(n + 1), 1000 * 2 ** n); return; }
+        if (x.status >= 200 && x.status < 300) { let d = {}; try { d = JSON.parse(x.responseText); } catch (e) { /* plain ok */ } resolve(d); }
+        else reject({ msg: UPLOAD_ERR[x.status] || 'Failed (' + x.status + ')' });
+      };
+      x.onerror = () => { if (!dead) reject({ msg: 'Mac unreachable' }); };
+      x.send(file);
+    };
+    attempt(0);
+  });
+  return { promise, abort() { dead = true; clearTimeout(timer); if (xhr) xhr.abort(); rej({ aborted: true }); } };
+}
+
 $('pick').onclick = () => $('files').click();
 $('files').onchange = () => { const fs = Array.from($('files').files); $('files').value = ''; fs.forEach(upload); };
 function upload(file) {
@@ -707,26 +736,81 @@ function upload(file) {
   const st = document.createElement('span'); st.className = 'st'; st.textContent = '0%';
   n.append(nm, st);
   const pr = document.createElement('div'); pr.className = 'bar4'; const fill = document.createElement('i'); pr.appendChild(fill);
-  const setP = (p) => { fill.style.width = p + '%'; };
+  const setP = (p) => { fill.style.width = p + '%'; st.textContent = p + '%'; };
   row.append(n, pr); $('uploads').prepend(row);
-  const fail = (m) => { row.classList.add('bad'); st.textContent = m; pr.hidden = true; };
-  const attempt = (n) => {
-  const x = new XMLHttpRequest();
-  x.open('POST', '/api/drop');
-  x.setRequestHeader('Authorization', 'Bearer ' + getToken());
-  x.setRequestHeader('X-Filename', encodeURIComponent(file.name || 'iPhone-upload'));
-  x.upload.onprogress = (e) => { if (e.lengthComputable) { const p = Math.round((e.loaded / e.total) * 100); setP(p); st.textContent = p + '%'; } };
-  x.onload = () => {
-    if (x.status === 401) { unpair(); return; }
-    // The Mac takes 2 uploads at a time; a 503 means "busy" — wait 1s, 2s, 4s… (6 tries) and go again.
-    if (x.status === 503 && n < 6) { setP(0); st.textContent = 'Waiting…'; setTimeout(() => attempt(n + 1), 1000 * 2 ** n); return; }
-    if (x.status >= 200 && x.status < 300) { setP(100); st.textContent = 'Sent'; setTimeout(() => row.remove(), 6000); }
-    else fail(({ 413: 'Too big (200 MB max)', 507: 'Mac disk is full', 408: 'Timed out', 503: 'Mac is busy, try again' })[x.status] || 'Failed (' + x.status + ')');
+  uploadFile(file, { onProgress: setP, onWait: () => { fill.style.width = '0%'; st.textContent = 'Waiting…'; } }).promise.then(() => {
+    fill.style.width = '100%'; st.textContent = 'Sent'; setTimeout(() => row.remove(), 6000);
+  }, (e) => { if (e.unpaired) return; row.classList.add('bad'); st.textContent = e.msg; pr.hidden = true; });
+}
+
+// ----- paperclip inside a pane: phone photo or a Mac shot -> /api/drop -> stage into this pane -----
+let chipJob = null;
+function paneNameNow() { return $('paneTitle').textContent || 'the pane'; }
+async function stageHere(attach, pid) {
+  const outcome = await stageAttachment(pid, attach);
+  if (outcome === 'unpaired') return;
+  toast(outcomeInfo(outcome, paneNameNow()).msg);   // stays in the pane either way
+}
+function attachPhoto(file) {
+  const pid = paneId, chip = $('upchip'), act = $('upAct');
+  const url = URL.createObjectURL(file), img = $('upThumb');
+  img.onerror = () => { img.style.visibility = 'hidden'; }; img.style.visibility = ''; img.src = url;
+  $('upName').textContent = file.name || 'Photo';
+  const fill = $('upBar').firstElementChild, state = $('upState');
+  const done = () => { chip.hidden = true; chipJob = null; URL.revokeObjectURL(url); };
+  const run = () => {
+    chip.hidden = false; chip.classList.remove('bad'); $('upBar').hidden = false; fill.style.width = '0%'; state.textContent = 'Uploading…';
+    act.textContent = 'Cancel';
+    const job = chipJob = uploadFile(file, { onProgress: (p) => { fill.style.width = p + '%'; state.textContent = p + '%'; }, onWait: () => { state.textContent = 'Waiting…'; } });
+    act.onclick = () => { job.abort(); };
+    job.promise.then(async (d) => {
+      done();
+      if (d.where === 'shots' && d.id) await stageHere({ id: d.id }, pid);
+      else toast('Saved to Downloads on the Mac');
+    }, (e) => {
+      if (e.unpaired) return;
+      if (e.aborted) { done(); return; }
+      chip.classList.add('bad'); $('upBar').hidden = true; state.textContent = e.msg; act.textContent = 'Retry'; act.onclick = run; chipJob = null;
+    });
   };
-  x.onerror = () => fail('Mac unreachable');
-  x.send(file);
+  run();
+}
+$('clip').onclick = () => {
+  openSheet('Attach an image', (body) => {
+    const g = el('div', 'group');
+    const mk = (g1, name, sub, fn) => { const b = listRow({ glyph: g1, name, sub, chev: true, onclick: fn }); g.appendChild(b); };
+    mk('doc', 'Photo from iPhone', 'Photos, camera or Files', () => { closeSheet(); $('paneFile').click(); });
+    mk('doc', 'From Mac Shots', 'Recent screenshots on the Mac', () => macShotsSheet());
+    body.appendChild(g);
+  }, 'Cancel');
+};
+$('paneFile').onchange = () => { const f = $('paneFile').files[0]; $('paneFile').value = ''; if (f && view === 'term') attachPhoto(f); };
+async function macShotsSheet() {
+  const pid = paneId; let body = null;
+  const paint = (fn) => { body.textContent = ''; fn(); };
+  const load = async () => {
+    paint(() => body.appendChild(skeletonGroup(2)));
+    try {
+      const r = await api('/api/shots');
+      if (r.status === 401) { unpair(); return; }
+      if (!r.ok) throw new Error(String(r.status));
+      const shots = (await r.json()).shots || [];
+      paint(() => {
+        if (!shots.length) { body.appendChild(stateBlock('No screenshots yet', 'Screenshots on the Mac appear here.')); return; }
+        const g = el('div', 'shotgrid');
+        for (const s of shots.slice(0, 30)) {
+          const b = document.createElement('button'); b.setAttribute('aria-label', 'Screenshot ' + s.created);
+          const img = document.createElement('img'); img.alt = ''; b.appendChild(img);
+          thumbFor(s.id).then((e) => { img.src = e.url; }).catch(() => b.classList.add('failed'));
+          b.onclick = () => { closeSheet(); stageHere({ id: s.id }, pid); };
+          g.appendChild(b);
+        }
+        body.appendChild(g);
+      });
+    } catch (e) { paint(() => body.appendChild(stateBlock("Can't reach the Mac", 'Check it is awake and on Tailscale.', load))); }
   };
-  attempt(0);
+  openSheet('Mac Shots', (b) => { body = b; }, 'Cancel');
+  load();
 }
 
 $('clipSend').onclick = async () => {
