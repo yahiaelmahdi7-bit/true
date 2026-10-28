@@ -3,7 +3,7 @@
 MOCK_STATE=normal|empty|offline|pairing (default normal), MOCK_PORT (default 8899). Pair code: 123456. No WebSocket.
 MOCK_FAULT=comma list: input404 inputUnknownAttach outcome=<wire> drop413 drop503x2 drop507 tabsEmpty hubEmpty
 builders=0|1|200 ack500.  Every POST/DELETE is appended to the log; GET /__log returns it, DELETE /__log clears it."""
-import json, mimetypes, os, pathlib, re, struct, time, zlib
+import json, uuid, mimetypes, os, pathlib, re, struct, time, zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent / "Resources" / "Remote"
@@ -49,7 +49,7 @@ def hub():
             row("seat", "helper-prism", "Asleep", "asleep", pane="88888888-8888-8888-8888-888888888888", cwd="~/Projects/prism")] + builders(nb))])
 
 def pane(i, title, cwd="", **kw):
-    d = dict(id="%08d-0000-0000-0000-000000000000" % i, title=title, cwd=cwd, agent=None, needsYou=False, claude=True, busy=False, live=True,
+    d = dict(id=str(uuid.uuid5(uuid.NAMESPACE_DNS, "pane%d" % i)), title=title, cwd=cwd, agent=None, needsYou=False, claude=True, busy=False, live=True,
              repo=None, branch=None, worktree=None, sessionID=None, topic=None)
     d.update(kw); return d
 

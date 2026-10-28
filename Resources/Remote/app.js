@@ -25,6 +25,7 @@ let okUntil = 0;
 function banner(msg, ok) {
   const t = $('toast');
   if (!msg) { if (Date.now() < okUntil) return; t.classList.remove('show'); return; }
+  if (!ok && Date.now() < okUntil) return;   // a warning never replaces a fresh confirmation toast
   okUntil = ok ? Date.now() + 2900 : 0;
   $('toastText').textContent = msg; t.classList.toggle('ok', !!ok); t.classList.add('show');
 }
@@ -535,7 +536,7 @@ function openPicker(attach, stay) {
     toast(info.msg);
   };
   const show = (tabs) => paint(() => {
-    const groups = tabs.map((t) => ({ t, items: paneItems(t.panes || []).sort((a, b) => (b.p.claude - a.p.claude) || 0) }));
+    const groups = tabs.map((t) => ({ t, items: paneItems(t.panes || []).sort((a, b) => (b.p.live - a.p.live) || (b.p.claude - a.p.claude)) }));
     const all = groups.flatMap((g) => g.items);
     if (!all.some((x) => x.p.live)) { body.appendChild(stateBlock('No open panes on the Mac', 'Open a pane on the Mac and it shows up here.')); return; }
     const row = (x) => listRow({ glyph: x.p.claude ? 'seat' : 'term', name: x.name, sub: x.p.claude ? x.sub : 'Shell · ' + x.sub, dim: !x.p.live,
