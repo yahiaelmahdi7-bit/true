@@ -67,6 +67,9 @@ struct CloudComposerContent: View {
     var onAddToCloud: () -> Void = {}
 
     @FocusState private var listFocus: Bool
+    @FocusState private var taskFocus: Bool
+    /// Model and effort stay folded into one line until "Change".
+    @State private var showPickers = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -74,10 +77,13 @@ struct CloudComposerContent: View {
             Divider().overlay(Theme.hairline)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    repoSection
                     taskSection
-                    modelSection
-                    effortSection
+                    repoSection
+                    modelLine
+                    if showPickers {
+                        modelSection
+                        effortSection
+                    }
                     moreSection
                 }
                 .padding(20)
@@ -151,6 +157,10 @@ struct CloudComposerContent: View {
                     .padding(.vertical, 8).padding(.leading, 12).padding(.trailing, 12)
                     .background(Theme.hubCardFill, in: Self.shape)
                     .overlay(Self.shape.strokeBorder(Theme.hubCardStroke, lineWidth: 0.5))
+                    if sel.isRunnable, case .idle = model.add {
+                        Text("Add to cloud sends a copy of the latest commit so your first job starts faster.")
+                            .font(.caption).foregroundStyle(Theme.dimText)
+                    }
                     if let p = sel.problem {
                         Label(p, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(Theme.hubFailed)
                     }
@@ -213,7 +223,6 @@ struct CloudComposerContent: View {
             .onKeyPress(.upArrow) { model.moveCursor(-1); return .handled }
             .onKeyPress(.downArrow) { model.moveCursor(1); return .handled }
             .onKeyPress(.return) { guard model.filtered.indices.contains(model.cursor) else { return .ignored }; model.pickCursor(); return .handled }
-            .onAppear { listFocus = true }
         }
     }
 
@@ -226,7 +235,7 @@ struct CloudComposerContent: View {
             TextEditor(text: $m.prompt)
                 .font(.body).scrollContentBackground(.hidden)
                 .padding(.horizontal, 8).padding(.vertical, 8)
-                .frame(height: Self.editorHeight(for: model.prompt))
+                .frame(height: Self.editorHeight(for: model.prompt, minLines: 4))
                 .background(Color.white.opacity(0.05), in: Self.shape)
                 .overlay(alignment: .topLeading) {
                     if model.prompt.isEmpty {
@@ -235,14 +244,26 @@ struct CloudComposerContent: View {
                     }
                 }
                 .overlay(Self.shape.strokeBorder(Theme.hubCardStroke, lineWidth: 0.5))
+                .focused($taskFocus)
+                .onAppear { taskFocus = true }
+        }
+    }
+
+    /// "Sonnet 5.5 · High" + Change: the pickers open only on request.
+    private var modelLine: some View {
+        HStack(spacing: 8) {
+            Text("\(model.models.first { $0.id == model.model }?.label ?? model.model) · \(CloudModel.effortLabel(model.effort))")
+                .font(.callout).foregroundStyle(Theme.hubSecondary)
+            Spacer(minLength: 8)
+            PlainButton(showPickers ? "Done" : "Change") { withAnimation(.snappy) { showPickers.toggle() } }
         }
     }
 
     /// ~6 lines to start, grows with the text to ~14, then the editor scrolls.
-    static func editorHeight(for text: String, perLine: CGFloat = 20) -> CGFloat {
+    static func editorHeight(for text: String, perLine: CGFloat = 20, minLines: Int = 6) -> CGFloat {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
             .reduce(0) { $0 + max(1, Int((Double($1.count) / 72).rounded(.up))) }
-        return CGFloat(min(max(lines, 6), 14)) * perLine + 16
+        return CGFloat(min(max(lines, minLines), 14)) * perLine + 16
     }
 
     // MARK: model + effort
