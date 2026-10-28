@@ -37,7 +37,7 @@ struct HubTile: Identifiable, Equatable {
     var detail: String
     /// The tile's one main button.
     var button: String
-    /// A second word-button; only failure tiles have one ("Look").
+    /// A second word-button; none today (Retry stays hidden until a retry engine exists).
     var secondary = ""
     /// What the tile stands for; its detail sheet lists these.
     var items: [TriageItem]
@@ -51,22 +51,43 @@ struct HubBoard: Equatable {
     var running: [HubTile]
     var done: [TriageItem]
     var backlogCount: Int
-    /// Nothing needs you, nothing runs, nothing finished today: the empty Hub.
-    var isEmpty: Bool { needsYou.isEmpty && running.isEmpty && done.isEmpty }
+    /// Nothing needs you and nothing runs: the empty Hub (finished jobs may still sit in the Done strip).
+    var isEmpty: Bool { needsYou.isEmpty && running.isEmpty }
 }
 
 extension HubTriage {
     /// Group titles by kind (noun + the row's button), plain words. Anything unlisted falls back to "N <noun> need you".
     static func groupWords(noun: String, action: String, count n: Int) -> (title: String, button: String) {
         switch (noun, action) {
-        case ("builders", "Review gates"): return ("\(n) reviews waiting", "Open queue")
-        case ("builders", _): return ("\(n) builders need a go-ahead", "Open queue")
-        case ("cloud jobs", _): return ("\(n) cloud questions", "Open queue")
-        case ("panes", _): return ("\(n) panes need a look", "Open queue")
-        case ("peer jobs", _): return ("\(n) requests from peers", "Open queue")
-        case ("agents", _): return ("\(n) agents need you", "Open queue")
-        default: return ("\(n) \(noun) need you", "Open queue")
+        case ("builders", "Review gates"): return ("\(n) reviews waiting", "Review")
+        case ("builders", _): return ("\(n) builders need a go-ahead", "Give go-ahead")
+        case ("cloud jobs", _): return ("\(n) cloud questions", "Answer")
+        case ("panes", _): return ("\(n) panes need a look", "Look")
+        case ("peer jobs", _): return ("\(n) requests from peers", "Look")
+        case ("agents", _): return ("\(n) agents need you", "Look")
+        default: return ("\(n) \(noun) need you", "Open")
         }
+    }
+
+    /// A row's button in one plain verb ("Review gates" -> "Review").
+    static func plainVerb(_ label: String) -> String {
+        switch label {
+        case "": return "Open"
+        case "Review gates": return "Review"
+        default: return label
+        }
+    }
+
+    /// One plain status line: "finished 1m ago", "<what> · 15m ago" for things waiting on you.
+    static func plainStatus(_ i: TriageItem, now: Double) -> String {
+        let age = HubTriage.age(now - i.at)
+        let ago = age == "now" ? "just now" : "\(age) ago"
+        if i.tone == .failed { return i.subtitle }
+        if i.tone == .done || i.subtitle.hasPrefix("Finished") || i.actionLabel == "Review gates" || i.subtitle.contains("finished in") {
+            return "finished \(ago)"
+        }
+        if i.tone == .needsYou { return [i.subtitle, ago].filter { !$0.isEmpty }.joined(separator: " · ") }
+        return i.subtitle
     }
 
     /// Why a failed item failed, in one lowercase phrase. Items with the same phrase and kind share a tile.
@@ -105,15 +126,16 @@ extension HubTriage {
             if xs.count == 1 {
                 return HubTile(id: "tile:\(first.id)", kind: failed ? .failures : .single, tone: first.tone, title: first.title,
                                detail: [first.project, first.subtitle].filter { !$0.isEmpty }.joined(separator: " · "),
-                               button: failed ? "Retry" : (first.actionLabel.isEmpty ? "Open" : first.actionLabel),
-                               secondary: failed ? "Look" : "", items: xs)
+                               button: failed ? "See what broke" : plainVerb(first.actionLabel),
+                               items: xs)
             }
             if failed {
                 let cause = failureCause(first)
                 let words = cause.hasPrefix("failed: ") ? "failed" : cause
+                let names = xs.prefix(3).map(\.title).joined(separator: ", ")
+                let why = cause.hasPrefix("failed: ") ? String(cause.dropFirst(8)) + " · " : ""
                 return HubTile(id: "tile:\(key)", kind: .failures, tone: .failed, title: "\(xs.count) \(first.noun) \(words)",
-                               detail: cause.hasPrefix("failed: ") ? String(cause.dropFirst(8)) : "", button: "Retry",
-                               secondary: "Look", items: xs)
+                               detail: why + names, button: "See what broke", items: xs)
             }
             let w = groupWords(noun: first.noun, action: first.actionLabel, count: xs.count)
             return HubTile(id: "tile:\(key)", kind: .group, tone: first.tone, title: w.title,
@@ -123,12 +145,12 @@ extension HubTriage {
         if all.count > maxNeeds {
             let rest = Array(all[(maxNeeds - 1)...])
             let hidden = rest.flatMap(\.items)
-            shown = Array(all[..<(maxNeeds - 1)]) + [HubTile(id: "tile:more", kind: .more, tone: .needsYou, title: "\(hidden.count) more",
-                                                              detail: "Behind the rest", button: "Open queue", items: hidden)]
+            shown = Array(all[..<(maxNeeds - 1)]) + [HubTile(id: "tile:more", kind: .more, tone: .needsYou, title: "\(rest.count) more groups",
+                                                              detail: rest.map(\.title).joined(separator: " · "), button: "Open", items: hidden)]
         }
         let running = items(.working).map {
             HubTile(id: "run:\($0.id)", kind: .single, tone: .working, title: $0.title,
-                    detail: $0.activity.isEmpty ? $0.subtitle : $0.activity, button: $0.actionLabel.isEmpty ? "Open" : $0.actionLabel,
+                    detail: $0.activity.isEmpty ? $0.subtitle : $0.activity, button: plainVerb($0.actionLabel),
                     items: [$0])
         }
         return HubBoard(needsYou: shown, needsYouCount: needs.count, running: running, done: items(.review),

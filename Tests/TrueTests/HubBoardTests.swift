@@ -71,22 +71,24 @@ enum HubBoardFixture {
         #expect(more.kind == .more)
         // Nothing is lost: every needs-you item sits behind exactly one tile.
         #expect(b.needsYou.reduce(0) { $0 + $1.count } == 21)
-        #expect(more.title == "\(more.count) more")
+        #expect(more.title.hasSuffix(" more groups"))
+        #expect(more.detail.contains(" · "))
     }
 
     @Test func sameKindItemsShareOneTile() {
         let b = HubTriage.board(HubBoardFixture.today)
         let reviews = b.needsYou.first { $0.title == "9 reviews waiting" }
-        #expect(reviews?.button == "Open queue")
+        #expect(reviews?.button == "Review")
         #expect(reviews?.items.count == 9)
     }
 
-    @Test func failuresGroupByCauseWithRetryAndLook() {
+    @Test func failuresGroupByCauseAndHideRetry() {
         let b = HubTriage.board(HubBoardFixture.today)
         let f = b.needsYou.first { $0.title == "2 builders failed" }
         #expect(f?.kind == .failures)
-        #expect(f?.button == "Retry")
-        #expect(f?.secondary == "Look")
+        #expect(f?.button == "See what broke")
+        #expect(f?.secondary == "")
+        #expect(f?.detail.isEmpty == false)
         // A different cause is a different tile.
         let items = [HubBoardFixture.item("a", .needsYou, .failed, "a", "Sonnet · failed after 3m", project: "p", noun: "builders", action: "Open"),
                      HubBoardFixture.item("b", .needsYou, .failed, "b", "Sonnet · died after 3m", project: "p", noun: "builders", action: "Open")]
@@ -104,6 +106,11 @@ enum HubBoardFixture {
         #expect(b.isEmpty)
         #expect(b.needsYou.isEmpty && b.running.isEmpty && b.done.isEmpty)
         #expect(b.backlogCount == 0)
+        #expect(HubTriage.groupWords(noun: "cloud jobs", action: "x", count: 2).button == "Answer")
+        #expect(HubTriage.groupWords(noun: "builders", action: "Review gates", count: 2).button == "Review")
+        #expect(HubTriage.groupWords(noun: "builders", action: "Open", count: 2).button == "Give go-ahead")
+        #expect(HubTriage.groupWords(noun: "panes", action: "x", count: 2).button == "Look")
+        #expect(HubTriage.plainVerb("Review gates") == "Review")
         let none = HubTriage.board([])
         #expect(none.isEmpty)
     }
@@ -112,6 +119,13 @@ enum HubBoardFixture {
         let b = HubTriage.board(HubBoardFixture.buckets(needs: [], working: HubBoardFixture.running()))
         #expect(b.needsYou.isEmpty)
         #expect(!b.isEmpty)
+    }
+
+    @Test func plainStatusReadsAsEnglish() {
+        let done = HubBoardFixture.item("d", .needsYou, .needsYou, "d", "Finished: check its gates", project: "p", noun: "builders", action: "Review gates")
+        let s = HubTriage.plainStatus(done, now: done.at + 60)
+        #expect(s == "finished 1m ago")
+        #expect(HubTriage.plainStatus(done, now: done.at) == "finished just now")
     }
 
     @Test func runningTilesCarryWhereChips() {
