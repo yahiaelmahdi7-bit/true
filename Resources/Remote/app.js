@@ -55,37 +55,98 @@ async function loadList() {
     listFails = 0; banner('');
     renderHub(data);
   } catch (e) {
-    if (++listFails >= 2) banner('Mac asleep or offline — retrying…');
+    if (!hubData) { $('skel').hidden = true; $('empty').hidden = true; const h = $('tabs'); h.textContent = ''; h.appendChild(stateBlock("Can't reach the Mac", 'Check that it is awake and True is open.', () => { listFails = 0; $('skel').hidden = false; h.textContent = ''; loadList(); })); }
+    else if (++listFails >= 2) banner('Mac asleep or offline — retrying…');
   }
 }
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 
-const STATUS_KEYS = ['working', 'needsYou', 'failed', 'done', 'idle', 'asleep'];
+let hubData = null, sessionsAll = false;
+const acking = new Set(), ackedLocal = new Set();   // builder ids: ack in flight (row hidden) / ack confirmed here
+const isBuilder = (r) => r.kind === 'background' && r.builderId;
+const isAcked = (r) => r.acked || ackedLocal.has(r.builderId);
+
+// The Hub bands. Mirrors the Mac's HubTriage.swift (build/item): needs-you and running are always shown, finished
+// work is one row, idle sessions sit last. Plain code on purpose — no model in the loop.
+function band(r) {
+  const k = r.statusKey;
+  if (isBuilder(r)) {
+    if (acking.has(r.builderId)) return null;
+    const acked = isAcked(r);
+    if (k === 'working') return 'running';
+    if (k === 'needsYou') return acked ? 'older' : 'needs';          // paused/held: blocked on you, any age
+    if (k === 'failed') return acked ? 'older' : r.fresh ? 'needs' : 'older';
+    return acked || !r.fresh ? 'older' : 'new';
+  }
+  if (k === 'needsYou') return 'needs';
+  if (k === 'working') return 'running';
+  return 'sessions';
+}
+function ago(secs) {
+  const d = Math.max(0, Date.now() / 1000 - secs);
+  if (d < 90) return 'just now';
+  if (d < 3570) return Math.round(d / 60) + 'm ago';
+  if (d < 129600) return Math.round(d / 3600) + 'h ago';
+  return Math.round(d / 86400) + 'd ago';
+}
+const rowGlyph = (r) => (r.kind === 'seat' ? 'seat' : r.kind === 'background' ? 'wrench' : 'term');
+const isFailedOpen = (r) => r.statusKey === 'failed' && !isAcked(r);
+
+function hubRow(r, project, sub, extra) {
+  const live = r.pane || isBuilder(r);
+  return listRow(Object.assign({ glyph: rowGlyph(r), name: r.name, sub, subTone: isFailedOpen(r) ? 'bad' : '', chev: !!live, onclick: () => rowTap(r) }, extra));
+}
+function section(host, title, count, rows) {
+  const h = el('h3', 'sec'); h.append(el('span', null, title), el('span', 's', count));
+  const g = el('div', 'group'); rows.forEach((x) => g.appendChild(x));
+  host.append(h, g);
+}
 function renderHub(data) {
+  hubData = data;
   const host = $('tabs'); host.textContent = '';
-  let n = 0;
   $('skel').hidden = true;
   $('hubSummary').textContent = data.summary || '';
-  for (const g of data.projects || []) {
-    const h = el('h3', 'sec'); h.append(el('span', null, g.title), el('span', 's', g.summary || ''));
-    const grp = el('div', 'group');
-    for (const r of g.rows || []) {
-      n++;
-      const b = el('button', 'row');
-      const box = el('span', 't');
-      box.append(el('span', 'n', r.name), el('span', 'c', [r.cwd, r.elapsed].filter(Boolean).join(' · ')));
-      const key = STATUS_KEYS.includes(r.statusKey) ? r.statusKey : 'idle';
-      const st = el('span', 'st ' + key); st.append(document.createElement('i'), el('b', null, r.status));
-      b.append(glyph(r.kind === 'seat' ? 'seat' : r.kind === 'background' ? 'wrench' : 'term'), box, st);
-      if (r.pane || (r.kind === 'background' && r.builderId)) { const c = ic('chev'); c.classList.add('chev'); b.appendChild(c); }
-      b.onclick = () => rowTap(r);
-      grp.appendChild(b);
+  const B = { needs: [], running: [], sessions: [], new: [], older: [] };
+  for (const g of data.projects || []) for (const r of g.rows || []) { const b = band(r); if (b) B[b].push({ r, project: g.title }); }
+  const failFirst = (a, b) => (isFailedOpen(b.r) - isFailedOpen(a.r)) || ((b.r.ended || 0) - (a.r.ended || 0));
+  B.new.sort((a, b) => (b.r.ended || 0) - (a.r.ended || 0)); B.older.sort(failFirst);
+  if (B.needs.length) section(host, 'Needs you', String(B.needs.length), B.needs.map(({ r, project }) => hubRow(r, project, r.question || r.status, { label: project })));
+  if (B.running.length) section(host, 'Running', String(B.running.length), B.running.map(({ r, project }) => hubRow(r, project, [project, r.elapsed].filter(Boolean).join(' · '))));
+  if (B.sessions.length) {
+    const shown = sessionsAll ? B.sessions : B.sessions.slice(0, 5);
+    const rows = shown.map(({ r, project }) => hubRow(r, project, [project, r.status].filter(Boolean).join(' · ')));
+    if (B.sessions.length > 5) {
+      const more = el('button', 'row more'), t = el('span', 't');
+      t.appendChild(el('span', 'n', sessionsAll ? 'Show fewer' : 'Show all ' + B.sessions.length));
+      more.appendChild(t); more.onclick = () => { sessionsAll = !sessionsAll; renderHub(hubData); };
+      rows.push(more);
     }
-    host.append(h, grp);
+    section(host, 'Sessions', String(B.sessions.length), rows);
   }
-  $('empty').hidden = n > 0;
+  const nNew = B.new.length, nOld = B.older.length;
+  if (nNew + nOld) {
+    const fin = listRow({ glyph: 'wrench', name: 'Finished builds', chev: true, chip: { cls: nNew ? 'needsYou' : 'idle', text: nNew ? nNew + ' new' : nOld + ' older' }, onclick: () => openFinished() });
+    section(host, 'Finished', '', [fin]);
+  }
+  $('empty').hidden = host.childNodes.length > 0;
   $('clock').textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+// The Finished sheet: New, then Older (open failures first, in red). Rows open the builder sheet, which holds Ack.
+function openFinished() {
+  const B = { new: [], older: [] };
+  for (const g of hubData.projects || []) for (const r of g.rows || []) { const b = band(r); if (b === 'new' || b === 'older') B[b].push(r); }
+  const byEnd = (a, b) => (isFailedOpen(b) - isFailedOpen(a)) || ((b.ended || 0) - (a.ended || 0));
+  B.new.sort((a, b) => (b.ended || 0) - (a.ended || 0)); B.older.sort(byEnd);
+  openSheet('Finished builds', (body) => {
+    for (const [key, title] of [['new', 'New'], ['older', 'Older']]) {
+      if (!B[key].length) continue;
+      const h = el('h3', 'sec'); h.append(el('span', null, title), el('span', 's', String(B[key].length)));
+      const g = el('div', 'group');
+      for (const r of B[key]) g.appendChild(listRow({ glyph: 'wrench', name: r.name, sub: [r.status, r.ended ? ago(r.ended) : ''].filter(Boolean).join(' · '), subTone: isFailedOpen(r) ? 'bad' : '', chev: true, onclick: () => openBuilder(r) }));
+      body.append(h, g);
+    }
+  });
 }
 
 function rowTap(r) {
@@ -135,9 +196,13 @@ async function openBuilder(r) {
       if (d.canAck && !d.acked) {
         const ack = el('button', 'primary', 'Ack');
         ack.onclick = async () => {
-          ack.disabled = true;
-          const x = await api2('/api/hub/builder/' + encodeURIComponent(r.builderId) + '/ack', 'POST', '{}', { 'Content-Type': 'application/json' });
-          if (x.ok) { closeSheet(); loadList(); } else { ack.disabled = false; ack.textContent = 'Failed (' + x.status + ') — retry'; }
+          const id = r.builderId;
+          acking.add(id); closeSheet(); if (hubData) renderHub(hubData);   // the row leaves at once
+          try {
+            const x = await api2('/api/hub/builder/' + encodeURIComponent(id) + '/ack', 'POST', '{}', { 'Content-Type': 'application/json' });
+            if (x.ok || x.status === 404) ackedLocal.add(id); else { toast("Couldn't clear"); }   // 404 = already gone
+          } catch (e) { toast("Couldn't clear"); }
+          acking.delete(id); if (hubData) renderHub(hubData); loadList();
         };
         body.appendChild(ack);
       }

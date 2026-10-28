@@ -258,3 +258,4 @@ textarea::placeholder,input::placeholder{color:var(--text-3)}
 #upchip.bad .c{color:var(--accent);opacity:1}
 #upAct{flex:none;min-height:44px;padding:0 8px;font-size:15px;font-weight:600;color:var(--term-ink)}
 #clip{flex:none;width:44px;height:44px;display:grid;place-items:center;border-radius:12px;background:var(--term-key);color:var(--term-ink)}
+.row.more{min-height:44px}.row.more .n{color:var(--accent-ink);font-weight:600}
