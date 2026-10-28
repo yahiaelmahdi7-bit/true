@@ -1146,3 +1146,26 @@ New optional meta fields read: `wait_reason`, `resume_at` (epoch seconds), `land
 - `SentJob.retryOf` exists but there is no Retry UI or inherit-session wiring. Resume of an unknown job answers with a failed event "<name> has no record of this job".
 - The paused label shows the instant in the viewer's zone with "(<peer>'s time)" wording. Stills cover the changed components (`PeerStatusText` labels, `PeerDeskRow`), not the full sheet. `.out/` stills are rendered by `PeerStillsM1Tests`.
 - Added `true-peer lanes [n]` and `true-peer resume <id>` to the CLI.
+
+## Run 40 — phone web v2
+
+Plan: `docs/designs/remote-web-v2.md` (built). Web app only (`Resources/Remote/*`, re-embedded with `gen.py`) plus two additive hub-row keys; no new routes.
+
+**Hub = triage bands.** `GET /api/hub` builder rows now also carry `ended` (finish time, epoch seconds, absent while running) and `fresh` (finished < 24 h, `HubTriage.isLive`). The phone bands rows client-side in one plain function, `band(row)` in `app.js` (reference: `HubTriage.swift`; no model involved): Needs you (seat/pane needsYou; builder paused/held any age; unacked fresh failure, in red), Running, Sessions (idle/asleep, max 5 then "Show all N"), and ONE Finished row ("N new" / "K older") that opens a sheet with New and Older (open failures first, red). Ack is optimistic: the row leaves at once, the POST follows, any non-2xx except 404 puts it back with "Couldn't clear"; polls never resurrect a row whose ack is in flight. States: skeleton on first load, "Can't reach the Mac" + Retry, "All clear".
+
+**Panes = one card per Mac tab.** Header = tab title + "N panes" (+ "On Mac screen"); rows on the shared `listRow` with a name (agent → repo → cwd leaf), a second line (topic → branch → `~/cwd` → "pane xxxx"; duplicates get "· pane 2"), a status chip; dead panes dimmed "Not running"; needs-you first.
+
+**Send to session.** Shots viewer: Send to session / Share / Save. The pane picker refetches `/api/tabs` on open, pins the last phone-opened pane as Recent (localStorage, try/catch), and posts `{intent:"stage", attach:[{id}]}` once (never retried). Every outcome has a plain toast (staged/landed, unverified, stuckInComposer, promptGone, noPane, unknown attachment).
+
+**Paperclip in a pane.** `#clip` offers Photo from iPhone (`/api/drop` then stage) or From Mac Shots; shared `uploadFile()` (also used by Send) with a cancel / retry chip that survives 413 / 507 / 503.
+
+**System pass.** One row component, radii 9/14/20/pill only, no raw colors outside `:root`, 44 pt hit areas, `design-lint` clean.
+
+**Test + dev tooling.** `RemoteBarTests.builderRowsCarryEndedAndFresh`; the embed test also covers `app.css`; `scripts/remote-mock.py` gained realistic hub/tabs data, input/drop/ack routes, `MOCK_FAULT` (input404, inputUnknownAttach, outcome=, drop413/503x2/507, tabsEmpty, tabs500, hubEmpty, hub500, builders=N, ack500) and `GET/DELETE /__log`; `scripts/remote-shots.mjs` writes every screen (light + dark, fault cases) to `.claude/shots/remote-web-v2/`.
+
+### Deviations (builder)
+- The upload chip sits in a row above the key bar, not in its first slot.
+- A non-ok banner is suppressed while an ok toast is fresh.
+- Picker sort: live before dead, Claude before shell. Downloads reply → toast "Saved to Downloads on the Mac".
+- Builder paused/held that is already acked goes to Older; acked fresh failure also Older.
+- "60m ago" is shown as "1h ago" (minutes up to 59).

@@ -1,5 +1,5 @@
 # True phone web app v2 — calm Hub, readable Panes, send images into sessions
-Status: building
+Status: built
 
 ## Goal
 Yahia drives True from his iPhone through the web app True serves over Tailscale (`Resources/Remote/*`,
