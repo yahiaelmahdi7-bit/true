@@ -304,8 +304,8 @@ struct HubPanelContent: View {
                            onItem: onTriage, onDismiss: { onDismiss([$0.id]) }, onClear: onDismiss,
                            onBack: { showBacklog = false })
         } else {
-            HubBoardView(board: HubTriage.board(buckets), now: now, onNew: onNew, onMain: mainAction, onSecondary: secondaryAction,
-                         onOpenTile: { openTile = $0 }, onItem: onTriage)
+            HubBoardView(board: HubTriage.board(buckets), now: now, onNew: onNew, onMain: mainAction,
+                         onRetry: onRetry.map { r in { t in r(t) } }, onItem: onTriage)
         }
     }
 
@@ -322,13 +322,9 @@ struct HubPanelContent: View {
     private func mainAction(_ t: HubTile) {
         switch t.kind {
         case .single: if let i = t.items.first { onTriage(i) }
-        case .failures: if let onRetry { onRetry(t) } else if t.items.count == 1 { onTriage(t.items[0]) } else { openTile = t }
+        case .failures: if t.items.count == 1 { onTriage(t.items[0]) } else { openTile = t }
         case .group, .more: openTile = t
         }
-    }
-
-    private func secondaryAction(_ t: HubTile) {
-        if t.items.count == 1 { onTriage(t.items[0]) } else { openTile = t }
     }
 
     private var rowTransition: AnyTransition {
@@ -341,7 +337,7 @@ struct HubPanelContent: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 10) {
                     Text("Hub").font(.title2.weight(.semibold)).foregroundStyle(HubInk(scheme).primary)
-                    if filter == .all { cloudPill }
+                    if filter == .all && cloudLink == .offline { cloudPill }
                 }
                 if filter != .crew && filter != .chat { summary(buckets) }
             }
@@ -421,14 +417,11 @@ struct HubPanelContent: View {
             let needs = buckets.first { $0.section == .needsYou }?.count ?? 0
             let working = buckets.first { $0.section == .working }?.count ?? 0
             let review = buckets.first { $0.section == .review }?.count ?? 0
-            let failed = HubTriage.count(buckets, tone: .failed)
             HStack(spacing: 0) {
                 if needs + working + review == 0 { Text("Nothing running") }
                 if needs > 0 {
-                    if failed > 0 {
-                        Button { jump = HubTriage.firstID(buckets, tone: .failed) } label: { Text("\(needs) need\(needs == 1 ? "s" : "") you") }
-                            .buttonStyle(.plain).foregroundStyle(Theme.hubFailed).help("Jump to the first failure")
-                    } else { Text("\(needs) need\(needs == 1 ? "s" : "") you") }
+                    Circle().fill(HubInk(scheme).accent).frame(width: 6, height: 6).padding(.trailing, 6)
+                    Text("\(needs) need\(needs == 1 ? "s" : "") you")
                 }
                 if working > 0 { Text("\(needs > 0 ? " · " : "")\(working) working") }
                 if review > 0 { Text("\(needs + working > 0 ? " · " : "")\(review) to review") }

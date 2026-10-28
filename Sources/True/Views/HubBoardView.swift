@@ -48,56 +48,105 @@ struct HubTileButton: View {
     }
 }
 
-/// One tile. Needs-you tiles carry one main button (failures add "Look"); a Running tile shows where it runs,
-/// the live step, time and cost. Tapping the body opens the detail sheet.
+/// Hover and press feedback for a whole-tile button.
+private struct HubTileStyle: ButtonStyle {
+    let ink: HubInk
+    let shape: RoundedRectangle
+    @State private var hovering = false
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(shape.fill(ink.tile).opacity(configuration.isPressed ? 0.6 : hovering ? 1.9 : 1))
+            .background(shape.fill(ink.tile.opacity(hovering ? 1 : 0)))
+            .overlay(shape.strokeBorder(hovering ? ink.faint : ink.tileStroke, lineWidth: 0.5))
+            .contentShape(shape)
+            .onHover { hovering = $0 }
+    }
+}
+
+/// One tile; the whole tile is the button. Needs-you tiles show a status dot, title and age on one row; only
+/// the first (oldest-waiting) carries a loud verb button; a failure tile adds quiet actions. A Running tile
+/// shows where it runs, the live step, time and cost.
 struct HubTileView: View {
     let tile: HubTile
     let now: Double
     var running = false
+    /// The first Needs-you tile: the one loud button on the screen.
+    var primary = false
+    var canRetry = false
     let onMain: () -> Void
-    var onSecondary: () -> Void = {}
-    let onOpen: () -> Void
+    var onRetry: () -> Void = {}
     @Environment(\.colorScheme) private var scheme
-    @State private var hovering = false
 
-    static let height: CGFloat = 132
+    static let height: CGFloat = 104
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 14, style: .continuous) }
-    private var newest: Double { tile.items.map(\.at).max() ?? now }
+    /// How long the tile has waited: its oldest item.
+    private var oldest: Double { tile.items.map(\.at).min() ?? now }
+    private var failure: Bool { tile.kind == .failures }
 
     var body: some View {
         let ink = HubInk(scheme)
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                if running, let item = tile.items.first { whereChip(item.runsOn, ink) } else {
-                    Circle().fill(ink.tone(tile.tone)).frame(width: 7, height: 7)
-                    if tile.kind == .failures { Text("Failed").font(.caption.weight(.medium)).foregroundStyle(ink.failed) }
+        Button(action: onMain) {
+            VStack(alignment: .leading, spacing: 4) {
+                if running, let item = tile.items.first {
+                    HStack(spacing: 8) {
+                        whereChip(item.runsOn, ink)
+                        Spacer(minLength: 4)
+                        if let cost = item.cost { Text(String(format: "$%.2f", cost)).font(.caption.monospacedDigit()).foregroundStyle(ink.secondary) }
+                        age(ink)
+                    }
+                    Text(tile.title).font(.headline).foregroundStyle(ink.primary).lineLimit(1).multilineTextAlignment(.leading)
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Circle().fill(ink.tone(tile.tone)).frame(width: 7, height: 7).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                        Text(tile.title).font(.headline).foregroundStyle(ink.primary).lineLimit(2).multilineTextAlignment(.leading)
+                        Spacer(minLength: 4)
+                        if tile.kind != .more { age(ink) }
+                    }
                 }
-                Spacer(minLength: 4)
-                if running, let cost = tile.items.first?.cost { Text(String(format: "$%.2f", cost)).font(.caption.monospacedDigit()).foregroundStyle(ink.secondary) }
-                if tile.kind != .more { Text(HubTriage.age(now - newest)).font(.caption.monospacedDigit()).foregroundStyle(ink.secondary) }
-            }
-            Text(tile.title).font(.headline).foregroundStyle(ink.primary).lineLimit(2).multilineTextAlignment(.leading)
-            if !tile.detail.isEmpty {
-                Text(tile.detail).font(.callout).foregroundStyle(ink.secondary).lineLimit(1).truncationMode(.tail)
-            }
-            Spacer(minLength: 0)
-            HStack(spacing: 6) {
-                HubTileButton(label: tile.button, loud: !running && tile.tone != .working, action: onMain)
-                if !tile.secondary.isEmpty { HubTileButton(label: tile.secondary, loud: false, action: onSecondary) }
+                HStack(spacing: 6) {
+                    Text(tile.detail).font(.callout).foregroundStyle(ink.secondary)
+                        .lineLimit(tile.kind == .more ? 2 : 1).truncationMode(.tail).multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                    if !showsButtons {
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(ink.faint)
+                    }
+                }
                 Spacer(minLength: 0)
+                if showsButtons {
+                    HStack(spacing: 6) {
+                        if primary && !failure { pill(tile.button, loud: true, ink) }
+                        if failure {
+                            pill(tile.button, loud: false, ink)
+                            if canRetry { quiet("Retry", ink, onRetry) }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
             }
+            .padding(12)
+            .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height, alignment: .topLeading)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height, alignment: .topLeading)
-        .background(hovering ? ink.tile.opacity(1.6) : ink.tile, in: shape)
-        .overlay(shape.strokeBorder(ink.tileStroke, lineWidth: 0.5))
-        .contentShape(shape)
-        .onHover { hovering = $0 }
-        .onTapGesture(perform: onOpen)
-        .accessibilityElement(children: .combine)
+        .buttonStyle(HubTileStyle(ink: ink, shape: shape))
         .accessibilityLabel("\(tile.title), \(tile.detail)")
-        .accessibilityAction(named: tile.button, onMain)
-        .accessibilityAction(named: "Details", onOpen)
+        .accessibilityHint(tile.button)
+    }
+
+    private var showsButtons: Bool { !running && ((primary && !failure) || failure) }
+
+    private func age(_ ink: HubInk) -> some View {
+        Text(HubTriage.age(now - oldest)).font(.caption.monospacedDigit()).foregroundStyle(ink.secondary)
+    }
+
+    /// Visual label only: the tile Button underneath takes the click.
+    private func pill(_ label: String, loud: Bool, _ ink: HubInk) -> some View {
+        Text(label).font(.callout.weight(.semibold)).lineLimit(1).fixedSize()
+            .foregroundStyle(loud ? ink.loudText : ink.primary)
+            .padding(.horizontal, 14).frame(height: 26)
+            .background(loud ? ink.loudFill : ink.chip, in: .capsule)
+    }
+
+    private func quiet(_ label: String, _ ink: HubInk, _ action: @escaping () -> Void) -> some View {
+        HubTileButton(label: label, loud: false, action: action)
     }
 
     private func whereChip(_ w: HubWhere, _ ink: HubInk) -> some View {
@@ -116,8 +165,8 @@ struct HubBoardView: View {
     let now: Double
     var onNew: () -> Void = {}
     let onMain: (HubTile) -> Void
-    var onSecondary: (HubTile) -> Void = { _ in }
-    let onOpenTile: (HubTile) -> Void
+    /// nil until a retry engine exists: no Retry button is drawn.
+    var onRetry: ((HubTile) -> Void)?
     let onItem: (TriageItem) -> Void
     /// Test hook: start with Done today open.
     var doneStartsOpen = false
@@ -129,11 +178,21 @@ struct HubBoardView: View {
         let ink = HubInk(scheme)
         GeometryReader { geo in
             if board.isEmpty {
-                VStack(spacing: 14) {
-                    Text("Nothing needs you").font(.title3.weight(.medium)).foregroundStyle(ink.primary)
-                    HubTileButton(label: "New", action: onNew)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        VStack(spacing: 6) {
+                            Text("All clear").font(.title2.weight(.semibold)).foregroundStyle(ink.primary)
+                            Text(board.done.isEmpty ? "Nothing running right now" : "\(board.done.count) done today · 0 running")
+                                .font(.callout).foregroundStyle(ink.secondary)
+                            HubTileButton(label: "New", action: onNew).padding(.top, 10)
+                            Text("Start a job — it runs in the cloud").font(.caption).foregroundStyle(ink.faint)
+                        }
+                        .frame(maxWidth: .infinity).padding(.top, 36)
+                        if !board.done.isEmpty { doneStrip(ink) }
+                    }
+                    .padding(.horizontal, 20).padding(.bottom, 24)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .scrollIndicators(.hidden)
             } else {
                 let cols = Array(repeating: GridItem(.flexible(), spacing: 12), count: HubLayout.tileColumns(width: geo.size.width))
                 ScrollView {
@@ -141,8 +200,9 @@ struct HubBoardView: View {
                         if !board.needsYou.isEmpty {
                             band("Needs you", count: board.needsYouCount, ink) {
                                 LazyVGrid(columns: cols, spacing: 12) {
-                                    ForEach(board.needsYou) { t in
-                                        HubTileView(tile: t, now: now, onMain: { onMain(t) }, onSecondary: { onSecondary(t) }, onOpen: { onOpenTile(t) })
+                                    ForEach(Array(board.needsYou.enumerated()), id: \.element.id) { n, t in
+                                        HubTileView(tile: t, now: now, primary: n == 0, canRetry: onRetry != nil,
+                                                    onMain: { onMain(t) }, onRetry: { onRetry?(t) })
                                     }
                                 }
                             }
@@ -151,7 +211,7 @@ struct HubBoardView: View {
                             band("Running", count: board.running.count, ink) {
                                 LazyVGrid(columns: cols, spacing: 12) {
                                     ForEach(board.running) { t in
-                                        HubTileView(tile: t, now: now, running: true, onMain: { onMain(t) }, onOpen: { onOpenTile(t) })
+                                        HubTileView(tile: t, now: now, running: true, onMain: { onMain(t) })
                                     }
                                 }
                             }
@@ -198,7 +258,7 @@ struct HubBoardView: View {
             .accessibilityHint(doneOpen ? "Hides the list" : "Shows what finished today")
             if doneOpen {
                 VStack(spacing: 0) {
-                    ForEach(board.done) { i in HubMiniRow(item: i, now: now, onAction: onItem) }
+                    ForEach(board.done) { i in HubMiniRow(item: i, now: now, onAction: onItem, showProject: true) }
                 }
                 .padding(.bottom, 6)
             }
@@ -214,6 +274,8 @@ struct HubMiniRow: View {
     let now: Double
     let onAction: (TriageItem) -> Void
     var onDismiss: ((TriageItem) -> Void)?
+    /// Done strip and backlog show the project on each row and an age column; a sheet groups by project instead.
+    var showProject = false
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
@@ -222,13 +284,13 @@ struct HubMiniRow: View {
             Circle().fill(ink.tone(item.tone)).frame(width: 6, height: 6)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.title).font(.body).foregroundStyle(ink.primary).lineLimit(1).truncationMode(.middle)
-                Text([item.project, item.subtitle].filter { !$0.isEmpty }.joined(separator: " · "))
+                Text(([showProject ? item.project : ""] + [HubTriage.plainStatus(item, now: now)]).filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.callout).foregroundStyle(ink.secondary).lineLimit(1).truncationMode(.tail)
             }
             Spacer(minLength: 8)
-            Text(HubTriage.age(now - item.at)).font(.callout.monospacedDigit()).foregroundStyle(ink.secondary)
+            if showProject { Text(HubTriage.age(now - item.at)).font(.callout.monospacedDigit()).foregroundStyle(ink.secondary) }
             if !item.actionLabel.isEmpty {
-                HubTileButton(label: item.actionLabel, loud: item.tone == .needsYou || item.tone == .failed) { onAction(item) }
+                HubTileButton(label: HubTriage.plainVerb(item.actionLabel), loud: false) { onAction(item) }
             }
             if let onDismiss {
                 Button { onDismiss(item) } label: {
@@ -240,7 +302,7 @@ struct HubMiniRow: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 7)
         .accessibilityElement(children: .combine)
-        .accessibilityAction(named: item.actionLabel) { onAction(item) }
+        .accessibilityAction(named: HubTriage.plainVerb(item.actionLabel)) { onAction(item) }
     }
 }
 
@@ -255,6 +317,12 @@ struct HubTileSheet: View {
     @Environment(\.colorScheme) private var scheme
 
     static let width: CGFloat = 520
+    /// The item that has waited longest: what "Review next" opens.
+    private var oldest: TriageItem? { tile.items.min { $0.at < $1.at } }
+    private var byProject: [(project: String, items: [TriageItem])] {
+        Dictionary(grouping: tile.items, by: \.project).map { ($0.key, $0.value.sorted { $0.at < $1.at }) }
+            .sorted { $0.0.localizedCaseInsensitiveCompare($1.0) == .orderedAscending }
+    }
 
     var body: some View {
         let ink = HubInk(scheme)
@@ -265,13 +333,22 @@ struct HubTileSheet: View {
                     if !tile.detail.isEmpty { Text(tile.detail).font(.callout).foregroundStyle(ink.secondary).lineLimit(2) }
                 }
                 Spacer(minLength: 8)
+                if let next = oldest {
+                    HubTileButton(label: tile.button == "Review" ? "Review next" : "Open next") { onItem(next) }
+                }
                 HubTileButton(label: "Done", loud: false, action: onClose).keyboardShortcut(.cancelAction)
             }
             .padding(.horizontal, 20).padding(.vertical, 16)
             Divider().overlay(ink.tileStroke)
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(tile.items) { HubMiniRow(item: $0, now: now, onAction: onItem, onDismiss: onDismissItem) }
+                    ForEach(byProject, id: \.project) { g in
+                        if byProject.count > 1 || !g.project.isEmpty {
+                            Text(g.project.isEmpty ? "Other" : g.project).font(.caption.weight(.semibold)).foregroundStyle(ink.faint)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 2)
+                        }
+                        ForEach(g.items) { HubMiniRow(item: $0, now: now, onAction: onItem, onDismiss: onDismissItem) }
+                    }
                 }
                 .padding(.vertical, 6)
             }
