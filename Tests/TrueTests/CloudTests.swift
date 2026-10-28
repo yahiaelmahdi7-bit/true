@@ -284,7 +284,7 @@ final class CloudBox<T>: @unchecked Sendable {
         let h = try await client(t).health()
         #expect(h.models.map(\.id) == ["claude-haiku-5-5", "x-new"] && h.models[0].hint == "fastest" && h.models[1].label == "New One")
         #expect(h.efforts == ["low", "high"] && h.defaultModel == "claude-haiku-5-5")
-        #expect(h.statusLine == "Connected · streambox · 1 of 2 running")
+        #expect(h.statusLine == "Cloud connected · 1 of 2 running")
         #expect(t.requests[0].url?.path == "/health")
     }
 
@@ -359,7 +359,7 @@ final class CloudBox<T>: @unchecked Sendable {
         let t = FakeCloud(); t.body = Data(#"{"running":1,"max_jobs":2}"#.utf8)
         let m = CloudComposerModel(projects: [])
         await m.refreshHealth(client: CloudClient(transport: t, tokenProvider: { "t" }), running: 1)
-        #expect(m.link == .online && m.models == CloudModel.builtIn && m.statusLine == "Connected · streambox · 1 of 2 running")
+        #expect(m.link == .online && m.models == CloudModel.builtIn && m.statusLine == "Cloud connected · 1 of 2 running")
         t.fail = true
         await m.refreshHealth(client: CloudClient(transport: t, tokenProvider: { "t" }), running: 0)
         #expect(m.link == .offline && !m.canRun)

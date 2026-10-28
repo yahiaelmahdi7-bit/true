@@ -242,7 +242,7 @@ final class CloudComposerModel {
         case .offline: return "Cloud offline · can't run right now"
         case .online:
             if let h = health { var c = h; if c.running == nil { c.running = runningJobs }; return c.statusLine }
-            return "Connected · streambox · \(runningJobs) running"
+            return "Cloud connected · \(runningJobs) running"
         }
     }
 

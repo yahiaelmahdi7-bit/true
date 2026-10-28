@@ -77,7 +77,7 @@ struct HubTileView: View {
     var onRetry: () -> Void = {}
     @Environment(\.colorScheme) private var scheme
 
-    static let height: CGFloat = 104
+    private var height: CGFloat { running ? 96 : 80 }
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 14, style: .continuous) }
     /// How long the tile has waited: its oldest item.
     private var oldest: Double { tile.items.map(\.at).min() ?? now }
@@ -105,26 +105,23 @@ struct HubTileView: View {
                 }
                 HStack(spacing: 6) {
                     Text(tile.detail).font(.callout).foregroundStyle(ink.secondary)
-                        .lineLimit(tile.kind == .more ? 2 : 1).truncationMode(.tail).multilineTextAlignment(.leading)
+                        .lineLimit(1).truncationMode(.tail).multilineTextAlignment(.leading)
                     Spacer(minLength: 0)
-                    if !showsButtons {
-                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(ink.faint)
-                    }
-                }
-                Spacer(minLength: 0)
-                if showsButtons {
-                    HStack(spacing: 6) {
+                    // The action sits at the end of the detail line, so a tile without one has no empty row.
+                    if showsButtons {
                         if primary && !failure { pill(tile.button, loud: true, ink) }
                         if failure {
                             pill(tile.button, loud: false, ink)
                             if canRetry { quiet("Retry", ink, onRetry) }
                         }
-                        Spacer(minLength: 0)
+                    } else {
+                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(ink.faint)
                     }
                 }
+                .frame(minHeight: 28)
             }
             .padding(12)
-            .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height, alignment: .topLeading)
+            .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .topLeading)
         }
         .buttonStyle(HubTileStyle(ink: ink, shape: shape))
         .accessibilityLabel("\(tile.title), \(tile.detail)")
@@ -182,8 +179,9 @@ struct HubBoardView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         VStack(spacing: 6) {
                             Text("All clear").font(.title2.weight(.semibold)).foregroundStyle(ink.primary)
-                            Text(board.done.isEmpty ? "Nothing running right now" : "\(board.done.count) done today · 0 running")
-                                .font(.callout).foregroundStyle(ink.secondary)
+                            if !board.done.isEmpty {
+                                Text("\(board.done.count) done today").font(.callout).foregroundStyle(ink.secondary)
+                            }
                             HubTileButton(label: "New", action: onNew).padding(.top, 10)
                             Text("Start a job — it runs in the cloud").font(.caption).foregroundStyle(ink.faint)
                         }
