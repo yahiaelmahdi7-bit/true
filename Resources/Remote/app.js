@@ -3,7 +3,7 @@
 // this page never resizes a PTY, it renders at the Mac's cols and scales/scrolls to fit.
 const $ = (id) => document.getElementById(id);
 const enc = new TextEncoder();
-const KEYS = { esc: '\x1b', tab: '\t', up: '\x1b[A', down: '\x1b[B', right: '\x1b[C', left: '\x1b[D', cc: '\x03' };
+const KEYS = { enter: '\r', esc: '\x1b', tab: '\t', up: '\x1b[A', down: '\x1b[B', right: '\x1b[C', left: '\x1b[D', cc: '\x03' };
 
 // Pairing token: localStorage + Authorization header, never a cookie (cookies ignore ports and would also reach
 // other services on the same *.ts.net hostname).
@@ -14,6 +14,7 @@ function unpair() {
   localStorage.removeItem(TOKEN_KEY); view = 'pair'; paneId = null;
   clearTimeout(retryTimer); if (ws) { ws.onclose = null; ws.close(); ws = null; }
   for (const id of ['list', 'termlist', 'term', 'shots', 'send', 'viewer', 'sheet']) $(id).hidden = true;
+  document.documentElement.classList.remove('inpane');
   $('term').className = ''; $('nav').hidden = true; document.body.classList.remove('hasnav', 'scrolled'); $('pair').hidden = false; banner(''); paintCode();
 }
 
@@ -27,7 +28,13 @@ function banner(msg, ok) {
   if (!msg) { if (Date.now() < okUntil) return; t.classList.remove('show'); return; }
   if (!ok && Date.now() < okUntil) return;   // a warning never replaces a fresh confirmation toast
   okUntil = ok ? Date.now() + 2900 : 0;
-  $('toastText').textContent = msg; t.classList.toggle('ok', !!ok); t.classList.add('show');
+  $('toastText').textContent = msg; t.classList.toggle('ok', !!ok); placeToast(); t.classList.add('show');
+}
+// In a pane the toast sits just above the key strip/composer (and so above the keyboard); elsewhere it stays at the top.
+function placeToast() {
+  const t = $('toast'), inPane = view === 'term' && !$('term').hidden;
+  t.classList.toggle('inpane', inPane);
+  t.style.top = inPane ? ($('keys').getBoundingClientRect().top - 8) + 'px' : '';
 }
 
 const ICON = {
@@ -84,7 +91,7 @@ function band(r) {
   return 'sessions';
 }
 function ago(secs) {
-  const d = Math.max(0, Date.now() / 1000 - secs);
+  const d = Math.max(0, ((hubData && hubData.now) || Date.now() / 1000) - secs);   // Mac clock, not the phone's
   if (d < 90) return 'just now';
   if (d < 3570) return Math.round(d / 60) + 'm ago';
   if (d < 129600) return Math.round(d / 3600) + 'h ago';
@@ -351,14 +358,24 @@ function ensureTerm() {
     theme: { background: '#000000', foreground: '#f2f2f2', cursor: '#f2f2f2' },
   });
   term.open($('xt'));
-  term.onData((d) => {
-    if (ctrl && d.length === 1) {
-      const c = d.toUpperCase().charCodeAt(0);
-      if (c >= 64 && c <= 95) d = String.fromCharCode(c - 64);
-      setCtrl(false);
-    }
-    sendText(d);
-  });
+  term.onData((d) => sendText(ctrlMap(d)));
+  const ta = term.textarea;
+  if (ta) { ta.setAttribute('inputmode', 'none'); ta.setAttribute('enterkeyhint', 'enter'); }   // tapping the terminal never opens the keyboard
+}
+// Ctrl armed: the next single char becomes a control char (same rule for the terminal and the message box), then it disarms.
+function ctrlMap(d) {
+  if (ctrl && d.length === 1) {
+    const c = d.toUpperCase().charCodeAt(0);
+    if (c >= 64 && c <= 95) d = String.fromCharCode(c - 64);
+    setCtrl(false);
+  }
+  return d;
+}
+function setRaw(on) {
+  const b = $('kbd'); b.setAttribute('aria-pressed', String(on));
+  const ta = term && term.textarea; if (!ta) return;
+  ta.setAttribute('inputmode', on ? 'text' : 'none');
+  if (on) ta.focus(); else ta.blur();
 }
 
 function sendText(s) { if (ws && ws.readyState === 1) ws.send(enc.encode(s)); }
@@ -376,11 +393,13 @@ function openPane(id, title) {
   paneId = id; view = 'term'; location.hash = 'p=' + id;
   retTab = tab; $('backLbl').textContent = TAB_TITLES[tab]; $('back').setAttribute('aria-label', 'Back to ' + TAB_TITLES[tab]); clearTimeout(termTimer); for (const id of Object.values(SECTIONS)) $(id).hidden = true; showNav(false); $('term').className = 'in'; $('term').hidden = false; $('paneTitle').textContent = title || 'Pane';
   ensureTerm(); term.reset(); retry = 0; wsEverOpen = false; banner('');
+  document.documentElement.classList.add('inpane'); pinned = true; setRaw(false); fitViewport(); sizeBox();
   connect();
 }
 
 function closePane() {
   view = 'list'; paneId = null; history.replaceState(null, '', location.pathname);
+  setRaw(false); document.documentElement.classList.remove('inpane'); fitViewport();
   clearTimeout(retryTimer); if (ws) { ws.onclose = null; ws.close(); ws = null; }
   $('term').className = 'out'; clearTimeout(termTimer);
   termTimer = setTimeout(() => { if (view !== 'term') { $('term').hidden = true; $('term').className = ''; } }, 280);
@@ -425,8 +444,54 @@ $('paste').onclick = async () => {
     sendText(bp ? '\x1b[200~' + t + '\x1b[201~' : t);
   } catch (e) { banner('Clipboard blocked — long-press the line field to paste.'); setTimeout(() => banner(''), 3000); }
 };
-$('line').onsubmit = (e) => { e.preventDefault(); const f = $('text'); sendText(f.value + '\r'); f.value = ''; $('sendBtn').classList.remove('ready'); };
-$('text').addEventListener('input', () => $('sendBtn').classList.toggle('ready', $('text').value.length > 0));
+$('kbd').onclick = () => setRaw($('kbd').getAttribute('aria-pressed') !== 'true');
+
+// The message box: Return is a newline; the button is Enter when empty and Send when there is text.
+const box = $('text'), act = $('sendBtn');
+function sizeBox() {
+  box.style.height = '0'; box.style.height = box.scrollHeight + 'px';
+  const empty = box.value.length === 0;
+  act.classList.toggle('ready', !empty);
+  act.setAttribute('aria-label', empty ? 'Press Enter' : 'Send');
+}
+box.addEventListener('input', (e) => {
+  if (ctrl && e.data && e.data.length === 1) {   // Ctrl armed: this char goes to the pane as a control char, not into the box
+    const at = box.selectionStart;
+    box.value = box.value.slice(0, at - 1) + box.value.slice(at); box.setSelectionRange(at - 1, at - 1);
+    sendText(ctrlMap(e.data));
+  }
+  sizeBox();
+});
+act.addEventListener('mousedown', (e) => e.preventDefault());   // keep the keyboard up when the button is tapped
+$('line').onsubmit = (e) => {
+  e.preventDefault();
+  const v = box.value;
+  if (!v) sendText('\r');
+  else if (v.includes('\n')) {
+    const bp = term && term.modes && term.modes.bracketedPasteMode;
+    sendText(bp ? '\x1b[200~' + v + '\x1b[201~\r' : v.replace(/\r?\n/g, '\r') + '\r');
+  } else sendText(v + '\r');
+  box.value = ''; sizeBox();
+};
+const strip = $('strip');
+function stripEnd() { strip.classList.toggle('end', strip.scrollLeft + strip.clientWidth >= strip.scrollWidth - 2); }
+strip.addEventListener('scroll', stripEnd, { passive: true });
+
+// Keyboard-safe pane: the page is locked, #term is sized to the visible area (so the header stays pinned and the
+// composer sits on the keyboard), and the terminal stays at the bottom if it was.
+let pinned = true;
+function fitViewport() {
+  const t = $('term'), vv = window.visualViewport;
+  if (view === 'term' && vv) {
+    t.style.top = vv.offsetTop + 'px'; t.style.height = vv.height + 'px'; t.style.bottom = 'auto';
+    t.classList.toggle('kb', window.innerHeight - vv.height - vv.offsetTop > 80);
+  } else { t.style.top = t.style.height = t.style.bottom = ''; t.classList.remove('kb'); }
+  stripEnd(); placeToast();
+}
+if (window.visualViewport) { visualViewport.addEventListener('resize', fitViewport); visualViewport.addEventListener('scroll', fitViewport); }
+const scr = $('screen');
+scr.addEventListener('scroll', () => { pinned = scr.scrollHeight - scr.scrollTop - scr.clientHeight < 6; }, { passive: true });
+if (window.ResizeObserver) new ResizeObserver(() => { if (pinned) scr.scrollTop = scr.scrollHeight; placeToast(); }).observe(scr);
 window.addEventListener('resize', applyScale);
 window.addEventListener('online', () => { if (view === 'term') { retry = 0; connect(); } else loadList(); });
 document.addEventListener('visibilitychange', () => {
@@ -481,11 +546,9 @@ async function loadTerms() {
       const panes = t.panes || [];
       if (!panes.length) continue;
       n += panes.length;
-      const h = el('h3', 'sec'), right = el('span', 's', panes.length + (panes.length === 1 ? ' pane' : ' panes'));
-      if (t.selected) right.textContent = 'On Mac screen · ' + right.textContent;
-      h.append(el('span', null, t.title), right);
+      const h = tabHeader(t, panes.length);
       const grp = el('div', 'group');
-      for (const { p, name, sub } of paneItems(panes)) {
+      for (const { p, name, sub } of paneItems(panes, t.title)) {
         const live = p.live !== false;
         grp.appendChild(listRow({
           glyph: p.claude ? 'seat' : 'term', name, sub, dim: !live, chev: live,
@@ -510,18 +573,32 @@ function paneName(p) { return p.agent || p.repo || lastPart(p.cwd) || p.title ||
 function paneSub(p) {
   if (p.topic) return p.topic;
   if (p.branch && p.branch !== 'main' && p.branch !== 'master') return p.branch;
-  return shortCwd(p.cwd) || 'pane ' + p.id.slice(0, 4);
+  return shortCwd(p.cwd);
 }
-// One tab's panes -> [{p, name, sub}], needs-you first (stable); rows that still read the same get "· pane 2", "· pane 3".
-function paneItems(panes) {
-  const sorted = panes.map((p, i) => ({ p, i })).sort((a, b) => (b.p.needsYou - a.p.needsYou) || (a.i - b.i));
-  const seen = new Map();
-  return sorted.map(({ p }) => {
-    const name = paneName(p); let sub = paneSub(p);
-    const key = name + '\n' + sub, n = (seen.get(key) || 0) + 1; seen.set(key, n);
-    if (n > 1) sub += ' · pane ' + n;
-    return { p, name, sub };
+const realBranch = (p) => (p.branch && p.branch !== 'main' && p.branch !== 'master' ? p.branch : '');
+// One tab's panes -> [{p, name, sub, generic}], needs-you first (stable). A name that repeats the tab title, or is shared
+// by 2+ panes in the tab, says nothing — so the line becomes topic -> branch -> "Pane N" (N = server order) and the facts move below.
+function paneItems(panes, tabTitle) {
+  const key = (p) => paneName(p).toLowerCase(), count = new Map();
+  panes.forEach((p) => count.set(key(p), (count.get(key(p)) || 0) + 1));
+  const tt = (tabTitle || '').toLowerCase();
+  const items = panes.map((p, i) => {
+    if (key(p) !== tt && count.get(key(p)) === 1) return { p, name: paneName(p), sub: paneSub(p), generic: false };
+    const used = p.topic || realBranch(p);
+    const name = used || 'Pane ' + (i + 1);
+    const sub = [p.claude ? 'Claude' : 'Shell', p.branch && p.branch !== (p.topic ? '' : realBranch(p)) ? p.branch : '',
+      lastPart(p.cwd) && lastPart(p.cwd).toLowerCase() !== tt ? shortCwd(p.cwd) : ''].filter(Boolean).join(' · ');
+    return { p, name, sub, generic: true, i };
   });
+  const seen = new Map();   // two panes that still share a line: number them
+  for (const x of items) if (x.generic) seen.set(x.name, (seen.get(x.name) || 0) + 1);
+  for (const x of items) if (x.generic && seen.get(x.name) > 1) x.name += ' · Pane ' + (x.i + 1);
+  return items.sort((a, b) => (b.p.needsYou - a.p.needsYou) || (panes.indexOf(a.p) - panes.indexOf(b.p)));
+}
+// A Mac tab's section header: title in its own case (may wrap), meta under it.
+function tabHeader(t, n) {
+  const h = el('h3', 'sec tab'), meta = n + (n === 1 ? ' pane' : ' panes') + (t.selected ? ' · On Mac screen' : '');
+  h.append(el('span', null, t.title), el('span', 's', meta)); return h;
 }
 async function fetchTabs() {
   const r = await api('/api/tabs');
@@ -607,16 +684,16 @@ function openPicker(attach, stay) {
     toast(info.msg);
   };
   const show = (tabs) => paint(() => {
-    const groups = tabs.map((t) => ({ t, items: paneItems(t.panes || []).sort((a, b) => (b.p.live - a.p.live) || (b.p.claude - a.p.claude)) }));
+    const groups = tabs.map((t) => ({ t, items: paneItems(t.panes || [], t.title).sort((a, b) => (b.p.live - a.p.live) || (b.p.claude - a.p.claude)) }));
     const all = groups.flatMap((g) => g.items);
     if (!all.some((x) => x.p.live)) { body.appendChild(stateBlock('No open panes on the Mac', 'Open a pane on the Mac and it shows up here.')); return; }
-    const row = (x) => listRow({ glyph: x.p.claude ? 'seat' : 'term', name: x.name, sub: x.p.claude ? x.sub : 'Shell · ' + x.sub, dim: !x.p.live,
+    const row = (x) => listRow({ glyph: x.p.claude ? 'seat' : 'term', name: x.name, sub: x.p.claude || x.generic ? x.sub : 'Shell · ' + x.sub, dim: !x.p.live,
       chip: x.p.live ? null : { cls: 'idle', text: 'Not running' }, onclick: () => pick(x.p, x.name) });
     const rec = all.find((x) => x.p.live && x.p.id === getRecentPane());
     if (rec) { body.appendChild(el('h3', 'sec', 'Recent')); const g = el('div', 'group'); g.appendChild(row(rec)); body.appendChild(g); }
     for (const { t, items } of groups) {
       if (!items.length) continue;
-      body.appendChild(el('h3', 'sec', t.title));
+      body.appendChild(tabHeader(t, (t.panes || []).length));
       const g = el('div', 'group'); items.forEach((x) => g.appendChild(row(x))); body.appendChild(g);
     }
   });

@@ -31,7 +31,7 @@ def builders(n):
 def hub():
     if STATE == "empty" or "hubEmpty" in FAULT: return dict(summary="", projects=[])  # matches the Mac: blank when idle
     nb = int(FAULT.get("builders", 27))
-    return dict(summary="3 working · 2 need you · %d done" % nb, projects=[
+    return dict(now=NOW, summary="3 working · 2 need you · %d done" % nb, projects=[
         dict(title="true", summary="1 working · 1 needs you", rows=[
             row("seat", "lead-true", "Working", "working", pane="11111111-1111-1111-1111-111111111111", cwd="~/Projects/true", elapsed="12m"),
             row("seat", "helper-1-true", "Needs you", "needsYou", pane="22222222-2222-2222-2222-222222222222", cwd="~/Projects/true/Sources", elapsed="3m",

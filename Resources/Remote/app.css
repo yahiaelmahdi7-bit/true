@@ -80,7 +80,7 @@ button.row:active{background:var(--press);transform:none}
 .foot{padding:8px 32px 0;font-size:13px;color:var(--text-2)}
 
 /* ---- toast ---- */
-#toast{position:fixed;top:calc(var(--safe-t) + 8px);left:50%;z-index:9;display:flex;align-items:center;gap:8px;max-width:calc(100% - 32px);padding:8px 16px;border-radius:999px;
+#toast{position:fixed;top:calc(var(--safe-t) + 8px);left:50%;z-index:9;display:flex;align-items:center;gap:8px;width:max-content;max-width:calc(100vw - 32px);padding:8px 16px;border-radius:999px;
   background:var(--glass);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);border:1px solid var(--line);box-shadow:var(--shadow-pop);
   font-size:13px;font-weight:600;white-space:nowrap;opacity:0;pointer-events:none;transform:translate(-50%,-16px);transition:opacity 220ms var(--ease),transform 320ms var(--ease)}
 #toast.show{opacity:1;transform:translate(-50%,0)}
@@ -213,22 +213,37 @@ textarea::placeholder,input::placeholder{color:var(--text-3)}
 #xt{width:max-content}
 .xterm .xterm-viewport{background:transparent!important}
 #keys{padding:8px 8px calc(var(--safe-b) + 8px);padding-left:max(8px,var(--safe-l));padding-right:max(8px,var(--safe-r));background:var(--term-bar);border-top:1px solid var(--term-line)}
-#keys .row{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:4px;margin-bottom:8px;min-height:0;padding:0;width:auto}
-.k{height:44px;min-width:0;padding:0 2px;border-radius:9px;background:var(--term-key);color:var(--term-ink);font-size:15px;font-weight:500}
+#strip{position:relative;display:flex;gap:4px;margin-bottom:8px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+  -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 28px),transparent)}
+#strip::-webkit-scrollbar{display:none}
+#strip.end{-webkit-mask-image:none;mask-image:none}
+.k{flex:none;height:44px;min-width:44px;padding:0 14px;border-radius:9px;background:var(--term-key);color:var(--term-ink);font-size:15px;font-weight:500;white-space:nowrap}
 .k:active{background:var(--term-line)}
 .k[aria-pressed=true]{background:var(--term-fill);color:var(--term-bg)}
-#line{display:flex;align-items:center;gap:8px}
-#text{flex:1;min-width:0;height:44px;padding:0 12px;border:0;border-radius:9px;background:var(--term-key);color:var(--term-ink);font-size:17px}
+#line{display:flex;align-items:flex-end;gap:8px}
+#text{flex:1;min-width:0;height:44px;min-height:44px;max-height:132px;padding:11px 12px;border:0;border-radius:9px;background:var(--term-key);color:var(--term-ink);font:inherit;font-size:17px;line-height:22px;resize:none;overflow-y:auto;display:block}
+#text:focus{outline:none;box-shadow:inset 0 0 0 1.5px var(--term-line)}
 #text::placeholder{color:var(--term-ink);opacity:.4}
-#sendBtn{flex:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:var(--term-key);color:var(--term-ink);opacity:.5}
-#sendBtn.ready{background:var(--term-fill);color:var(--term-bg);opacity:1}
-#sendBtn svg{stroke-width:2.4}
+#sendBtn{flex:none;width:44px;height:44px;border-radius:9px;display:grid;place-items:center;background:var(--term-key);color:var(--term-ink)}
+#sendBtn svg{grid-area:1/1;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+#sendBtn .i-send{display:none}
+#sendBtn.ready{background:var(--accent);color:var(--on-accent)}
+#sendBtn.ready .i-send{display:block}#sendBtn.ready .i-enter{display:none}
+#term.kb #keys{padding-bottom:8px}
+html.inpane,html.inpane body{overflow:hidden;overscroll-behavior:none}
+#toast.inpane{width:max-content;white-space:normal;text-align:left;border-radius:16px;transform:translate(-50%,calc(-100% + 8px))}
+#toast.inpane.show{transform:translate(-50%,-100%)}
+#toast.inpane #toastText{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:normal}
+.sec.tab{display:block;padding-top:24px;text-transform:none;letter-spacing:0;font-size:17px;font-weight:600;color:var(--text-0)}
+.sec.tab span:first-child{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;overflow-wrap:anywhere;line-height:22px}
+.sec.tab .s{display:block;margin-top:2px;font-size:13px;font-weight:400;line-height:18px}
 
-@media (max-width:360px){.k{font-size:13px}.lt h1,#pair h1{font-size:34px}.cells{gap:4px}}
+@media (max-width:360px){.lt h1,#pair h1{font-size:34px}.cells{gap:4px}}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition-property:opacity!important}
   button:active{transform:none}
   #toast,#toast.show{transform:translateX(-50%)}
+  #toast.inpane,#toast.inpane.show{transform:translate(-50%,-100%)}
   #sheetBox,#sheet.open #sheetBox{transform:none}
   #sheet:not(.open) #sheetBox{opacity:0}
   .st.working i{opacity:.7}
@@ -260,5 +275,5 @@ textarea::placeholder,input::placeholder{color:var(--text-3)}
 #clip{flex:none;width:44px;height:44px;display:grid;place-items:center;border-radius:9px;background:var(--term-key);color:var(--term-ink)}
 .row.more{min-height:44px}.row.more .n{color:var(--accent-ink);font-weight:600}
 /* 44pt hit areas on small visuals: the ::after grows the tap target, not the look */
-.x,.pill,#sendBtn,.rc{position:relative}
-.x::after{content:"";position:absolute;inset:-8px}.pill::after,#sendBtn::after{content:"";position:absolute;inset:-6px}.rc::after{content:"";position:absolute;inset:-4px 0}
+.x,.pill,.rc{position:relative}
+.x::after{content:"";position:absolute;inset:-8px}.pill::after{content:"";position:absolute;inset:-6px}.rc::after{content:"";position:absolute;inset:-4px 0}

@@ -66,6 +66,46 @@ try {
       await pg.tap('[data-tab=send]'); await pg.waitForSelector('#inbox .item'); await wait(400); await shot(pg, 'send');
       await pg.close();
     });
+    // The pane view and its composer (Addendum A): Enter state, multi-line Send state, toast, upload chip, attach sheet, key strip, raw mode, keyboard stand-in.
+    const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    // A stand-in socket so the pane shows a believable screen (the mock speaks HTTP only).
+    const fakeSocket = (pg) => pg.addInitScript(() => {
+      const screen = ['\x1b[?2004h\x1b[2J\x1b[H', '\x1b[1m● Claude\x1b[0m  finance-director-os\r\n\r\n', '\x1b[36m>\x1b[0m Pick a chart library for the dashboard\r\n\r\n',
+        'I compared three options:\r\n  1. Recharts   - simple, React-native\r\n  2. visx       - low level, flexible\r\n  3. Chart.js   - canvas, fast on big data\r\n\r\n', '\x1b[33mWhich one should I use?\x1b[0m\r\n\r\n\x1b[2m? for shortcuts\x1b[0m\r\n'].join('');
+      window.WebSocket = class { constructor() { this.readyState = 1; setTimeout(() => { this.onopen && this.onopen(); this.onmessage && this.onmessage({ data: JSON.stringify({ t: 'snap', cols: 80, rows: 24 }) }); this.onmessage && this.onmessage({ data: new TextEncoder().encode(screen).buffer }); }, 60); } send() {} close() {} };
+    });
+    const openFirstPane = async (pg) => {
+      await pg.tap('[data-tab=terms]'); await pg.waitForSelector('#termTabs .row'); await pg.tap('#termTabs .row >> nth=0');
+      await pg.waitForSelector('#term:not([hidden])'); await wait(700);
+    };
+    await withMock('normal', async () => {
+      const pg = await page(true); await fakeSocket(pg); await pg.reload(); await pg.waitForSelector('#tabs .row');
+      await openFirstPane(pg);
+      await shot(pg, 'pane-empty');
+      await pg.tap('#text'); await pg.keyboard.type('Refactor the ledger rounding'); await pg.keyboard.press('Enter');
+      await pg.keyboard.type('then add a test for it'); await pg.keyboard.press('Enter'); await pg.keyboard.type('and run the suite'); await wait(300);
+      await shot(pg, 'pane-multiline');
+      await pg.evaluate(() => { const t = document.getElementById('text'); t.value = ''; t.dispatchEvent(new Event('input')); t.blur(); });
+      await pg.evaluate(() => { document.getElementById('strip').scrollLeft = 9999; }); await wait(300); await shot(pg, 'pane-strip-scrolled');
+      await pg.evaluate(() => { document.getElementById('strip').scrollLeft = 0; });
+      await pg.tap('#kbd'); await wait(300); await shot(pg, 'pane-raw'); await pg.tap('#kbd');
+      await pg.tap('#clip'); await wait(500); await shot(pg, 'pane-attach-sheet');
+      await pg.tap('#sheetBody .row >> nth=1'); await pg.waitForSelector('.shotgrid img[src]'); await wait(500);
+      await pg.tap('.shotgrid button >> nth=0'); await pg.waitForSelector('#toast.show'); await wait(500); await shot(pg, 'pane-after-send');
+      await wait(3400);
+      await pg.evaluate(() => { const c = document.getElementById('upchip'); c.hidden = false; c.classList.remove('bad'); document.getElementById('upName').textContent = 'IMG_4021.jpg'; document.getElementById('upState').textContent = '46%'; document.getElementById('upBar').hidden = false; document.getElementById('upBar').firstElementChild.style.width = '46%'; document.getElementById('upAct').textContent = 'Cancel'; });
+      await wait(300); await shot(pg, 'pane-upload');
+      await pg.setViewportSize({ width: 390, height: 508 }); await wait(500); await shot(pg, 'pane-keyboard');
+      await pg.close();
+    });
+    await withMock('normal', async () => {
+      const pg = await page(true); await fakeSocket(pg); await pg.reload(); await pg.waitForSelector('#tabs .row'); await openFirstPane(pg);
+      await pg.tap('#clip'); await wait(400);
+      const [fc] = await Promise.all([pg.waitForEvent('filechooser'), pg.tap('#sheetBody .row >> nth=0')]);
+      await fc.setFiles({ name: 'IMG_4021.png', mimeType: 'image/png', buffer: PNG });
+      await pg.waitForSelector('#upchip.bad'); await wait(400); await shot(pg, 'pane-upload-failed');
+      await pg.close();
+    }, 'drop413');
     for (const [fault, name, tabSel, sel] of [['hubEmpty', 'hub-empty', null, '#empty:not([hidden])'], ['hub500', 'hub-error', null, '#tabs .empty'], ['tabsEmpty', 'panes-empty', '[data-tab=terms]', '#termEmpty:not([hidden])'], ['tabs500', 'panes-error', '[data-tab=terms]', '#termTabs .empty'], ['drop413', 'attach-error', 'attach', '#upchip:not([hidden])']]) {
       await withMock('normal', async () => {
         const pg = await page(true); await pg.waitForSelector('#skel', { state: 'attached' });
