@@ -290,7 +290,7 @@ private func tempFile() -> URL {
     @Test func embeddedXtermMatchesResource() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         for (path, file) in [("/xterm.js", "xterm.js"), ("/xterm.css", "xterm.css"), ("/app.js", "app.js"),
-                             ("/index.html", "index.html")] {
+                             ("/index.html", "index.html"), ("/app.css", "app.css")] {
             let disk = try Data(contentsOf: root.appendingPathComponent("Resources/Remote/\(file)"))
             #expect(Data(RemoteWebAssets.asset(path)?.body ?? []) == disk, "\(file) embedded copy is stale — run gen.py")
         }
